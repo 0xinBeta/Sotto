@@ -447,6 +447,28 @@ describe("KokoroTtsEngine", () => {
     await expect(speaking).resolves.toBeUndefined();
   });
 
+  it("prewarms a suspended AudioContext without audible output", async () => {
+    const harness = runtimeHarness();
+    const context = new FakeAudioContext("suspended");
+    const engine = new KokoroTtsEngine({
+      runtime: harness.runtime,
+      audioContextFactory: () => context as unknown as AudioContext,
+      runtimeUrl: (path) => path,
+      backend: "wasm",
+    });
+    await engine.init();
+    harness.generate.mockClear();
+
+    await engine.prewarm();
+
+    expect(context.resume).toHaveBeenCalledOnce();
+    expect(harness.generate).toHaveBeenCalledWith("Ready.", {
+      voice: KOKORO_VOICE,
+      speed: 1,
+    });
+    expect(context.sources).toHaveLength(0);
+  });
+
   it("does not orphan a source when stopped while playback is resuming", async () => {
     let finishResume!: () => void;
     const resumeGate = new Promise<void>((resolve) => {

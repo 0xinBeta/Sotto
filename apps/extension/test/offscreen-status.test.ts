@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const nano = vi.hoisted(() => ({
   askPageWithPrompt: vi.fn(),
+  createParserSession: vi.fn(),
   getNanoAvailability: vi.fn(),
+  parseCommand: vi.fn(),
   respondOneSentence: vi.fn(),
   rewriteWithPrompt: vi.fn(),
   summarizeWithPrompt: vi.fn(),
@@ -11,6 +13,7 @@ const premium = vi.hoisted(() => ({
   init: vi.fn(),
   speak: vi.fn(),
   stop: vi.fn(),
+  prewarm: vi.fn(),
   probe: vi.fn(),
   dispose: vi.fn(),
 }));
@@ -37,10 +40,10 @@ vi.mock("@sotto/core", () => ({
 }));
 vi.mock("@sotto/nano", () => ({
   askPageWithPrompt: nano.askPageWithPrompt,
-  createParserSession: vi.fn(),
+  createParserSession: nano.createParserSession,
   createResponderSession: vi.fn(),
   getNanoAvailability: nano.getNanoAvailability,
-  parseCommand: vi.fn(),
+  parseCommand: nano.parseCommand,
   respondOneSentence: nano.respondOneSentence,
   rewriteWithPrompt: nano.rewriteWithPrompt,
   summarizeWithPrompt: nano.summarizeWithPrompt,
@@ -69,6 +72,7 @@ vi.mock("@sotto/tts/kokoro", () => ({
     init = premium.init;
     speak = premium.speak;
     stop = premium.stop;
+    prewarm = premium.prewarm;
     probe = premium.probe;
     dispose = premium.dispose;
   },
@@ -86,6 +90,7 @@ async function installPremiumOffscreen(options: {
   readonly webGpu?: boolean;
 } = {}) {
   nano.getNanoAvailability.mockResolvedValue("unavailable");
+  premium.prewarm.mockResolvedValue(undefined);
   premium.init.mockResolvedValue(undefined);
   premium.dispose.mockResolvedValue(undefined);
   speech.moonshineInit.mockResolvedValue(undefined);
@@ -173,6 +178,8 @@ async function installPremiumOffscreen(options: {
 afterEach(() => {
   vi.useRealTimers();
   nano.askPageWithPrompt.mockReset();
+  nano.createParserSession.mockReset();
+  nano.parseCommand.mockReset();
   vi.resetModules();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -181,6 +188,7 @@ afterEach(() => {
   premium.init.mockReset();
   premium.speak.mockReset();
   premium.stop.mockReset();
+  premium.prewarm.mockReset();
   premium.probe.mockReset();
   premium.dispose.mockReset();
   speech.moonshineOptions.splice(0);
@@ -448,6 +456,153 @@ describe("offscreen fail-soft status", () => {
         minSpeechMs: 320,
       }),
     );
+  });
+
+  it("skips warm-up after recent activity and runs after 30 idle seconds", async () => {
+    vi.useFakeTimers();
+    const harness = await installPremiumOffscreen();
+    await harness.message({ type: "prepare-premium-tts" });
+    premium.prewarm.mockClear();
+
+    await expect(
+      harness.message({ type: "start-listening" }),
+    ).resolves.toEqual({ ok: true });
+    await vi.waitFor(() => expect(premium.prewarm).toHaveBeenCalledOnce());
+
+    await harness.message({ type: "stop-listening" });
+    await vi.advanceTimersByTimeAsync(650);
+    await harness.message({ type: "start-listening" });
+    await Promise.resolve();
+    expect(premium.prewarm).toHaveBeenCalledOnce();
+
+    await harness.message({ type: "stop-listening" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "open a new tab",
+      timings: { input: "typed" },
+    });
+    await harness.message({ type: "start-listening" });
+    await Promise.resolve();
+    expect(premium.prewarm).toHaveBeenCalledOnce();
+
+    await harness.message({ type: "stop-listening" });
+    await vi.advanceTimersByTimeAsync(30_650);
+    await harness.message({ type: "start-listening" });
+    await vi.waitFor(() =>
+      expect(premium.prewarm).toHaveBeenCalledTimes(2)
+    );
+  });
+
+  it("does not wait for warm-up before listening starts", async () => {
+    premium.prewarm.mockImplementation(
+      () => new Promise<void>(() => undefined),
+    );
+    const harness = await installPremiumOffscreen();
+    await harness.message({ type: "prepare-premium-tts" });
+
+    await expect(
+      harness.message({ type: "start-listening" }),
+    ).resolves.toEqual({ ok: true });
+    expect(vad.create).toHaveBeenCalledOnce();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "listening-state",
+      listening: true,
+    });
+  });
+
+  it("logs warm-up failures without publishing a pipeline error", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const harness = await installPremiumOffscreen();
+    await harness.message({ type: "prepare-premium-tts" });
+    premium.prewarm.mockRejectedValue(new Error("prewarm failed"));
+    nano.getNanoAvailability.mockResolvedValue("available");
+    nano.createParserSession.mockResolvedValue({
+      ok: false,
+      availability: "available",
+      error: {
+        name: "OperationError",
+        message: "parser warm-up failed",
+      },
+    });
+
+    await expect(
+      harness.message({ type: "start-listening" }),
+    ).resolves.toEqual({ ok: true });
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        "Sotto pipeline warm-up failed",
+        expect.any(Error),
+      )
+    );
+
+    expect(
+      harness.sendMessage.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.type === "pipeline-error"),
+    ).toEqual([]);
+  });
+
+  it("cancels Nano warm-up before speech transcription", async () => {
+    const order: string[] = [];
+    const harness = await installPremiumOffscreen();
+    nano.getNanoAvailability.mockResolvedValue("available");
+    nano.createParserSession
+      .mockImplementationOnce(
+        (options: { readonly signal?: AbortSignal }) =>
+          new Promise((resolve) => {
+            order.push("nano:warm");
+            options.signal?.addEventListener(
+              "abort",
+              () => {
+                order.push("nano:cancel");
+                resolve({
+                  ok: false,
+                  availability: "available",
+                  error: {
+                    name: "AbortError",
+                    message: "warm-up cancelled",
+                  },
+                });
+              },
+              { once: true },
+            );
+          }),
+      )
+      .mockResolvedValue({
+        ok: true,
+        availability: "available",
+        session: {
+          destroyed: false,
+          prompt: vi.fn(),
+          destroy: vi.fn(),
+        },
+      });
+    speech.moonshineTranscribe.mockImplementation(async () => {
+      order.push("stt");
+      return "open a new tab";
+    });
+    nano.parseCommand.mockResolvedValue({ action: "unknown" });
+
+    await harness.message({ type: "start-listening" });
+    await vi.waitFor(() => expect(order).toEqual(["nano:warm"]));
+    const vadOptions = vad.create.mock.calls[0]?.[0] as {
+      onSpeechEnd(audio: Float32Array): void;
+    };
+    const audio = new Float32Array(16_000);
+    audio.fill(0.02);
+    vadOptions.onSpeechEnd(audio);
+
+    await vi.waitFor(() => expect(order).toContain("stt"));
+    expect(order.indexOf("nano:cancel")).toBeLessThan(
+      order.indexOf("stt"),
+    );
+    expect(
+      harness.sendMessage.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.type === "pipeline-error"),
+    ).toEqual([]);
   });
 
   it("publishes smoothed levels until stop and reports a very low meter", async () => {

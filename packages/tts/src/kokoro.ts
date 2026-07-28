@@ -37,6 +37,10 @@ export interface KokoroSpeakOptions extends TtsSpeakOptions {}
 
 export interface KokoroLongSpeakOptions extends TtsLongSpeakOptions {}
 
+export interface KokoroPrewarmOptions {
+  readonly signal?: AbortSignal;
+}
+
 interface RawKokoroAudio {
   readonly data: Float32Array;
   readonly sampling_rate: number;
@@ -78,7 +82,14 @@ export interface KokoroTtsEngineOptions {
   readonly audioContextFactory?: () => AudioContext;
   readonly backend?: KokoroBackend | "auto";
   readonly runtimeUrl?: (path: string) => string;
-  readonly runInference?: <T>(task: () => Promise<T>) => Promise<T>;
+  readonly runInference?: <T>(
+    task: () => Promise<T>,
+    signal?: AbortSignal,
+  ) => Promise<T>;
+  readonly runWarmupInference?: <T>(
+    task: () => Promise<T>,
+    signal?: AbortSignal,
+  ) => Promise<T>;
   readonly webGpuAvailable?: () => Promise<boolean>;
 }
 
@@ -227,7 +238,14 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
   readonly #audioContextFactory: () => AudioContext;
   readonly #backendPreference: KokoroBackend | "auto";
   readonly #runtimeUrl: (path: string) => string;
-  readonly #runInference: <T>(task: () => Promise<T>) => Promise<T>;
+  readonly #runInference: <T>(
+    task: () => Promise<T>,
+    signal?: AbortSignal,
+  ) => Promise<T>;
+  readonly #runWarmupInference: <T>(
+    task: () => Promise<T>,
+    signal?: AbortSignal,
+  ) => Promise<T>;
   readonly #webGpuAvailable: (() => Promise<boolean>) | undefined;
 
   #tts: KokoroModel | undefined;
@@ -252,6 +270,8 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     this.#runInference =
       options.runInference ??
       (async <T>(task: () => Promise<T>) => await task());
+    this.#runWarmupInference =
+      options.runWarmupInference ?? this.#runInference;
     this.#webGpuAvailable = options.webGpuAvailable;
   }
 
@@ -290,14 +310,24 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     await this.#speakChunks(text, options);
   }
 
-  async probe(): Promise<void> {
+  async prewarm(options: KokoroPrewarmOptions = {}): Promise<void> {
     if (!this.#tts) throw new Error("KokoroTtsEngine is not initialized");
-    await this.#queueInference(() =>
-      this.#tts!.generate(PREWARM_TEXT, {
-        voice: KOKORO_VOICE,
-        speed: 1,
-      })
-    );
+    await Promise.all([
+      this.#audio(),
+      this.#queueInference(
+        () =>
+          this.#tts!.generate(PREWARM_TEXT, {
+            voice: KOKORO_VOICE,
+            speed: 1,
+          }),
+        this.#runWarmupInference,
+        options.signal,
+      ),
+    ]);
+  }
+
+  async probe(): Promise<void> {
+    await this.prewarm();
   }
 
   stop(): void {
@@ -558,10 +588,17 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     }
   }
 
-  #queueInference<T>(task: () => Promise<T>): Promise<T> {
+  #queueInference<T>(
+    task: () => Promise<T>,
+    runInference = this.#runInference,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const pending = this.#inferenceTail
       .catch(() => undefined)
-      .then(() => this.#runInference(task));
+      .then(() => {
+        if (signal) throwIfAborted(signal);
+        return runInference(task, signal);
+      });
     this.#inferenceTail = pending.catch(() => undefined);
     return pending;
   }

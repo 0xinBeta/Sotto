@@ -377,4 +377,45 @@ describe("InferenceMutex", () => {
     ]);
     expect(mutex.pending).toBe(0);
   });
+
+  it("cancels queued warm-up before prioritized transcription", async () => {
+    const mutex = new InferenceMutex();
+    const order: string[] = [];
+    const controller = new AbortController();
+    let releaseActive!: () => void;
+    const activeGate = new Promise<void>((resolve) => {
+      releaseActive = resolve;
+    });
+
+    const active = mutex.run(async () => {
+      order.push("active:start");
+      await activeGate;
+      order.push("active:end");
+    });
+    const warmup = mutex.run(
+      async () => {
+        order.push("warmup");
+      },
+      { priority: "background", signal: controller.signal },
+    );
+    const transcription = mutex.run(
+      async () => {
+        order.push("transcription");
+      },
+      { priority: "transcription" },
+    );
+
+    await vi.waitFor(() => expect(order).toEqual(["active:start"]));
+    controller.abort();
+    releaseActive();
+
+    await expect(warmup).rejects.toMatchObject({ name: "AbortError" });
+    await Promise.all([active, transcription, mutex.idle()]);
+    expect(order).toEqual([
+      "active:start",
+      "active:end",
+      "transcription",
+    ]);
+    expect(mutex.pending).toBe(0);
+  });
 });

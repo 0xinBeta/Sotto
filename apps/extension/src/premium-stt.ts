@@ -44,6 +44,7 @@ export interface PremiumSttManagerOptions {
   readonly storedEnabled?: unknown;
   readonly createPremium: (tier: PremiumSttTier) => SttEngine;
   readonly runInference: <T>(task: () => Promise<T>) => Promise<T>;
+  readonly runTranscription?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly selfTestAudio: () => Promise<Float32Array>;
   readonly onStatus?: (status: PremiumSttStatus) => void;
   readonly onProgress?: (progress: SttProgress) => void;
@@ -121,6 +122,7 @@ export class PremiumSttManager {
   readonly #tier: PremiumSttTier;
   readonly #createPremium: (tier: PremiumSttTier) => SttEngine;
   readonly #runInference: <T>(task: () => Promise<T>) => Promise<T>;
+  readonly #runTranscription: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #selfTestAudio: () => Promise<Float32Array>;
   readonly #onStatus: (status: PremiumSttStatus) => void;
   readonly #onProgress: (progress: SttProgress) => void;
@@ -148,6 +150,8 @@ export class PremiumSttManager {
     this.#tier = options.tier;
     this.#createPremium = options.createPremium;
     this.#runInference = options.runInference;
+    this.#runTranscription =
+      options.runTranscription ?? options.runInference;
     this.#selfTestAudio = options.selfTestAudio;
     this.#onStatus = options.onStatus ?? (() => undefined);
     this.#onProgress = options.onProgress ?? (() => undefined);
@@ -239,7 +243,9 @@ export class PremiumSttManager {
     const premium = this.#premium;
     if (!premium || !this.#enabled || this.#state !== "active") {
       await this.#ensureTiny();
-      const result = await this.#runInference(() => this.#tiny.transcribe(audio));
+      const result = await this.#runTranscription(() =>
+        this.#tiny.transcribe(audio)
+      );
       if (
         this.#downloaded &&
         this.#enabled &&
@@ -252,7 +258,7 @@ export class PremiumSttManager {
     }
 
     try {
-      return await this.#runInference(() => premium.transcribe(audio));
+      return await this.#runTranscription(() => premium.transcribe(audio));
     } catch (error) {
       if (this.#tier !== "parakeet" || !isWebGpuSttFailure(error)) {
         throw error;
@@ -266,14 +272,16 @@ export class PremiumSttManager {
         if (!replacement) {
           throw new Error("Premium STT reload did not produce a resident model");
         }
-        return await this.#runInference(() => replacement.transcribe(audio));
+        return await this.#runTranscription(() =>
+          replacement.transcribe(audio)
+        );
       } catch (retryError) {
         if (this.status.state !== "error") {
           await this.#fallbackToTiny(retryError);
         } else {
           await this.#ensureTiny();
         }
-        return this.#runInference(() => this.#tiny.transcribe(audio));
+        return this.#runTranscription(() => this.#tiny.transcribe(audio));
       }
     }
   }

@@ -126,6 +126,12 @@ let premiumTtsRecovery: Promise<void> | undefined;
 let premiumSettingsReady: Promise<void> | undefined;
 let premiumTtsUtteranceId: string | undefined;
 let premiumTtsIdleReleased = false;
+let parserSessionPromiseIsWarmup = false;
+let pipelineWarmup: AbortController | undefined;
+let lastPipelineWarmupAt = Number.NEGATIVE_INFINITY;
+let lastExchangeAt = Number.NEGATIVE_INFINITY;
+
+const PIPELINE_WARM_IDLE_MS = 30_000;
 
 modelLru.register("premium-stt", async () => {
   await premiumStt?.releasePremium();
@@ -477,6 +483,8 @@ async function ensurePremiumSttSettings(): Promise<void> {
       storedEnabled: stored[PREMIUM_STT_ENABLED_KEY],
       createPremium: createPremiumSttEngine,
       runInference: (task) => inferenceMutex.run(task),
+      runTranscription: (task) =>
+        inferenceMutex.run(task, { priority: "transcription" }),
       selfTestAudio: loadSttSelfTestPcm,
       onStatus(status) {
         premiumSttStatus = status;
@@ -564,6 +572,11 @@ function createPremiumEngine(
     backend,
     runtimeUrl: (path) => chrome.runtime.getURL(path),
     runInference: (task) => inferenceMutex.run(task),
+    runWarmupInference: (task, signal) =>
+      inferenceMutex.run(task, {
+        priority: "background",
+        ...(signal === undefined ? {} : { signal }),
+      }),
   });
 }
 
@@ -733,9 +746,24 @@ function progressRatio(progress: SttProgress): number | undefined {
   return undefined;
 }
 
-async function ensureParserSession(): Promise<NanoSession | undefined> {
+async function ensureParserSession(options: {
+  readonly signal?: AbortSignal;
+  readonly warmup?: boolean;
+} = {}): Promise<NanoSession | undefined> {
   if (parserSession && !parserSession.destroyed) return parserSession;
-  if (parserSessionPromise) return parserSessionPromise;
+  if (parserSessionPromise) {
+    const pending = parserSessionPromise;
+    const pendingIsWarmup = parserSessionPromiseIsWarmup;
+    const session = await pending;
+    if (
+      !session &&
+      pendingIsWarmup &&
+      !options.warmup
+    ) {
+      return ensureParserSession(options);
+    }
+    return session;
+  }
 
   parserSessionPromise = (async () => {
     nanoAvailability = await getNanoAvailability();
@@ -743,6 +771,7 @@ async function ensureParserSession(): Promise<NanoSession | undefined> {
 
     const created = await createParserSession({
       registry,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
       onDownloadProgress(progress) {
         void sendPanel({
           type: "model-progress",
@@ -754,23 +783,96 @@ async function ensureParserSession(): Promise<NanoSession | undefined> {
     if (!created.ok) {
       nanoAvailability = created.availability;
       if (created.error) {
-        console.warn("Gemini Nano parser session creation failed", created.error);
-        await sendPanel({
-          type: "pipeline-error",
-          message: `Gemini Nano could not start: ${created.error.message}`,
-        });
+        if (
+          created.error.name !== "AbortError" &&
+          !options.signal?.aborted
+        ) {
+          console.warn(
+            "Gemini Nano parser session creation failed",
+            created.error,
+          );
+          if (!options.warmup) {
+            await sendPanel({
+              type: "pipeline-error",
+              message: `Gemini Nano could not start: ${created.error.message}`,
+            });
+          }
+        }
       }
       return undefined;
     }
     parserSession = created.session;
     return parserSession;
   })();
+  parserSessionPromiseIsWarmup = options.warmup === true;
 
   try {
     return await parserSessionPromise;
   } finally {
     parserSessionPromise = undefined;
+    parserSessionPromiseIsWarmup = false;
   }
+}
+
+function cancelPipelineWarmup(): void {
+  pipelineWarmup?.abort();
+  pipelineWarmup = undefined;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+async function prewarmPremiumTts(signal: AbortSignal): Promise<void> {
+  await ensurePremiumSettings();
+  if (
+    signal.aborted ||
+    !premiumTtsEnabled ||
+    premiumTtsState !== "ready" ||
+    !premiumTts
+  ) {
+    return;
+  }
+  await premiumTts.prewarm({ signal });
+}
+
+function beginPipelineWarmup(): void {
+  const now = Date.now();
+  if (
+    now - Math.max(lastPipelineWarmupAt, lastExchangeAt) <
+      PIPELINE_WARM_IDLE_MS
+  ) {
+    return;
+  }
+  lastPipelineWarmupAt = now;
+  cancelPipelineWarmup();
+  const controller = new AbortController();
+  pipelineWarmup = controller;
+
+  // Speech-end aborts this background work before prioritized STT takes the mutex.
+  const parserWarmup = inferenceMutex.run(
+    () =>
+      ensureParserSession({
+        signal: controller.signal,
+        warmup: true,
+      }),
+    {
+      priority: "background",
+      signal: controller.signal,
+    },
+  );
+  void Promise.allSettled([
+    parserWarmup,
+    prewarmPremiumTts(controller.signal),
+  ]).then((results) => {
+    for (const result of results) {
+      if (result.status === "rejected" && !isAbortError(result.reason)) {
+        console.warn("Sotto pipeline warm-up failed", result.reason);
+      }
+    }
+  }).finally(() => {
+    if (pipelineWarmup === controller) pipelineWarmup = undefined;
+  });
 }
 
 async function ensureResponderSession(): Promise<NanoSession | undefined> {
@@ -1098,6 +1200,7 @@ async function processTranscript(
 ): Promise<void> {
   const transcript = cleanTranscript(rawTranscript);
   if (!transcript) return;
+  lastExchangeAt = Date.now();
 
   await sendPanel({ type: "transcript", text: transcript });
   let parseMs = 0;
@@ -1275,6 +1378,7 @@ async function startListening(): Promise<void> {
   }
   starting = true;
   stopRequested = false;
+  beginPipelineWarmup();
 
   try {
     const stream = await openMicrophone();
@@ -1312,6 +1416,7 @@ async function startListening(): Promise<void> {
         speechContext.onFrame(frame);
       },
       onSpeechEnd(audio) {
+        cancelPipelineWarmup();
         const sttStartedAt = performance.now();
         const input = speechContext.onSpeechEnd(audio);
         const observedMicLevel = micLevelPeak;
