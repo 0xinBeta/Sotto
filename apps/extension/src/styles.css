@@ -8,9 +8,79 @@
   --acid: #e6ff97;
   --acid-ink: #1a1d16;
   --danger: #ff9b7b;
+  --ambient-acid: rgba(230, 255, 151, 0.09);
+  --status-shadow: rgba(230, 255, 151, 0);
+  --accent-border-soft: rgba(230, 255, 151, 0.38);
+  --accent-panel-wash: rgba(230, 255, 151, 0.06);
+  --surface-faint: rgba(255, 255, 255, 0.02);
+  --accent-card-wash: rgba(230, 255, 151, 0.055);
+  --surface-card: rgba(255, 255, 255, 0.018);
+  --accent-decoration: rgba(230, 255, 151, 0.12);
+  --accent-border-ready: rgba(230, 255, 151, 0.42);
+  --danger-border: rgba(255, 155, 123, 0.46);
+  --switch-border: rgba(233, 234, 223, 0.35);
+  --accent-wash: rgba(230, 255, 151, 0.08);
+  --progress-track: rgba(255, 255, 255, 0.08);
+  --transcript-placeholder: #696d67;
+  --listen-border: rgba(230, 255, 151, 0.56);
+  --shortcut-border: rgba(26, 29, 22, 0.3);
+  --ring-border: rgba(230, 255, 151, 0.25);
+  --meter-track: rgba(233, 234, 223, 0.12);
+  --meter-shadow: rgba(230, 255, 151, 0.8);
+  --input-border: rgba(233, 234, 223, 0.48);
+  --input-placeholder: #5f625e;
+  --helper-text: #747872;
+  --accent-border-strong: rgba(230, 255, 151, 0.55);
+  --accent-card-fill: rgba(230, 255, 151, 0.07);
+  --empty-text: #646762;
+  --time-text: #6e716d;
+  --timing-green: #9de37b;
+  --timing-amber: #ffc45f;
   font-family: "Avenir Next", "Gill Sans", sans-serif;
   background: var(--ink);
   color: var(--paper);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --ink: #f6f6f0;
+    --ink-soft: #ecece4;
+    --paper: #1a1d1b;
+    --paper-dim: #535950;
+    --rule: rgba(18, 20, 19, 0.2);
+    --acid: #526600;
+    --acid-ink: #ffffff;
+    --danger: #a13c22;
+    --ambient-acid: rgba(82, 102, 0, 0.08);
+    --status-shadow: rgba(82, 102, 0, 0);
+    --accent-border-soft: rgba(82, 102, 0, 0.42);
+    --accent-panel-wash: rgba(82, 102, 0, 0.08);
+    --surface-faint: rgba(18, 20, 19, 0.035);
+    --accent-card-wash: rgba(82, 102, 0, 0.07);
+    --surface-card: rgba(18, 20, 19, 0.025);
+    --accent-decoration: rgba(82, 102, 0, 0.16);
+    --accent-border-ready: rgba(82, 102, 0, 0.55);
+    --danger-border: rgba(161, 60, 34, 0.5);
+    --switch-border: rgba(18, 20, 19, 0.38);
+    --accent-wash: rgba(82, 102, 0, 0.1);
+    --progress-track: rgba(18, 20, 19, 0.12);
+    --transcript-placeholder: #62685f;
+    --listen-border: rgba(82, 102, 0, 0.65);
+    --shortcut-border: rgba(255, 255, 255, 0.45);
+    --ring-border: rgba(82, 102, 0, 0.32);
+    --meter-track: rgba(18, 20, 19, 0.14);
+    --meter-shadow: rgba(82, 102, 0, 0.45);
+    --input-border: rgba(18, 20, 19, 0.48);
+    --input-placeholder: #646b62;
+    --helper-text: #5e655c;
+    --accent-border-strong: rgba(82, 102, 0, 0.62);
+    --accent-card-fill: rgba(82, 102, 0, 0.08);
+    --empty-text: #5e655c;
+    --time-text: #596057;
+    --timing-green: #326b2d;
+    --timing-amber: #855500;
+  }
 }
 
 * {
@@ -21,7 +91,7 @@ html {
   min-width: 280px;
   min-height: 100%;
   background:
-    radial-gradient(circle at 10% -10%, rgba(230, 255, 151, 0.09), transparent 28rem),
+    radial-gradient(circle at 10% -10%, var(--ambient-acid), transparent 28rem),
     var(--ink);
 }
 
@@ -40,13 +110,28 @@ button {
 }
 
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
   outline: 2px solid var(--acid);
   outline-offset: 3px;
 }
 
 [hidden] {
   display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
 .shell {
@@ -89,9 +174,11 @@ input:focus-visible {
 
 .eyebrow,
 .section-index {
+  max-width: none;
   margin: 0;
   color: var(--paper-dim);
   font-size: 10px;
+  font-weight: 400;
   line-height: 1.4;
 }
 
@@ -140,7 +227,7 @@ h2 {
   height: 6px;
   border-radius: 50%;
   background: var(--paper-dim);
-  box-shadow: 0 0 0 0 rgba(230, 255, 151, 0);
+  box-shadow: 0 0 0 0 var(--status-shadow);
 }
 
 .status-chip[data-state="ready"] .status-dot,
@@ -159,9 +246,9 @@ h2 {
 .onboarding {
   margin: 0 0 24px;
   padding: 22px;
-  border: 1px solid rgba(230, 255, 151, 0.38);
+  border: 1px solid var(--accent-border-soft);
   background:
-    linear-gradient(135deg, rgba(230, 255, 151, 0.06), transparent 58%),
+    linear-gradient(135deg, var(--accent-panel-wash), transparent 58%),
     var(--ink-soft);
 }
 
@@ -207,7 +294,7 @@ h2 {
 .progress-card {
   padding: 13px 14px;
   border: 1px solid var(--rule);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-faint);
 }
 
 .premium-voice-card {
@@ -217,8 +304,8 @@ h2 {
   overflow: hidden;
   border: 1px solid var(--rule);
   background:
-    linear-gradient(125deg, rgba(230, 255, 151, 0.055), transparent 62%),
-    rgba(255, 255, 255, 0.018);
+    linear-gradient(125deg, var(--accent-card-wash), transparent 62%),
+    var(--surface-card);
 }
 
 .premium-voice-card::after {
@@ -227,18 +314,18 @@ h2 {
   right: -32px;
   width: 82px;
   height: 82px;
-  border: 1px solid rgba(230, 255, 151, 0.12);
+  border: 1px solid var(--accent-decoration);
   border-radius: 50%;
   content: "";
 }
 
 .premium-voice-card[data-state="ready"],
 .premium-voice-card[data-state="active"] {
-  border-color: rgba(230, 255, 151, 0.42);
+  border-color: var(--accent-border-ready);
 }
 
 .premium-voice-card[data-state="error"] {
-  border-color: rgba(255, 155, 123, 0.46);
+  border-color: var(--danger-border);
 }
 
 .premium-voice-heading {
@@ -264,7 +351,7 @@ h2 {
 
 .premium-voice-card[data-state="ready"] .premium-state,
 .premium-voice-card[data-state="active"] .premium-state {
-  border-color: rgba(230, 255, 151, 0.38);
+  border-color: var(--accent-border-soft);
   color: var(--acid);
 }
 
@@ -312,7 +399,7 @@ h2 {
   position: relative;
   width: 34px;
   height: 18px;
-  border: 1px solid rgba(233, 234, 223, 0.35);
+  border: 1px solid var(--switch-border);
   border-radius: 99px;
   transition: border-color 160ms ease, background 160ms ease;
 }
@@ -331,7 +418,7 @@ h2 {
 
 .voice-switch input:checked + .voice-switch-track {
   border-color: var(--acid);
-  background: rgba(230, 255, 151, 0.08);
+  background: var(--accent-wash);
 }
 
 .voice-switch input:checked + .voice-switch-track::after {
@@ -373,7 +460,7 @@ progress {
 }
 
 progress::-webkit-progress-bar {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--progress-track);
 }
 
 progress::-webkit-progress-value {
@@ -408,7 +495,7 @@ progress::-webkit-progress-value {
 }
 
 .transcript[data-placeholder="true"] {
-  color: #696d67;
+  color: var(--transcript-placeholder);
 }
 
 .control-panel {
@@ -425,7 +512,7 @@ progress::-webkit-progress-value {
   height: 142px;
   padding: 20px;
   overflow: visible;
-  border: 1px solid rgba(230, 255, 151, 0.56);
+  border: 1px solid var(--listen-border);
   border-radius: 50%;
   background: var(--acid);
   color: var(--acid-ink);
@@ -464,7 +551,7 @@ progress::-webkit-progress-value {
   z-index: 1;
   align-self: start;
   padding: 2px 5px;
-  border: 1px solid rgba(26, 29, 22, 0.3);
+  border: 1px solid var(--shortcut-border);
   border-radius: 3px;
   font-family: "SFMono-Regular", "Cascadia Mono", monospace;
   font-size: 9px;
@@ -476,7 +563,7 @@ progress::-webkit-progress-value {
 .listen-rings::after {
   position: absolute;
   inset: -1px;
-  border: 1px solid rgba(230, 255, 151, 0.25);
+  border: 1px solid var(--ring-border);
   border-radius: inherit;
   content: "";
 }
@@ -494,7 +581,7 @@ progress::-webkit-progress-value {
   height: 4px;
   margin-top: 14px;
   overflow: hidden;
-  background: rgba(233, 234, 223, 0.12);
+  background: var(--meter-track);
 }
 
 .mic-meter-fill {
@@ -514,7 +601,7 @@ progress::-webkit-progress-value {
 
 .mic-meter[data-state="speech"] .mic-meter-fill {
   background: var(--paper);
-  box-shadow: 0 0 8px rgba(230, 255, 151, 0.8);
+  box-shadow: 0 0 8px var(--meter-shadow);
 }
 
 .mic-help {
@@ -562,7 +649,7 @@ progress::-webkit-progress-value {
   height: 44px;
   padding: 0;
   border: 0;
-  border-bottom: 1px solid rgba(233, 234, 223, 0.48);
+  border-bottom: 1px solid var(--input-border);
   border-radius: 0;
   background: transparent;
   color: var(--paper);
@@ -571,7 +658,7 @@ progress::-webkit-progress-value {
 }
 
 .command-row input::placeholder {
-  color: #5f625e;
+  color: var(--input-placeholder);
 }
 
 .command-row button {
@@ -586,7 +673,7 @@ progress::-webkit-progress-value {
 
 .command-form > p {
   margin: 9px 0 0;
-  color: #747872;
+  color: var(--helper-text);
   font-size: 8px;
   letter-spacing: 0.025em;
   text-transform: none;
@@ -596,8 +683,8 @@ progress::-webkit-progress-value {
   align-items: flex-end;
   margin: -12px 0 28px;
   padding: 15px;
-  border: 1px solid rgba(230, 255, 151, 0.55);
-  background: rgba(230, 255, 151, 0.07);
+  border: 1px solid var(--accent-border-strong);
+  background: var(--accent-card-fill);
 }
 
 .clipboard-card p:not(.section-index) {
@@ -657,7 +744,7 @@ progress::-webkit-progress-value {
 }
 
 .notes-list .empty-notes {
-  color: #646762;
+  color: var(--empty-text);
   font-family: "Iowan Old Style", Baskerville, serif;
   font-size: 16px;
 }
@@ -665,8 +752,8 @@ progress::-webkit-progress-value {
 .reminder-banner {
   margin: 12px 0;
   padding: 12px;
-  border: 1px solid rgba(230, 255, 151, 0.55);
-  background: rgba(230, 255, 151, 0.07);
+  border: 1px solid var(--accent-border-strong);
+  background: var(--accent-card-fill);
   color: var(--acid);
   font-size: 12px;
   line-height: 1.45;
@@ -716,7 +803,7 @@ progress::-webkit-progress-value {
 
 .action-log time {
   padding-top: 2px;
-  color: #6e716d;
+  color: var(--time-text);
   font-family: "SFMono-Regular", "Cascadia Mono", monospace;
   font-size: 8px;
 }
@@ -740,11 +827,11 @@ progress::-webkit-progress-value {
 }
 
 .log-timing[data-tone="green"] .log-timing-total {
-  color: #9de37b;
+  color: var(--timing-green);
 }
 
 .log-timing[data-tone="amber"] .log-timing-total {
-  color: #ffc45f;
+  color: var(--timing-amber);
 }
 
 .log-timing[data-tone="red"] .log-timing-total {
@@ -765,7 +852,7 @@ progress::-webkit-progress-value {
 
 .action-log .empty-log {
   display: block;
-  color: #646762;
+  color: var(--empty-text);
   font-family: "Iowan Old Style", Baskerville, serif;
   font-size: 16px;
 }
@@ -826,7 +913,7 @@ progress::-webkit-progress-value {
 
 @keyframes signal {
   50% {
-    box-shadow: 0 0 0 7px rgba(230, 255, 151, 0.08);
+    box-shadow: 0 0 0 7px var(--accent-wash);
   }
 }
 
@@ -861,8 +948,7 @@ progress::-webkit-progress-value {
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    animation: none !important;
+    transition: none !important;
   }
 }

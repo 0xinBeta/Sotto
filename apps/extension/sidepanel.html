@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <title>Sotto</title>
   </head>
   <body>
@@ -13,11 +13,18 @@
           <p class="eyebrow">ON-DEVICE VOICE UTILITY</p>
           <h1>Sotto<span aria-hidden="true">.</span></h1>
         </div>
-        <div class="status-chip" id="status-chip" data-state="booting">
+        <div
+          class="status-chip"
+          id="status-chip"
+          data-state="booting"
+          role="status"
+          aria-atomic="true"
+        >
           <span class="status-dot" aria-hidden="true"></span>
           <span id="status-label">Checking hardware</span>
         </div>
       </header>
+      <p class="sr-only" id="pipeline-error" role="alert" aria-atomic="true"></p>
 
       <section class="onboarding" id="capture-setup" hidden>
         <p class="section-index">00 / FIRST-RUN SETUP</p>
@@ -53,11 +60,21 @@
       <section class="progress-stack" aria-label="Model setup">
         <div class="progress-card" id="nano-progress-card" hidden>
           <div class="progress-copy"><span id="nano-progress-label">Gemini Nano</span><output id="nano-progress-value">0%</output></div>
-          <progress id="nano-progress" max="1" value="0"></progress>
+          <progress
+            id="nano-progress"
+            max="1"
+            value="0"
+            aria-labelledby="nano-progress-label"
+          ></progress>
         </div>
         <div class="progress-card" id="stt-progress-card" hidden>
-          <div class="progress-copy"><span>Moonshine speech model</span><output id="stt-progress-value">0%</output></div>
-          <progress id="stt-progress" max="1" value="0"></progress>
+          <div class="progress-copy"><span id="stt-progress-label">Moonshine speech model</span><output id="stt-progress-value">0%</output></div>
+          <progress
+            id="stt-progress"
+            max="1"
+            value="0"
+            aria-labelledby="stt-progress-label"
+          ></progress>
         </div>
       </section>
 
@@ -87,7 +104,12 @@
             <span id="premium-progress-label">Kokoro voice model</span>
             <output id="premium-progress-value">0%</output>
           </div>
-          <progress id="premium-progress" max="1" value="0"></progress>
+          <progress
+            id="premium-progress"
+            max="1"
+            value="0"
+            aria-labelledby="premium-progress-label"
+          ></progress>
         </div>
       </section>
 
@@ -117,25 +139,47 @@
             <span id="premium-stt-progress-label">Speech model</span>
             <output id="premium-stt-progress-value">0%</output>
           </div>
-          <progress id="premium-stt-progress" max="1" value="0"></progress>
+          <progress
+            id="premium-stt-progress"
+            max="1"
+            value="0"
+            aria-labelledby="premium-stt-progress-label"
+          ></progress>
         </div>
       </section>
 
-      <section class="transcript-panel" aria-live="polite">
+      <section class="transcript-panel" aria-labelledby="transcript-heading">
         <div class="section-heading">
-          <p class="section-index">01 / HEARD</p>
+          <h2 class="section-index" id="transcript-heading">01 / HEARD</h2>
           <span class="listening-mark" id="listening-mark">IDLE</span>
         </div>
-        <p class="transcript" id="transcript">Your words will appear here.</p>
+        <p class="transcript" id="transcript" aria-live="polite" aria-atomic="true">
+          Your words will appear here.
+        </p>
       </section>
 
-      <section class="control-panel">
-        <button class="listen-button" id="listen-button" type="button" aria-pressed="false">
+      <section class="control-panel" aria-label="Voice input">
+        <button
+          class="listen-button"
+          id="listen-button"
+          type="button"
+          aria-pressed="false"
+          aria-labelledby="listen-label"
+        >
           <span class="listen-rings" aria-hidden="true"></span>
           <span id="listen-label">Hold to talk</span>
           <kbd id="shortcut-label">⌥ S</kbd>
         </button>
-        <div class="mic-meter" id="mic-meter" data-state="idle" aria-hidden="true">
+        <div
+          class="mic-meter"
+          id="mic-meter"
+          data-state="idle"
+          role="meter"
+          aria-label="Microphone input level"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
           <span class="mic-meter-fill" id="mic-meter-fill"></span>
         </div>
         <p class="mic-help" id="mic-help">
@@ -153,26 +197,43 @@
         <p>Uses the same private parse → validate → act pipeline.</p>
       </form>
 
-      <section class="clipboard-card" id="clipboard-card" hidden>
+      <section
+        class="clipboard-card"
+        id="clipboard-card"
+        aria-labelledby="clipboard-heading"
+        hidden
+      >
         <div>
-          <p class="section-index">SCREENSHOT READY</p>
+          <h2 class="section-index" id="clipboard-heading">SCREENSHOT READY</h2>
           <p id="clipboard-copy">Copy the PNG to continue.</p>
         </div>
         <button class="button primary" id="copy-screenshot" type="button">Copy &amp; continue</button>
       </section>
 
-      <section class="page-text-card" id="page-text-card" hidden aria-live="polite">
+      <section
+        class="page-text-card"
+        id="page-text-card"
+        aria-labelledby="page-text-title"
+        hidden
+        aria-live="polite"
+      >
         <div class="section-heading">
-          <p class="section-index" id="page-text-title">PAGE</p>
+          <h2 class="section-index" id="page-text-title">PAGE</h2>
           <button class="link-button" id="close-page-text" type="button">Close</button>
         </div>
         <p class="page-text-output" id="page-text-output"></p>
-        <progress id="reading-progress" max="1" value="0" hidden></progress>
+        <progress
+          id="reading-progress"
+          max="1"
+          value="0"
+          aria-label="Reading progress"
+          hidden
+        ></progress>
       </section>
 
-      <section class="notes-panel" id="notes-panel">
+      <section class="notes-panel" id="notes-panel" aria-labelledby="notes-heading">
         <div class="section-heading">
-          <p class="section-index">03 / NOTES</p>
+          <h2 class="section-index" id="notes-heading">03 / NOTES</h2>
           <button class="link-button" id="export-notes" type="button">Export .md</button>
         </div>
         <p class="reminder-banner" id="reminder-banner" hidden></p>
@@ -181,14 +242,20 @@
         </ul>
       </section>
 
-      <section class="log-panel">
+      <section class="log-panel" aria-labelledby="log-heading">
         <div class="section-heading">
-          <p class="section-index">02 / DID</p>
+          <h2 class="section-index" id="log-heading">02 / DID</h2>
           <button class="link-button" id="clear-log" type="button">Clear</button>
         </div>
         <ol class="action-log" id="action-log">
           <li class="empty-log">No commands yet.</li>
         </ol>
+        <p
+          class="sr-only"
+          id="action-log-announcer"
+          aria-live="polite"
+          aria-atomic="true"
+        ></p>
       </section>
     </main>
     <script type="module" src="/src/sidepanel.ts"></script>

@@ -1066,6 +1066,9 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return sendOffscreen({ type: "start-listening" });
     case "stop-listening":
       return sendOffscreen({ type: "stop-listening" });
+    case "stop-reading":
+      beginCommandGeneration();
+      return undefined;
     case "toggle-listening":
       beginCommandGeneration();
       return sendOffscreen({ type: "toggle-listening" });

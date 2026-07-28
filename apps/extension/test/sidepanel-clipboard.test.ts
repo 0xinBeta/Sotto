@@ -11,6 +11,7 @@ vi.mock("@sotto/destinations", () => ({
 type Listener = (event: Record<string, unknown>) => unknown;
 
 class FakeElement {
+  readonly attributes: Record<string, string> = {};
   readonly children: Array<FakeElement | FakeText> = [];
   readonly dataset: Record<string, string> = {};
   readonly listeners = new Map<string, Listener[]>();
@@ -21,6 +22,7 @@ class FakeElement {
   hidden = false;
   parent?: FakeElement;
   readonly style: Record<string, string> = {};
+  textUpdateCount = 0;
   title = "";
   value: string | number = "";
   private copy = "";
@@ -39,6 +41,7 @@ class FakeElement {
   }
 
   set textContent(value: string) {
+    this.textUpdateCount += 1;
     this.copy = value;
     this.children.length = 0;
   }
@@ -88,16 +91,26 @@ class FakeElement {
     this.append(...children);
   }
 
-  setAttribute(): void {}
+  getAttribute(name: string): string | null {
+    return this.attributes[name] ?? null;
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes[name] = value;
+  }
   setPointerCapture(): void {}
   releasePointerCapture(): void {}
 
-  async emit(type: string): Promise<void> {
+  async emit(
+    type: string,
+    values: Record<string, unknown> = {},
+  ): Promise<void> {
     const event = {
       preventDefault: vi.fn(),
       pointerId: 1,
       key: "",
       repeat: false,
+      ...values,
     };
     await Promise.all(
       (this.listeners.get(type) ?? []).map((listener) =>
@@ -118,6 +131,7 @@ class FakeText {
 const elementIds = [
   "status-chip",
   "status-label",
+  "pipeline-error",
   "capture-setup",
   "enable-capture",
   "setup-grant-mic",
@@ -140,6 +154,7 @@ const elementIds = [
   "clipboard-copy",
   "copy-screenshot",
   "action-log",
+  "action-log-announcer",
   "clear-log",
   "nano-progress-card",
   "nano-progress",
@@ -218,6 +233,7 @@ async function installSidepanel(options: {
   elements["action-log"].append(emptyLog);
 
   let onMessage: ((message: unknown) => void) | undefined;
+  const documentListeners = new Map<string, Listener[]>();
   const requestPermission = vi.fn().mockResolvedValue(true);
   const sendMessage = vi.fn().mockImplementation(
     async (message: { readonly type?: string }) => {
@@ -235,6 +251,11 @@ async function installSidepanel(options: {
 
   vi.stubGlobal("document", {
     hasFocus: vi.fn(() => true),
+    addEventListener: vi.fn((type: string, listener: Listener) => {
+      const listeners = documentListeners.get(type) ?? [];
+      listeners.push(listener);
+      documentListeners.set(type, listeners);
+    }),
     querySelector: vi.fn((selector: string) =>
       selector.startsWith("#") ? elements[selector.slice(1) as keyof typeof elements] : undefined,
     ),
@@ -272,10 +293,34 @@ async function installSidepanel(options: {
   sendMessage.mockClear();
   if (!onMessage) throw new Error("Side-panel message listener was not installed");
 
-  return { elements, onMessage, requestPermission, sendMessage };
+  const emitDocument = async (
+    type: string,
+    values: Record<string, unknown> = {},
+  ): Promise<void> => {
+    const event = {
+      preventDefault: vi.fn(),
+      key: "",
+      repeat: false,
+      ...values,
+    };
+    await Promise.all(
+      (documentListeners.get(type) ?? []).map((listener) =>
+        Promise.resolve(listener(event)),
+      ),
+    );
+  };
+
+  return {
+    elements,
+    emitDocument,
+    onMessage,
+    requestPermission,
+    sendMessage,
+  };
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   clipboard.perform.mockReset();
   vi.resetModules();
   vi.unstubAllGlobals();
@@ -458,6 +503,67 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["mic-meter-fill"].style.transform).toBe("scaleX(0)");
   });
 
+  it("updates the meter for assistive technology at most twice per second", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+    const { elements, onMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "listening-state",
+      listening: true,
+    });
+    onMessage({ target: "sidepanel", type: "mic-level", level: 0.2 });
+    expect(elements["mic-meter"].getAttribute("aria-valuenow")).toBe("20");
+
+    vi.advanceTimersByTime(100);
+    onMessage({ target: "sidepanel", type: "mic-level", level: 0.8 });
+    expect(elements["mic-meter-fill"].style.transform).toBe("scaleX(0.8)");
+    expect(elements["mic-meter"].getAttribute("aria-valuenow")).toBe("20");
+
+    vi.advanceTimersByTime(399);
+    expect(elements["mic-meter"].getAttribute("aria-valuenow")).toBe("20");
+    vi.advanceTimersByTime(1);
+    expect(elements["mic-meter"].getAttribute("aria-valuenow")).toBe("80");
+  });
+
+  it("stops listening and reading when Escape is pressed in the panel", async () => {
+    const {
+      elements,
+      emitDocument,
+      onMessage,
+      sendMessage,
+    } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "listening-state",
+      listening: true,
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "reading-progress",
+      current: 4,
+      total: 10,
+    });
+
+    await emitDocument("keydown", { key: "Escape" });
+
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith({
+        target: "worker",
+        type: "stop-listening",
+      });
+      expect(sendMessage).toHaveBeenCalledWith({
+        target: "worker",
+        type: "stop-reading",
+      });
+    });
+    expect(elements["listen-button"].getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    expect(elements["reading-progress"].hidden).toBe(true);
+  });
+
   it("shows first-run capture setup and hides it live after the one-time grant", async () => {
     const { elements, requestPermission } = await installSidepanel({
       capturePermissionGranted: false,
@@ -618,6 +724,25 @@ describe("side-panel screenshot clipboard fallback", () => {
       "typed · parse 500ms · act 500ms · voice 1000ms · total 2.0s",
     );
     expect(newest?.querySelector(".log-timing")?.dataset.tone).toBe("amber");
+    expect(elements["action-log-announcer"].textUpdateCount).toBe(2);
+    expect(elements["action-log-announcer"].textContent).toBe(
+      "open calendar. Opened Calendar. Repeated 2 times.",
+    );
+  });
+
+  it("announces pipeline errors through the alert region only", async () => {
+    const { elements, onMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "pipeline-error",
+      message: "The speech model could not start.",
+    });
+
+    expect(elements["pipeline-error"].textContent).toBe(
+      "The speech model could not start.",
+    );
+    expect(elements["action-log-announcer"].textContent).toBe("");
   });
 
   it("clears a successful automatic workflow so a later click cannot write twice", async () => {

@@ -331,6 +331,7 @@ function requiredElement<T extends Element>(selector: string): T {
 
 const statusChip = requiredElement<HTMLElement>("#status-chip");
 const statusLabel = requiredElement<HTMLElement>("#status-label");
+const pipelineError = requiredElement<HTMLElement>("#pipeline-error");
 const captureSetup = requiredElement<HTMLElement>("#capture-setup");
 const enableCapture = requiredElement<HTMLButtonElement>("#enable-capture");
 const setupGrantMic = requiredElement<HTMLButtonElement>("#setup-grant-mic");
@@ -353,6 +354,8 @@ const clipboardCard = requiredElement<HTMLElement>("#clipboard-card");
 const clipboardCopy = requiredElement<HTMLElement>("#clipboard-copy");
 const copyScreenshot = requiredElement<HTMLButtonElement>("#copy-screenshot");
 const actionLog = requiredElement<HTMLOListElement>("#action-log");
+const actionLogAnnouncer =
+  requiredElement<HTMLElement>("#action-log-announcer");
 const clearLog = requiredElement<HTMLButtonElement>("#clear-log");
 const nanoProgressCard = requiredElement<HTMLElement>("#nano-progress-card");
 const nanoProgress = requiredElement<HTMLProgressElement>("#nano-progress");
@@ -415,8 +418,12 @@ let premiumState: PremiumTtsState = "absent";
 let highAccuracyState: PremiumSttState = "not-downloaded";
 let highAccuracyTier: PremiumSttTier = "moonshine-base";
 let highAccuracyResumable = false;
+let meterAccessibleTimer: number | undefined;
+let pendingMeterAccessibleValue: number | undefined;
+let lastMeterAccessibleUpdate = Number.NEGATIVE_INFINITY;
 const progressHideTimers:
   Partial<Record<"nano" | "stt" | "premium-tts" | "premium-stt", number>> = {};
+const METER_ACCESSIBLE_INTERVAL_MS = 500;
 
 function setStatus(
   state: "booting" | "ready" | "listening" | "error",
@@ -433,13 +440,44 @@ function setListening(listening: boolean): void {
   listeningMark.textContent = listening ? "LIVE" : "IDLE";
   listeningMark.dataset.active = String(listening);
   micMeter.dataset.state = listening ? "listening" : "idle";
-  if (!listening) micMeterFill.style.transform = "scaleX(0)";
+  if (!listening) {
+    micMeterFill.style.transform = "scaleX(0)";
+    updateMeterAccessibleValue(0);
+  }
   setStatus(listening ? "listening" : "ready", listening ? "Listening" : "On device");
+}
+
+function commitMeterAccessibleValue(value: number): void {
+  micMeter.setAttribute("aria-valuenow", String(value));
+  lastMeterAccessibleUpdate = Date.now();
+  pendingMeterAccessibleValue = undefined;
+  meterAccessibleTimer = undefined;
+}
+
+function updateMeterAccessibleValue(level: number): void {
+  pendingMeterAccessibleValue = Math.round(level * 100);
+  const remaining =
+    METER_ACCESSIBLE_INTERVAL_MS - (Date.now() - lastMeterAccessibleUpdate);
+  if (remaining <= 0) {
+    if (meterAccessibleTimer !== undefined) {
+      window.clearTimeout(meterAccessibleTimer);
+      meterAccessibleTimer = undefined;
+    }
+    commitMeterAccessibleValue(pendingMeterAccessibleValue);
+    return;
+  }
+  if (meterAccessibleTimer !== undefined) return;
+  meterAccessibleTimer = window.setTimeout(() => {
+    if (pendingMeterAccessibleValue !== undefined) {
+      commitMeterAccessibleValue(pendingMeterAccessibleValue);
+    }
+  }, remaining);
 }
 
 function showMicLevel(level: number): void {
   if (!isListening) return;
   micMeterFill.style.transform = `scaleX(${level})`;
+  updateMeterAccessibleValue(level);
 }
 
 function showTranscript(text: string): void {
@@ -852,10 +890,17 @@ function createTimingLine(
   return line;
 }
 
+function actionLogAnnouncement(heard: string, did: string): string {
+  const heardText = /[.!?]$/.test(heard) ? heard : `${heard}.`;
+  const didText = /[.!?]$/.test(did) ? did : `${did}.`;
+  return `${heardText} ${didText}`;
+}
+
 function appendLog(
   heard: string,
   did: string,
   timings?: ExchangeTimings,
+  announce = true,
 ): void {
   const decision = nextLogEntry(newestLogEntry, heard, did);
   const now = new Date();
@@ -871,6 +916,10 @@ function appendLog(
       newest?.querySelector(".log-timing")?.remove();
       if (timingLine) newest?.append(timingLine);
       newestLogEntry = decision.entry;
+      if (announce) {
+        actionLogAnnouncer.textContent =
+          `${actionLogAnnouncement(heard, did)} Repeated ${decision.entry.count} times.`;
+      }
       return;
     }
   }
@@ -894,6 +943,9 @@ function appendLog(
   if (timingLine) item.append(timingLine);
   actionLog.prepend(item);
   newestLogEntry = decision.entry;
+  if (announce) {
+    actionLogAnnouncer.textContent = actionLogAnnouncement(heard, did);
+  }
 }
 
 async function requestWorker<T>(
@@ -974,6 +1026,14 @@ listenButton.addEventListener("keyup", (event) => {
     event.preventDefault();
     void stopListening();
   }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !document.hasFocus()) return;
+  event.preventDefault();
+  if (isListening) void stopListening();
+  readingProgress.hidden = true;
+  void send({ type: "stop-reading" });
 });
 
 for (const button of [grantMic, setupGrantMic]) {
@@ -1350,7 +1410,8 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       break;
     case "pipeline-error":
       setStatus("error", "Needs attention");
-      appendLog("system", message.message);
+      pipelineError.textContent = message.message;
+      appendLog("system", message.message, undefined, false);
       break;
   }
 });
