@@ -372,6 +372,7 @@ async function publishPremiumSttStatus(): Promise<void> {
     enabled: status.enabled,
     downloaded: status.downloaded,
     resident: status.resident,
+    resumable: status.resumable,
     tier: status.tier,
     backend: status.backend,
     ...(status.error === undefined ? {} : { error: status.error }),
@@ -490,6 +491,12 @@ async function ensurePremiumSttSettings(): Promise<void> {
           progress: Math.max(0, Math.min(1, ratio)),
           status: progress.status,
           ...(progress.file === undefined ? {} : { file: progress.file }),
+          ...(progress.loaded === undefined
+            ? {}
+            : { loaded: progress.loaded }),
+          ...(progress.total === undefined
+            ? {}
+            : { total: progress.total }),
         });
       },
       onTinyProgress(progress) {

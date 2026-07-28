@@ -5,6 +5,7 @@ export interface SttProgress {
   readonly progress?: number;
   readonly loaded?: number;
   readonly total?: number;
+  readonly resumable?: boolean;
   readonly [key: string]: unknown;
 }
 

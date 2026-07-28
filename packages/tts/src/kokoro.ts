@@ -393,6 +393,10 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     };
 
     const loadAndPrewarm = async (): Promise<KokoroModel> => {
+      // transformers.js caches complete files through its public API.
+      // The browser discards a partial failed fetch, so this layer cannot
+      // resume its bytes. A retry reuses each file that completed before
+      // the failure and fetches the incomplete file again.
       const loaded = await this.#queueInference(() =>
         this.#runtime.load({
           modelId: KOKORO_MODEL_ID,

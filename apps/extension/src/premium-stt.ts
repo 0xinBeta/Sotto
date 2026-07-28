@@ -31,6 +31,7 @@ export interface PremiumSttStatus {
   readonly enabled: boolean;
   readonly downloaded: boolean;
   readonly resident: boolean;
+  readonly resumable: boolean;
   readonly tier: PremiumSttTier;
   readonly backend: "webgpu" | "wasm";
   readonly error?: string;
@@ -134,6 +135,7 @@ export class PremiumSttManager {
   #enabled: boolean;
   #hasStoredEnabled: boolean;
   #downloaded: boolean;
+  #resumable = false;
   #error: string | undefined;
   #premium: SttEngine | undefined;
   #tinyReady = false;
@@ -172,6 +174,7 @@ export class PremiumSttManager {
       enabled: this.#enabled,
       downloaded: this.#downloaded,
       resident: this.#premium !== undefined,
+      resumable: this.#resumable,
       tier: this.#tier,
       backend: this.#tier === "parakeet" ? "webgpu" : "wasm",
       ...(this.#error === undefined ? {} : { error: this.#error }),
@@ -317,6 +320,9 @@ export class PremiumSttManager {
 
     try {
       await candidate.init((progress) => {
+        if (typeof progress.resumable === "boolean") {
+          this.#resumable = progress.resumable;
+        }
         if (progress.status === "downloading") {
           this.#setState("downloading");
         } else if (progress.status === "validating") {
@@ -356,6 +362,7 @@ export class PremiumSttManager {
       const previous = this.#premium;
       this.#premium = candidate;
       this.#downloaded = true;
+      this.#resumable = false;
       this.#onResidentChange(true);
       this.#setState("ready");
       if (!this.#hasStoredEnabled) this.#enabled = true;

@@ -284,7 +284,7 @@ afterEach(() => {
 
 describe("side-panel screenshot clipboard fallback", () => {
   it("shows OS fallback while absent and enables the default-on premium toggle when ready", async () => {
-    const { elements, onMessage } = await installSidepanel();
+    const { elements, onMessage, sendMessage } = await installSidepanel();
 
     onMessage({
       target: "sidepanel",
@@ -297,6 +297,22 @@ describe("side-panel screenshot clipboard fallback", () => {
     );
     expect(elements["download-premium-voice"].hidden).toBe(false);
     expect(elements["premium-voice-enabled"].disabled).toBe(true);
+
+    onMessage({
+      target: "sidepanel",
+      type: "premium-tts-state",
+      state: "error",
+      enabled: false,
+    });
+    expect(elements["download-premium-voice"].textContent).toBe(
+      "Retry voice download",
+    );
+    expect(elements["download-premium-voice"].disabled).toBe(false);
+    await elements["download-premium-voice"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "prepare-premium-tts",
+    });
 
     onMessage({
       target: "sidepanel",
@@ -334,10 +350,39 @@ describe("side-panel screenshot clipboard fallback", () => {
       progress: 0.5,
       status: "downloading",
       file: "encoder-model.int4.onnx",
+      loaded: 204_612_558,
+      total: 409_225_115,
     });
-    expect(elements["premium-stt-progress-value"].textContent).toBe("50%");
+    expect(elements["premium-stt-progress-value"].textContent).toBe(
+      "205 of 409 MB",
+    );
     expect(elements["premium-stt-progress-label"].textContent).toContain(
       "encoder-model.int4.onnx",
+    );
+
+    onMessage({
+      target: "sidepanel",
+      type: "premium-stt-state",
+      state: "error",
+      enabled: false,
+      downloaded: false,
+      resident: false,
+      resumable: true,
+      tier: "parakeet",
+      backend: "webgpu",
+    });
+    expect(elements["download-premium-stt"].textContent).toBe(
+      "Resume download",
+    );
+    expect(elements["download-premium-stt"].disabled).toBe(false);
+    await elements["download-premium-stt"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "prepare-premium-stt",
+    });
+    expect(elements["download-premium-stt"].disabled).toBe(true);
+    expect(elements["premium-stt-progress-value"].textContent).toBe(
+      "205 of 409 MB",
     );
 
     onMessage({

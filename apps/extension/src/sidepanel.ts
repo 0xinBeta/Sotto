@@ -93,6 +93,8 @@ type PanelMessage =
       progress: number;
       status?: string;
       file?: string;
+      loaded?: number;
+      total?: number;
     }
   | { target: "sidepanel"; type: "earcon"; kind: "listen" | "complete" }
   | {
@@ -156,6 +158,7 @@ type PanelMessage =
       enabled: boolean;
       downloaded: boolean;
       resident: boolean;
+      resumable?: boolean;
       tier: PremiumSttTier;
       backend: "webgpu" | "wasm";
       error?: string;
@@ -250,7 +253,20 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         (message.status === undefined ||
           isBoundedString(message.status, 100)) &&
         (message.file === undefined ||
-          isBoundedString(message.file, 1_000))
+          isBoundedString(message.file, 1_000)) &&
+        (message.loaded === undefined ||
+          (typeof message.loaded === "number" &&
+            Number.isFinite(message.loaded) &&
+            message.loaded >= 0)) &&
+        (message.total === undefined ||
+          (typeof message.total === "number" &&
+            Number.isFinite(message.total) &&
+            message.total > 0)) &&
+        (
+          message.loaded === undefined ||
+          message.total === undefined ||
+          message.loaded <= message.total
+        )
       );
     case "premium-tts-state":
       return (
@@ -278,6 +294,8 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         typeof message.enabled === "boolean" &&
         typeof message.downloaded === "boolean" &&
         typeof message.resident === "boolean" &&
+        (message.resumable === undefined ||
+          typeof message.resumable === "boolean") &&
         (message.tier === "parakeet" ||
           message.tier === "moonshine-base") &&
         (message.backend === "webgpu" ||
@@ -396,6 +414,7 @@ let nanoAvailability: NanoAvailability | undefined;
 let premiumState: PremiumTtsState = "absent";
 let highAccuracyState: PremiumSttState = "not-downloaded";
 let highAccuracyTier: PremiumSttTier = "moonshine-base";
+let highAccuracyResumable = false;
 const progressHideTimers:
   Partial<Record<"nano" | "stt" | "premium-tts" | "premium-stt", number>> = {};
 
@@ -543,6 +562,8 @@ function updateProgress(
   value: number,
   complete = value >= 1,
   file?: string,
+  loaded?: number,
+  total?: number,
 ): void {
   const normalized = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
   const progressKind =
@@ -597,7 +618,14 @@ function updateProgress(
   card.hidden = false;
   if (file) card.title = file;
   bar.value = normalized;
-  output.value = `${Math.round(normalized * 100)}%`;
+  output.value =
+    typeof loaded === "number" &&
+      Number.isFinite(loaded) &&
+      typeof total === "number" &&
+      Number.isFinite(total) &&
+      total > 0
+      ? `${formatMegabytes(loaded)} of ${formatMegabytes(total)} MB`
+      : `${Math.round(normalized * 100)}%`;
   output.textContent = output.value;
   const previousTimer = progressHideTimers[progressKind];
   if (previousTimer !== undefined) {
@@ -610,6 +638,12 @@ function updateProgress(
       delete progressHideTimers[progressKind];
     }, 900);
   }
+}
+
+function formatMegabytes(bytes: number): string {
+  const value = bytes / 1_000_000;
+  if (value >= 10) return String(Math.round(value));
+  return value.toFixed(1).replace(/\.0$/, "");
 }
 
 function showPremiumVoiceState(
@@ -644,10 +678,10 @@ function showPremiumVoiceState(
         `Kokoro af_heart is ready at 24 kHz${backend ? ` via ${backend.toUpperCase()}` : ""}. Your operating system voice remains the instant fallback.`;
       break;
     case "error":
-      downloadPremiumVoice.textContent = "Retry premium download";
+      downloadPremiumVoice.textContent = "Retry voice download";
       premiumVoiceCopy.textContent =
         error ??
-        "Premium voice could not start. Sotto is continuing with your operating system voice.";
+        "The voice download failed. Select retry to use completed files from the local cache.";
       break;
   }
 }
@@ -658,10 +692,12 @@ function showPremiumSttState(
   downloaded: boolean,
   resident: boolean,
   tier: PremiumSttTier,
+  resumable = false,
   error?: string,
 ): void {
   highAccuracyState = state;
   highAccuracyTier = tier;
+  highAccuracyResumable = resumable;
   premiumSttCard.dataset.state = state;
   premiumSttState.textContent = state.replace("-", " ").toUpperCase();
   premiumSttEnabled.checked = enabled;
@@ -682,9 +718,11 @@ function showPremiumSttState(
     case "not-downloaded":
       downloadPremiumStt.hidden = false;
       downloadPremiumStt.disabled = false;
-      downloadPremiumStt.textContent = tier === "parakeet"
-        ? "Download 409 MB model"
-        : "Download 63 MB model";
+      downloadPremiumStt.textContent = resumable
+        ? "Resume download"
+        : tier === "parakeet"
+          ? "Download 409 MB model"
+          : "Download 63 MB model";
       premiumSttCopy.textContent =
         `${modelCopy} Nothing downloads until you choose it; Moonshine tiny remains instant.`;
       break;
@@ -725,10 +763,14 @@ function showPremiumSttState(
     case "error":
       downloadPremiumStt.hidden = false;
       downloadPremiumStt.disabled = false;
-      downloadPremiumStt.textContent = "Retry high accuracy setup";
+      downloadPremiumStt.textContent = resumable
+        ? "Resume download"
+        : "Retry high accuracy setup";
       premiumSttCopy.textContent =
-        error ??
-        "High accuracy speech could not start. Moonshine tiny remains active.";
+        resumable
+          ? "The download stopped. Select resume after the network is available."
+          : error ??
+            "High accuracy speech could not start. Moonshine tiny remains active.";
       break;
   }
 }
@@ -1065,7 +1107,11 @@ premiumVoiceEnabled.addEventListener("change", async () => {
 
 downloadPremiumStt.addEventListener("click", async () => {
   downloadPremiumStt.disabled = true;
-  updateProgress("premium-stt", 0, false);
+  if (highAccuracyResumable) {
+    premiumSttProgressCard.hidden = false;
+  } else {
+    updateProgress("premium-stt", 0, false);
+  }
   if (!(await send({ type: "prepare-premium-stt" }))) {
     showPremiumSttState(
       "error",
@@ -1073,6 +1119,7 @@ downloadPremiumStt.addEventListener("click", async () => {
       false,
       false,
       highAccuracyTier,
+      highAccuracyResumable,
       "High accuracy speech setup could not start. Moonshine tiny is still available.",
     );
   }
@@ -1213,6 +1260,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
         message.downloaded,
         message.resident,
         message.tier,
+        message.resumable,
         message.error,
       );
       break;
@@ -1252,6 +1300,8 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
             ? message.status === "ready"
             : message.progress >= 1,
         message.file,
+        message.loaded,
+        message.total,
       );
       break;
     case "page-text":

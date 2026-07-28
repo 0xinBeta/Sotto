@@ -55,12 +55,33 @@ const TEST_SIZES = {
   "vocab.txt": 2,
 } as const;
 
+function interruptedBody(bytes: number): ReadableStream<Uint8Array> {
+  let sent = false;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (!sent) {
+        sent = true;
+        if (bytes > 0) {
+          controller.enqueue(new Uint8Array(bytes));
+          return;
+        }
+      }
+      controller.error(new Error("connection interrupted"));
+    },
+  });
+}
+
 function harness(options: {
   readonly sizes?: typeof TEST_SIZES;
   readonly failFile?: string;
-  readonly interruptFile?: string;
+  readonly cacheStorage?: FakeCacheStorage;
+  readonly fetch?: (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => Promise<Response>;
+  readonly now?: () => number;
 } = {}) {
-  const cacheStorage = new FakeCacheStorage();
+  const cacheStorage = options.cacheStorage ?? new FakeCacheStorage();
   const model = {
     transcribe: vi.fn().mockResolvedValue({
       utterance_text: "  open calendar  ",
@@ -69,28 +90,35 @@ function harness(options: {
     dispose: vi.fn().mockResolvedValue(undefined),
   };
   const factory = vi.fn().mockResolvedValue(model);
-  const fetch = vi.fn(async (input: RequestInfo | URL) => {
+  const defaultFetch = async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
     const name = String(input).split("/").at(-1) as keyof typeof TEST_SIZES;
     const expected = (options.sizes ?? TEST_SIZES)[name];
-    const declared = name === options.failFile ? expected + 1 : expected;
-    const body = name === options.interruptFile
-      ? new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new Uint8Array(Math.max(1, expected - 1)));
-            controller.error(new Error("connection interrupted"));
-          },
-        })
-      : new Uint8Array(expected);
+    const range = new Headers(init?.headers).get("range");
+    const offset = Number(/^bytes=(\d+)-$/.exec(range ?? "")?.[1] ?? 0);
+    const remaining = expected - offset;
+    const declared = name === options.failFile
+      ? remaining + 1
+      : remaining;
+    const body = new Uint8Array(remaining);
     return new Response(body, {
-      status: 200,
+      status: offset > 0 ? 206 : 200,
       headers: {
         "content-length": String(declared),
         "content-type": name === "vocab.txt"
           ? "text/plain"
           : "application/octet-stream",
+        "accept-ranges": "bytes",
+        ...(offset > 0
+          ? { "content-range": `bytes ${offset}-${expected - 1}/${expected}` }
+          : {}),
       },
     });
-  });
+  };
+  const fetch = vi.fn(options.fetch ?? defaultFetch);
+  const sleep = vi.fn().mockResolvedValue(undefined);
   const objectUrls: string[] = [];
   const engine = new ParakeetSttEngine({
     cacheStorage: cacheStorage as unknown as CacheStorage,
@@ -104,8 +132,18 @@ function harness(options: {
     },
     revokeObjectUrl: vi.fn(),
     modelSizes: options.sizes ?? TEST_SIZES,
+    ...(options.now === undefined ? {} : { now: options.now }),
+    sleep,
   });
-  return { cacheStorage, engine, factory, fetch, model, objectUrls };
+  return {
+    cacheStorage,
+    engine,
+    factory,
+    fetch,
+    model,
+    objectUrls,
+    sleep,
+  };
 }
 
 describe("ParakeetSttEngine", () => {
@@ -181,33 +219,311 @@ describe("ParakeetSttEngine", () => {
     ).toBe(false);
   });
 
-  it.each(Object.keys(TEST_SIZES))(
-    "never commits a manifest when %s is interrupted",
-    async (interruptFile) => {
-      const { cacheStorage, engine, factory } = harness({ interruptFile });
+  it("requests the saved offset and includes it in resumed progress", async () => {
+    let encoderRequests = 0;
+    const setup = harness({
+      fetch: async (input, init) => {
+        const name = String(input).split("/").at(-1) as keyof typeof TEST_SIZES;
+        const range = new Headers(init?.headers).get("range");
+        if (name === "encoder-model.int4.onnx") {
+          encoderRequests += 1;
+          if (encoderRequests === 1) {
+            return new Response(interruptedBody(2), {
+              status: 200,
+              headers: {
+                "accept-ranges": "bytes",
+                "content-length": "4",
+              },
+            });
+          }
+          expect(range).toBe("bytes=2-");
+          return new Response(new Uint8Array(2), {
+            status: 206,
+            headers: {
+              "content-length": "2",
+              "content-range": "bytes 2-3/4",
+            },
+          });
+        }
+        const size = TEST_SIZES[name];
+        return new Response(new Uint8Array(size), {
+          headers: {
+            "accept-ranges": "bytes",
+            "content-length": String(size),
+          },
+        });
+      },
+    });
+    const progress: Array<Record<string, unknown>> = [];
 
-      await expect(engine.init()).rejects.toThrow("connection interrupted");
-      expect(factory).not.toHaveBeenCalled();
-      for (const [name, cache] of cacheStorage.caches) {
-        expect(name).not.toContain("-staging-");
-        expect(
-          [...cache.entries.keys()].some((key) =>
-            key.includes("sotto-cache-manifest")
-          ),
-        ).toBe(false);
+    await setup.engine.init((event) => progress.push({ ...event }));
+
+    expect(setup.fetch).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("encoder-model.int4.onnx"),
+      expect.objectContaining({
+        headers: { Range: "bytes=2-" },
+      }),
+    );
+    expect(progress).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: "encoder-model.int4.onnx",
+          loaded: 2,
+          total: 9,
+          progress: 2 / 9,
+          resumable: true,
+        }),
+      ]),
+    );
+    const committed = [...setup.cacheStorage.caches.entries()].find(
+      ([name]) => !name.endsWith("-staging"),
+    )?.[1];
+    expect(
+      [...(committed?.entries.keys() ?? [])].some((key) =>
+        key.includes("sotto-cache-manifest")
+      ),
+    ).toBe(true);
+  });
+
+  it("restarts a partial file when a Range request returns 200", async () => {
+    let encoderRequests = 0;
+    const progress: number[] = [];
+    const setup = harness({
+      fetch: async (input, init) => {
+        const name = String(input).split("/").at(-1) as keyof typeof TEST_SIZES;
+        const range = new Headers(init?.headers).get("range");
+        if (name === "encoder-model.int4.onnx") {
+          encoderRequests += 1;
+          if (encoderRequests === 1) {
+            return new Response(interruptedBody(2), {
+              headers: {
+                "accept-ranges": "bytes",
+                "content-length": "4",
+              },
+            });
+          }
+          expect(range).toBe("bytes=2-");
+          return new Response(new Uint8Array(4), {
+            status: 200,
+            headers: { "content-length": "4" },
+          });
+        }
+        const size = TEST_SIZES[name];
+        return new Response(new Uint8Array(size), {
+          headers: { "content-length": String(size) },
+        });
+      },
+    });
+
+    await setup.engine.init((event) => {
+      if (
+        event.status === "downloading" &&
+        event.file === "encoder-model.int4.onnx" &&
+        typeof event.loaded === "number"
+      ) {
+        progress.push(event.loaded);
       }
-    },
-  );
+    });
 
-  it("removes an orphaned staging cache before a recreated download", async () => {
-    const setup = harness();
-    const staleName =
-      `sotto-parakeet-${PARAKEET_MODEL_REVISION}-staging-orphan`;
-    setup.cacheStorage.caches.set(staleName, new FakeCache());
+    expect(progress).toContain(2);
+    expect(progress).toContain(4);
+    expect(setup.objectUrls[0]).toBe("blob:test-4-0");
+  });
+
+  it("restarts without Range when the server omits Accept-Ranges", async () => {
+    let encoderRequests = 0;
+    const setup = harness({
+      fetch: async (input, init) => {
+        const name = String(input).split("/").at(-1) as keyof typeof TEST_SIZES;
+        if (name === "encoder-model.int4.onnx") {
+          encoderRequests += 1;
+          if (encoderRequests === 1) {
+            return new Response(interruptedBody(2), {
+              headers: { "content-length": "4" },
+            });
+          }
+          expect(new Headers(init?.headers).get("range")).toBeNull();
+          return new Response(new Uint8Array(4), {
+            headers: { "content-length": "4" },
+          });
+        }
+        const size = TEST_SIZES[name];
+        return new Response(new Uint8Array(size), {
+          headers: { "content-length": String(size) },
+        });
+      },
+    });
 
     await setup.engine.init();
 
-    expect(setup.cacheStorage.caches.has(staleName)).toBe(false);
+    expect(encoderRequests).toBe(2);
+  });
+
+  it("rejects a 206 response with the wrong Content-Range", async () => {
+    let request = 0;
+    const setup = harness({
+      fetch: async (input) => {
+        const name = String(input).split("/").at(-1) as keyof typeof TEST_SIZES;
+        request += 1;
+        if (request === 1) {
+          return new Response(interruptedBody(2), {
+            headers: {
+              "accept-ranges": "bytes",
+              "content-length": "4",
+            },
+          });
+        }
+        return new Response(new Uint8Array(2), {
+          status: 206,
+          headers: {
+            "content-length": "2",
+            "content-range": "bytes 1-2/4",
+          },
+        });
+      },
+    });
+
+    await expect(setup.engine.init()).rejects.toThrow(
+      "invalid Content-Range",
+    );
+    expect(setup.factory).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed partial without committing the model", async () => {
+    let request = 0;
+    const setup = harness({
+      fetch: async () => {
+        request += 1;
+        return new Response(interruptedBody(request === 1 ? 2 : 0), {
+          headers: {
+            "accept-ranges": "bytes",
+            "content-length": String(request === 1 ? 4 : 2),
+            ...(request > 1
+              ? { "content-range": "bytes 2-3/4" }
+              : {}),
+          },
+          status: request > 1 ? 206 : 200,
+        });
+      },
+    });
+    const progress: Array<Record<string, unknown>> = [];
+
+    await expect(
+      setup.engine.init((event) => progress.push({ ...event })),
+    ).rejects.toThrow("connection interrupted");
+
+    expect(setup.fetch).toHaveBeenCalledTimes(3);
+    expect(
+      [...setup.cacheStorage.caches.keys()].some((name) =>
+        name.endsWith("-staging")
+      ),
+    ).toBe(true);
+    for (const [name, cache] of setup.cacheStorage.caches) {
+      if (name.endsWith("-staging")) continue;
+      expect(
+        [...cache.entries.keys()].some((key) =>
+          key.includes("sotto-cache-manifest")
+        ),
+      ).toBe(false);
+    }
+    expect(progress.at(-1)).toEqual(
+      expect.objectContaining({ loaded: 2, resumable: true }),
+    );
+
+    const resumed = harness({
+      cacheStorage: setup.cacheStorage,
+      fetch: async (input, init) => {
+        const name = String(input).split("/").at(-1) as keyof typeof TEST_SIZES;
+        const range = new Headers(init?.headers).get("range");
+        const offset = Number(/^bytes=(\d+)-$/.exec(range ?? "")?.[1] ?? 0);
+        const size = TEST_SIZES[name];
+        return new Response(new Uint8Array(size - offset), {
+          status: offset > 0 ? 206 : 200,
+          headers: {
+            "accept-ranges": "bytes",
+            "content-length": String(size - offset),
+            ...(offset > 0
+              ? { "content-range": `bytes ${offset}-${size - 1}/${size}` }
+              : {}),
+          },
+        });
+      },
+    });
+    await resumed.engine.init();
+
+    expect(
+      new Headers(resumed.fetch.mock.calls[0]?.[1]?.headers).get("range"),
+    ).toBe("bytes=2-");
+    const committed = [...setup.cacheStorage.caches.entries()].find(
+      ([name]) => !name.endsWith("-staging"),
+    )?.[1];
+    expect(
+      [...(committed?.entries.keys() ?? [])].some((key) =>
+        key.includes("sotto-cache-manifest")
+      ),
+    ).toBe(true);
+  });
+
+  it("sweeps a partial after seven days", async () => {
+    const cacheStorage = new FakeCacheStorage();
+    let firstRequest = true;
+    const interrupted = harness({
+      cacheStorage,
+      now: () => 1_000,
+      fetch: async () => {
+        const body = interruptedBody(firstRequest ? 2 : 0);
+        const response = new Response(body, {
+          headers: {
+            "accept-ranges": "bytes",
+            "content-length": firstRequest ? "4" : "2",
+            ...(firstRequest
+              ? {}
+              : { "content-range": "bytes 2-3/4" }),
+          },
+          status: firstRequest ? 200 : 206,
+        });
+        firstRequest = false;
+        return response;
+      },
+    });
+    await expect(interrupted.engine.init()).rejects.toThrow(
+      "connection interrupted",
+    );
+    const resumed = harness({
+      cacheStorage,
+      now: () => 1_000 + 8 * 24 * 60 * 60 * 1_000,
+    });
+
+    await resumed.engine.init();
+
+    expect(
+      new Headers(resumed.fetch.mock.calls[0]?.[1]?.headers).get("range"),
+    ).toBeNull();
+  });
+
+  it("retries a network failure three times with exponential backoff", async () => {
+    let request = 0;
+    const setup = harness({
+      fetch: async (input) => {
+        request += 1;
+        if (request < 3) throw new TypeError("network unavailable");
+        const name = String(input).split("/").at(-1) as keyof typeof TEST_SIZES;
+        const size = TEST_SIZES[name];
+        return new Response(new Uint8Array(size), {
+          headers: {
+            "accept-ranges": "bytes",
+            "content-length": String(size),
+          },
+        });
+      },
+    });
+
+    await setup.engine.init();
+
+    expect(setup.fetch).toHaveBeenCalledTimes(5);
+    expect(setup.sleep).toHaveBeenNthCalledWith(1, 500);
+    expect(setup.sleep).toHaveBeenNthCalledWith(2, 1_000);
   });
 
   it("reloads cheaply from validated CacheStorage without fetching again", async () => {
