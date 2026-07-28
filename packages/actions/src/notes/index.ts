@@ -1,0 +1,203 @@
+import { defineAction } from "@sotto/core";
+import type { JsonSchema } from "@sotto/core";
+import {
+  MAX_NOTE_BODY_LENGTH,
+  MAX_REMINDER_DELAY_MINUTES,
+  MAX_REMINDER_TEXT_LENGTH,
+  MIN_REMINDER_DELAY_MINUTES,
+  notesReminderStore,
+} from "./storage.js";
+
+export type NotesCommand =
+  | {
+      readonly action: "notes";
+      readonly operation: "create";
+      readonly body: string;
+    }
+  | {
+      readonly action: "notes";
+      readonly operation: "list";
+    }
+  | {
+      readonly action: "notes";
+      readonly operation: "remind";
+      readonly text: string;
+      readonly delayMinutes: number;
+    };
+
+export const notesSchema = {
+  oneOf: [
+    {
+      type: "object",
+      properties: {
+        action: { const: "notes" },
+        operation: { const: "create" },
+        body: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_NOTE_BODY_LENGTH,
+          description: "The note text copied only from the transcript",
+        },
+      },
+      required: ["action", "operation", "body"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        action: { const: "notes" },
+        operation: { const: "list" },
+      },
+      required: ["action", "operation"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        action: { const: "notes" },
+        operation: { const: "remind" },
+        text: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_REMINDER_TEXT_LENGTH,
+          description: "The reminder text copied only from the transcript",
+        },
+        delayMinutes: {
+          type: "number",
+          minimum: MIN_REMINDER_DELAY_MINUTES,
+          maximum: MAX_REMINDER_DELAY_MINUTES,
+          description: "Bounded delay in minutes parsed from the transcript",
+        },
+      },
+      required: ["action", "operation", "text", "delayMinutes"],
+      additionalProperties: false,
+    },
+  ],
+} as const satisfies JsonSchema;
+
+const notesAction = defineAction<NotesCommand>({
+  id: "notes",
+  title: "Notes and reminders",
+  permissions: ["storage", "alarms", "notifications"],
+  schema: notesSchema,
+  examples: [
+    {
+      say: "note that down: check the benchmark",
+      emit: {
+        action: "notes",
+        operation: "create",
+        body: "Check the benchmark",
+      },
+    },
+    {
+      say: "make a note to compare local speech models",
+      emit: {
+        action: "notes",
+        operation: "create",
+        body: "Compare local speech models",
+      },
+    },
+    {
+      say: "show my notes",
+      emit: { action: "notes", operation: "list" },
+    },
+    {
+      say: "remind me to stretch in thirty seconds",
+      emit: {
+        action: "notes",
+        operation: "remind",
+        text: "Stretch",
+        delayMinutes: 0.5,
+      },
+    },
+    {
+      say: "remind me to check the oven in ten minutes",
+      emit: {
+        action: "notes",
+        operation: "remind",
+        text: "Check the oven",
+        delayMinutes: 10,
+      },
+    },
+    {
+      say: "remind me in twenty minutes to check the build",
+      emit: {
+        action: "notes",
+        operation: "remind",
+        text: "Check the build",
+        delayMinutes: 20,
+      },
+    },
+  ],
+  confirm: false,
+  async execute(command) {
+    switch (command.operation) {
+      case "create": {
+        const note = await notesReminderStore.createNote({
+          body: command.body,
+        });
+        return {
+          spoken: "Saved your note.",
+          data: {
+            note: {
+              id: note.id,
+              body: note.body,
+              createdAt: note.createdAt,
+              updatedAt: note.updatedAt,
+            },
+          },
+        };
+      }
+      case "list": {
+        const notes = await notesReminderStore.listNotes();
+        return {
+          spoken:
+            notes.length === 0
+              ? "You don't have any notes."
+              : `You have ${notes.length} ${notes.length === 1 ? "note" : "notes"}.`,
+          data: {
+            notes: notes.map((note) => ({
+              id: note.id,
+              body: note.body,
+              createdAt: note.createdAt,
+              updatedAt: note.updatedAt,
+              ...(note.source ? { source: { ...note.source } } : {}),
+            })),
+          },
+        };
+      }
+      case "remind": {
+        const [activeTab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        const reminder = await notesReminderStore.scheduleReminder({
+          text: command.text,
+          delayMinutes: command.delayMinutes,
+          ...(activeTab?.id === undefined
+            ? {}
+            : { sourceTabId: activeTab.id }),
+          ...(activeTab?.windowId === undefined
+            ? {}
+            : { sourceWindowId: activeTab.windowId }),
+        });
+        return {
+          spoken: "Set your reminder.",
+          data: {
+            reminder: {
+              id: reminder.id,
+              text: reminder.text,
+              dueAt: reminder.dueAt,
+              status: reminder.status,
+              alarmName: reminder.alarmName,
+            },
+          },
+        };
+      }
+    }
+  },
+});
+
+export default notesAction;
+export * from "./markdown.js";
+export * from "./storage.js";

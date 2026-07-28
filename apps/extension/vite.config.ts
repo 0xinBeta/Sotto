@@ -82,6 +82,60 @@ function placeholderIcons(): Plugin {
   };
 }
 
+function inlineExtractPageRuntime(): Plugin {
+  return {
+    name: "sotto-inline-extractor-runtime",
+    enforce: "post",
+    generateBundle(_options, bundle) {
+      const extractor = bundle["extractPage.js"];
+      if (!extractor || extractor.type !== "chunk") {
+        throw new Error("The extractPage content-script chunk was not emitted");
+      }
+      const importPattern =
+        /^import\{t as ([A-Za-z_$][\w$]*)\}from["'][^"']*rolldown-runtime[^"']*["'];/;
+      const match = importPattern.exec(extractor.code);
+      if (!match?.[1]) {
+        throw new Error(
+          "The extractPage bundle is not self-contained in the expected form",
+        );
+      }
+
+      const localName = match[1];
+      const commonJsFactory =
+        `var ${localName}=(factory,module)=>()=>` +
+        `(module||(factory((module={exports:{}}).exports,module),` +
+        `factory=null),module.exports);`;
+      extractor.code = extractor.code.replace(
+        importPattern,
+        commonJsFactory,
+      );
+      extractor.imports.splice(
+        0,
+        extractor.imports.length,
+        ...extractor.imports.filter(
+          (fileName) => !fileName.includes("rolldown-runtime"),
+        ),
+      );
+
+      if (/^\s*(?:import|export)\b/m.test(extractor.code)) {
+        throw new Error(
+          "The extractPage content script still contains module syntax",
+        );
+      }
+      const typeBridge = bundle["typeBridge.js"];
+      if (
+        !typeBridge ||
+        typeBridge.type !== "chunk" ||
+        /^\s*(?:import|export)\b/m.test(typeBridge.code)
+      ) {
+        throw new Error(
+          "The typeBridge content script must be a self-contained script",
+        );
+      }
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     viteStaticCopy({
@@ -114,6 +168,7 @@ export default defineConfig({
       ],
     }),
     placeholderIcons(),
+    inlineExtractPageRuntime(),
   ],
   build: {
     outDir: "dist",
@@ -121,9 +176,11 @@ export default defineConfig({
     rolldownOptions: {
       input: {
         background: resolve(extensionRoot, "src/background.ts"),
+        extractPage: resolve(extensionRoot, "src/extract-page.ts"),
         sidepanel: resolve(extensionRoot, "sidepanel.html"),
         offscreen: resolve(extensionRoot, "offscreen.html"),
         requestMic: resolve(extensionRoot, "request-mic.html"),
+        typeBridge: resolve(extensionRoot, "src/type-bridge.ts"),
       },
       output: {
         entryFileNames: "[name].js",

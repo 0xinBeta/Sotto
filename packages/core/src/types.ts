@@ -98,6 +98,79 @@ export interface ActionResult {
   readonly spoken: string;
   readonly workflow?: ClientWorkflow;
   readonly data?: Readonly<Record<string, JsonValue>>;
+  /**
+   * Untrusted page-derived text has exactly two sinks: inert panel text and
+   * local TTS. The worker handles this presentation before the generic
+   * responder path so it can never become parser input or action data.
+   */
+  readonly pageText?: {
+    readonly text: string;
+    readonly title?: string;
+    readonly speech: "short" | "long";
+  };
+}
+
+export interface ExtractedPageText {
+  readonly text: string;
+  readonly title: string;
+  readonly url: string;
+  readonly language?: string;
+  readonly source:
+    | "selection"
+    | "readability"
+    | "article"
+    | "main"
+    | "body";
+  readonly truncated: boolean;
+}
+
+export type PageModelTask =
+  | {
+      readonly role: "summarize";
+      readonly page: ExtractedPageText;
+    }
+  | {
+      readonly role: "ask-page";
+      readonly page: ExtractedPageText;
+      readonly question: string;
+    };
+
+export interface PageActionServices {
+  extract(options: {
+    readonly preferSelection: boolean;
+    readonly requireSelection?: boolean;
+  }): Promise<ExtractedPageText>;
+  runModelTask(task: PageModelTask): Promise<string>;
+}
+
+export interface EditableActionServices {
+  capture(options: {
+    readonly requireSelection: boolean;
+    readonly allowLastDictated: boolean;
+  }): Promise<{
+    readonly snapshotId: string;
+    readonly selectedText: string;
+    readonly source: "caret" | "selection" | "last-dictated";
+  }>;
+  rewrite(options: {
+    readonly source: string;
+    readonly transformation:
+      | "more-formal"
+      | "more-casual"
+      | "clearer"
+      | "fix-grammar"
+      | "shorter"
+      | "longer"
+      | "friendlier"
+      | "bullets";
+  }): Promise<string>;
+  commit(options: {
+    readonly snapshotId: string;
+    readonly text: string;
+    readonly inputType: "insertText" | "insertReplacementText";
+  }): Promise<{
+    readonly kind: "input" | "textarea" | "contenteditable";
+  }>;
 }
 
 export interface ActionContext {
@@ -109,6 +182,10 @@ export interface ActionContext {
     destinationId: string,
     input: DestinationInput,
   ) => Promise<ActionResult>;
+  /** Worker-owned bridge to isolated extraction and offscreen page models. */
+  readonly page?: PageActionServices;
+  /** Worker-owned bridge to the captured editable range. */
+  readonly type?: EditableActionServices;
 }
 
 export interface DestinationContext {

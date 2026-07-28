@@ -52,7 +52,7 @@
 
       <section class="progress-stack" aria-label="Model setup">
         <div class="progress-card" id="nano-progress-card" hidden>
-          <div class="progress-copy"><span>Gemini Nano</span><output id="nano-progress-value">0%</output></div>
+          <div class="progress-copy"><span id="nano-progress-label">Gemini Nano</span><output id="nano-progress-value">0%</output></div>
           <progress id="nano-progress" max="1" value="0"></progress>
         </div>
         <div class="progress-card" id="stt-progress-card" hidden>
@@ -96,6 +96,26 @@
           <p id="clipboard-copy">Copy the PNG to continue.</p>
         </div>
         <button class="button primary" id="copy-screenshot" type="button">Copy &amp; continue</button>
+      </section>
+
+      <section class="page-text-card" id="page-text-card" hidden aria-live="polite">
+        <div class="section-heading">
+          <p class="section-index" id="page-text-title">PAGE</p>
+          <button class="link-button" id="close-page-text" type="button">Close</button>
+        </div>
+        <p class="page-text-output" id="page-text-output"></p>
+        <progress id="reading-progress" max="1" value="0" hidden></progress>
+      </section>
+
+      <section class="notes-panel" id="notes-panel">
+        <div class="section-heading">
+          <p class="section-index">03 / NOTES</p>
+          <button class="link-button" id="export-notes" type="button">Export .md</button>
+        </div>
+        <p class="reminder-banner" id="reminder-banner" hidden></p>
+        <ul class="notes-list" id="notes-list">
+          <li class="empty-notes">No notes yet.</li>
+        </ul>
       </section>
 
       <section class="log-panel">

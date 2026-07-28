@@ -9,6 +9,34 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./summarize": {
+      "types": "./dist/summarize/index.d.ts",
+      "import": "./dist/summarize/index.js"
+    },
+    "./summarize/extract": {
+      "types": "./dist/summarize/extract.d.ts",
+      "import": "./dist/summarize/extract.js"
+    },
+    "./type": {
+      "types": "./dist/type/index.d.ts",
+      "import": "./dist/type/index.js"
+    },
+    "./type/bridge": {
+      "types": "./dist/type/bridge.d.ts",
+      "import": "./dist/type/bridge.js"
+    },
+    "./notes": {
+      "types": "./dist/notes/index.d.ts",
+      "import": "./dist/notes/index.js"
+    },
+    "./notes/storage": {
+      "types": "./dist/notes/storage.d.ts",
+      "import": "./dist/notes/storage.js"
+    },
+    "./notes/markdown": {
+      "types": "./dist/notes/markdown.d.ts",
+      "import": "./dist/notes/markdown.js"
     }
   },
   "files": [
@@ -19,6 +47,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@mozilla/readability": "0.6.0",
     "@sotto/core": "workspace:*"
   },
   "devDependencies": {

@@ -140,9 +140,18 @@ const elementIds = [
   "nano-progress-card",
   "nano-progress",
   "nano-progress-value",
+  "nano-progress-label",
   "stt-progress-card",
   "stt-progress",
   "stt-progress-value",
+  "page-text-card",
+  "page-text-title",
+  "page-text-output",
+  "close-page-text",
+  "reading-progress",
+  "notes-list",
+  "export-notes",
+  "reminder-banner",
 ] as const;
 
 const workflow = {
@@ -247,6 +256,36 @@ afterEach(() => {
 });
 
 describe("side-panel screenshot clipboard fallback", () => {
+  it("renders page-model and note text as inert textContent", async () => {
+    const { elements, onMessage } = await installSidepanel();
+    const untrusted = '<img src=x onerror="chrome.runtime.sendMessage(1)">';
+
+    onMessage({
+      target: "sidepanel",
+      type: "page-text",
+      title: "Answer",
+      text: untrusted,
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "notes-updated",
+      notes: [
+        {
+          id: "note-1",
+          body: untrusted,
+          createdAt: "2026-07-28T12:00:00.000Z",
+          updatedAt: "2026-07-28T12:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(elements["page-text-output"].textContent).toBe(untrusted);
+    expect(elements["page-text-card"].hidden).toBe(false);
+    expect(elements["notes-list"].firstElementChild?.textContent).toContain(
+      untrusted,
+    );
+  });
+
   it("automatically writes on receipt without showing the copy card", async () => {
     clipboard.perform.mockResolvedValue(completion);
     const { elements, onMessage, sendMessage } = await installSidepanel();

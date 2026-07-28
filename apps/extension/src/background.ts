@@ -1,4 +1,12 @@
 import actions from "@sotto/actions";
+import { createNotesMarkdownExport } from "@sotto/actions/notes/markdown";
+import {
+  isReminderRecord,
+  notesReminderStore,
+  restrictNotesStorageAccess,
+  type NoteRecord,
+  type ReminderRecord,
+} from "@sotto/actions/notes/storage";
 import {
   ActionRegistry,
   CommandRouter,
@@ -8,6 +16,10 @@ import {
   type ActionResult,
   type ClipboardWorkflow,
   type DestinationFollowUp,
+  type EditableActionServices,
+  type ExtractedPageText,
+  type PageActionServices,
+  type PageModelTask,
 } from "@sotto/core";
 import destinations, {
   executeDestinationFollowUp,
@@ -123,9 +135,433 @@ function runAndReport(
   );
 }
 
+function panelNote(note: NoteRecord): Record<string, unknown> {
+  return {
+    id: note.id,
+    body: note.body,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+    ...(note.source === undefined
+      ? {}
+      : { source: { title: note.source.title, url: note.source.url } }),
+  };
+}
+
+async function publishNotes(): Promise<readonly NoteRecord[]> {
+  const notes = await notesReminderStore.listNotes();
+  await sendPanel({
+    type: "notes-updated",
+    notes: notes.map(panelNote),
+  });
+  return notes;
+}
+
+async function deliverReminder(reminder: ReminderRecord): Promise<void> {
+  const notificationId = `reminder:${reminder.id}`;
+  const permission = await chrome.notifications.getPermissionLevel();
+  if (permission === "granted") {
+    await chrome.notifications.create(notificationId, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+      title: "Sotto reminder",
+      message: reminder.text,
+      eventTime: Date.parse(reminder.dueAt),
+    });
+  }
+  await sendPanel({
+    type: "reminder-fired",
+    reminder: {
+      id: reminder.id,
+      text: reminder.text,
+      dueAt: reminder.dueAt,
+      notificationPermission: permission,
+    },
+  });
+  void tts
+    .speak(`Reminder: ${reminder.text}`, { lang: "en-US" })
+    .catch((error: unknown) =>
+      reportBackgroundFailure("Sotto could not speak the reminder", error),
+    );
+}
+
+async function reconcileReminders(): Promise<void> {
+  await notesReminderStore.reconcileReminders({
+    onDue: deliverReminder,
+  });
+}
+
+async function loadReminder(
+  notificationId: string,
+): Promise<ReminderRecord | undefined> {
+  const values = await chrome.storage.local.get([
+    "schemaVersion",
+    notificationId,
+  ]);
+  const value = values[notificationId];
+  return isReminderRecord(value) ? value : undefined;
+}
+
 function safeTranscript(value: unknown): string {
   return typeof value === "string" ? value.trim().slice(0, 2_000) : "";
 }
+
+const PAGE_SOURCES = new Set<ExtractedPageText["source"]>([
+  "selection",
+  "readability",
+  "article",
+  "main",
+  "body",
+]);
+
+function parseExtractedPage(value: unknown): ExtractedPageText {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("The page extractor returned invalid data");
+  }
+  const candidate = value as {
+    text?: unknown;
+    title?: unknown;
+    url?: unknown;
+    language?: unknown;
+    source?: unknown;
+    truncated?: unknown;
+  };
+  if (
+    typeof candidate.text !== "string" ||
+    !candidate.text.trim() ||
+    candidate.text.length > 120_000 ||
+    typeof candidate.title !== "string" ||
+    candidate.title.length > 500 ||
+    typeof candidate.url !== "string" ||
+    candidate.url.length > 4_000 ||
+    typeof candidate.source !== "string" ||
+    !PAGE_SOURCES.has(candidate.source as ExtractedPageText["source"]) ||
+    typeof candidate.truncated !== "boolean" ||
+    (candidate.language !== undefined &&
+      (typeof candidate.language !== "string" ||
+        candidate.language.length > 35))
+  ) {
+    throw new TypeError("The page extractor exceeded its data contract");
+  }
+  return {
+    text: candidate.text,
+    title: candidate.title,
+    url: candidate.url,
+    source: candidate.source as ExtractedPageText["source"],
+    truncated: candidate.truncated,
+    ...(typeof candidate.language === "string"
+      ? { language: candidate.language }
+      : {}),
+  };
+}
+
+async function extractActivePage(
+  options: Parameters<PageActionServices["extract"]>[0],
+): Promise<ExtractedPageText> {
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (activeTab?.id === undefined) {
+    throw new Error("No active tab is available to read");
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: activeTab.id, frameIds: [0] },
+      files: ["extractPage.js"],
+      world: "ISOLATED",
+    });
+    const raw = (await chrome.tabs.sendMessage(
+      activeTab.id,
+      {
+        target: "sotto-page-extractor",
+        options,
+      },
+      { frameId: 0 },
+    )) as
+      | {
+          readonly ok?: unknown;
+          readonly value?: unknown;
+          readonly error?: unknown;
+        }
+      | undefined;
+    if (raw?.ok !== true) {
+      throw new Error(
+        typeof raw?.error === "string"
+          ? raw.error
+          : "Sotto could not find readable text on this page.",
+      );
+    }
+    return parseExtractedPage(raw.value);
+  } catch (error) {
+    const detail = errorMessage(error);
+    if (
+      detail.startsWith("Select some text") ||
+      detail.startsWith("Sotto could not find readable text")
+    ) {
+      throw error;
+    }
+    throw new Error("Sotto cannot read this page.");
+  }
+}
+
+async function runPageModelTask(task: PageModelTask): Promise<string> {
+  const value = await sendOffscreen({
+    type: "page-task",
+    task: {
+      role: task.role,
+      pageText: task.page.text,
+      ...(task.page.language === undefined
+        ? {}
+        : { language: task.page.language }),
+      ...(task.role === "ask-page" ? { question: task.question } : {}),
+    },
+  });
+  if (
+    typeof value !== "string" ||
+    !value.trim() ||
+    value.length > 24_000
+  ) {
+    throw new Error("The on-device page model returned invalid text");
+  }
+  return value;
+}
+
+const pageActionServices: PageActionServices = {
+  extract: extractActivePage,
+  runModelTask: runPageModelTask,
+};
+
+interface EditorBridgeLocation {
+  readonly tabId: number;
+  readonly frameId: number;
+  readonly documentId?: string;
+  readonly bridgeSnapshotId: string;
+}
+
+const editorSnapshots = new Map<string, EditorBridgeLocation>();
+const rewriteOutputs = new Set<string>();
+
+function bridgeMessageOptions(
+  location: Pick<EditorBridgeLocation, "frameId" | "documentId">,
+): { readonly frameId: number; readonly documentId?: string } {
+  return {
+    frameId: location.frameId,
+    ...(location.documentId === undefined
+      ? {}
+      : { documentId: location.documentId }),
+  };
+}
+
+function parseEditorCapture(value: unknown): {
+  readonly snapshotId: string;
+  readonly selectedText: string;
+  readonly source: "caret" | "selection" | "last-dictated";
+} {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("The editor bridge returned invalid capture data");
+  }
+  const capture = value as {
+    snapshotId?: unknown;
+    selectedText?: unknown;
+    source?: unknown;
+  };
+  if (
+    typeof capture.snapshotId !== "string" ||
+    typeof capture.selectedText !== "string" ||
+    capture.selectedText.length > 24_000 ||
+    (capture.source !== "caret" &&
+      capture.source !== "selection" &&
+      capture.source !== "last-dictated")
+  ) {
+    throw new TypeError("The editor capture exceeded its data contract");
+  }
+  return {
+    snapshotId: capture.snapshotId,
+    selectedText: capture.selectedText,
+    source: capture.source,
+  };
+}
+
+async function captureEditable(
+  options: Parameters<EditableActionServices["capture"]>[0],
+): ReturnType<EditableActionServices["capture"]> {
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (activeTab?.id === undefined) {
+    throw new Error("No active tab has a focused editor");
+  }
+
+  let frames: chrome.scripting.InjectionResult<unknown>[];
+  try {
+    frames = await chrome.scripting.executeScript({
+      target: { tabId: activeTab.id, allFrames: true },
+      files: ["typeBridge.js"],
+      world: "ISOLATED",
+    });
+  } catch {
+    throw new Error("The focused editor is in an inaccessible frame.");
+  }
+
+  const captures: Array<{
+    readonly capture: ReturnType<typeof parseEditorCapture>;
+    readonly location: Omit<EditorBridgeLocation, "bridgeSnapshotId">;
+  }> = [];
+  const errors: string[] = [];
+  for (const frame of frames) {
+    try {
+      const raw = (await chrome.tabs.sendMessage(
+        activeTab.id,
+        {
+          target: "sotto-type-bridge",
+          type: "capture",
+          options,
+        },
+        bridgeMessageOptions({
+          frameId: frame.frameId,
+          ...(frame.documentId === undefined
+            ? {}
+            : { documentId: frame.documentId }),
+        }),
+      )) as
+        | {
+            readonly ok?: unknown;
+            readonly value?: unknown;
+            readonly error?: {
+              readonly code?: unknown;
+              readonly message?: unknown;
+            };
+          }
+        | undefined;
+      if (raw?.ok !== true) {
+        if (typeof raw?.error?.message === "string") {
+          errors.push(raw.error.message);
+        }
+        continue;
+      }
+      captures.push({
+        capture: parseEditorCapture(raw.value),
+        location: {
+          tabId: activeTab.id,
+          frameId: frame.frameId,
+          ...(frame.documentId === undefined
+            ? {}
+            : { documentId: frame.documentId }),
+        },
+      });
+    } catch (error) {
+      errors.push(errorMessage(error));
+    }
+  }
+
+  if (captures.length !== 1) {
+    const selectionError = errors.find((message) =>
+      message.startsWith("Select text"),
+    );
+    throw new Error(
+      selectionError ??
+        (captures.length > 1
+          ? "Sotto found more than one focused editor and refused to guess."
+          : "The focused editor is inaccessible or too complex to edit safely."),
+    );
+  }
+
+  const selected = captures[0]!;
+  const snapshotId = crypto.randomUUID();
+  editorSnapshots.clear();
+  editorSnapshots.set(snapshotId, {
+    ...selected.location,
+    bridgeSnapshotId: selected.capture.snapshotId,
+  });
+  return {
+    snapshotId,
+    selectedText: selected.capture.selectedText,
+    source: selected.capture.source,
+  };
+}
+
+async function commitEditable(
+  options: Parameters<EditableActionServices["commit"]>[0],
+): ReturnType<EditableActionServices["commit"]> {
+  const location = editorSnapshots.get(options.snapshotId);
+  editorSnapshots.delete(options.snapshotId);
+  const isRewriteOutput = rewriteOutputs.delete(options.text);
+  if (!location) throw new Error("The editor snapshot is no longer valid.");
+
+  try {
+    const raw = (await chrome.tabs.sendMessage(
+      location.tabId,
+      {
+        target: "sotto-type-bridge",
+        type: "commit",
+        snapshotId: location.bridgeSnapshotId,
+        text: options.text,
+        inputType: options.inputType,
+      },
+      bridgeMessageOptions(location),
+    )) as
+      | {
+          readonly ok?: unknown;
+          readonly value?: unknown;
+          readonly error?: { readonly message?: unknown };
+        }
+      | undefined;
+    if (raw?.ok !== true) {
+      throw new Error(
+        typeof raw?.error?.message === "string"
+          ? raw.error.message
+          : "The editor rejected the text change.",
+      );
+    }
+    const kind = (raw.value as { kind?: unknown } | undefined)?.kind;
+    if (
+      kind !== "input" &&
+      kind !== "textarea" &&
+      kind !== "contenteditable"
+    ) {
+      throw new TypeError("The editor bridge returned an invalid commit");
+    }
+    return { kind };
+  } catch (error) {
+    if (isRewriteOutput) {
+      await sendPanel({
+        type: "rewrite-fallback",
+        text: options.text,
+      });
+    }
+    throw error;
+  }
+}
+
+async function rewriteEditable(
+  options: Parameters<EditableActionServices["rewrite"]>[0],
+): ReturnType<EditableActionServices["rewrite"]> {
+  if (!options.source.trim() || options.source.length > 24_000) {
+    throw new TypeError("Rewrite source is empty or exceeds the edit bound");
+  }
+  const value = await sendOffscreen({
+    type: "rewrite-task",
+    sourceText: options.source,
+    transformation: options.transformation,
+  });
+  if (
+    typeof value !== "string" ||
+    !value.trim() ||
+    value.length > 24_000
+  ) {
+    throw new Error("The on-device rewrite model returned invalid text");
+  }
+  rewriteOutputs.add(value);
+  return value;
+}
+
+const editableActionServices: EditableActionServices = {
+  capture: captureEditable,
+  commit: commitEditable,
+  rewrite: rewriteEditable,
+};
 
 function isAllowedFollowUp(value: unknown): value is DestinationFollowUp {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -269,6 +705,47 @@ async function publishActionResult(
   command: ActionCommand,
   result: ActionResult,
 ): Promise<void> {
+  if (command.action === "notes") {
+    await publishNotes();
+  }
+  if (result.pageText) {
+    const { text, title, speech } = result.pageText;
+    if (
+      typeof text !== "string" ||
+      !text.trim() ||
+      text.length > 120_000 ||
+      (title !== undefined &&
+        (typeof title !== "string" || title.length > 600))
+    ) {
+      throw new TypeError("Rejected invalid page-derived presentation text");
+    }
+    await sendPanel({
+      type: "page-text",
+      text,
+      ...(title === undefined ? {} : { title }),
+    });
+    await sendPanel({ type: "earcon", kind: "complete" });
+    await sendPanel({
+      type: "action-log",
+      heard: transcript,
+      did: result.spoken,
+    });
+    if (speech === "long") {
+      await tts.speakLong(text, {
+        lang: "en-US",
+        onProgress(progress) {
+          void sendPanel({
+            type: "reading-progress",
+            current: progress.charIndex,
+            total: progress.totalChars,
+          });
+        },
+      });
+    } else {
+      await tts.speak(text, { lang: "en-US" });
+    }
+    return;
+  }
   if (result.workflow?.kind === "screenshot-permission") {
     await sendPanel({
       type: "screenshot-permission-needed",
@@ -307,13 +784,24 @@ async function executeCommand(
     const result = await commandRouter.route(validated, {
       dispatchDestination: (id, input) =>
         destinationRegistry.dispatch(id, input),
+      page: pageActionServices,
+      type: editableActionServices,
     });
     await publishActionResult(transcript, validated, result);
     return result;
   } catch (error) {
     const rejected = error instanceof CommandValidationError;
+    const actionId =
+      typeof command === "object" &&
+      command !== null &&
+      !Array.isArray(command) &&
+      typeof (command as { action?: unknown }).action === "string"
+        ? (command as { action: string }).action
+        : "";
     const spoken = rejected
       ? "Sorry, say that again?"
+      : actionId === "type"
+        ? "I couldn't safely type in that editor."
       : "That action could not be completed.";
     const detail = error instanceof Error ? error.message : String(error);
     console.warn("Sotto command failed", error);
@@ -342,18 +830,28 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
   switch (message.type) {
     case "get-status":
       return sendOffscreen({ type: "get-status" });
+    case "get-notes":
+      return (await publishNotes()).map(panelNote);
+    case "export-notes":
+      return createNotesMarkdownExport(
+        await notesReminderStore.listNotes(),
+      );
     case "start-listening":
+      tts.stop();
       return sendOffscreen({ type: "start-listening" });
     case "stop-listening":
       return sendOffscreen({ type: "stop-listening" });
     case "toggle-listening":
+      tts.stop();
       return sendOffscreen({ type: "toggle-listening" });
     case "text-command": {
+      tts.stop();
       const text = safeTranscript(message.text);
       if (!text) throw new TypeError("A non-empty text command is required");
       return sendOffscreen({ type: "parse-transcript", transcript: text });
     }
     case "execute-command": {
+      tts.stop();
       const transcript = safeTranscript(message.transcript);
       return executeCommand(message.command, transcript);
     }
@@ -419,6 +917,7 @@ chrome.runtime.onMessage.addListener(
 
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command !== "toggle-sotto") return;
+  tts.stop();
   let panelOpening: Promise<void> = Promise.resolve();
   if (tab?.id !== undefined) {
     panelOpening = chrome.sidePanel.open({ tabId: tab.id });
@@ -443,4 +942,69 @@ chrome.runtime.onInstalled.addListener(() => {
     }),
     "Sotto could not configure its side panel",
   );
+  runAndReport(
+    restrictNotesStorageAccess().then(reconcileReminders),
+    "Sotto could not initialize notes and reminders",
+  );
 });
+
+chrome.runtime.onStartup?.addListener(() => {
+  runAndReport(
+    restrictNotesStorageAccess().then(reconcileReminders),
+    "Sotto could not reconcile reminders",
+  );
+});
+
+chrome.alarms?.onAlarm?.addListener((alarm) => {
+  runAndReport(
+    notesReminderStore.handleReminderAlarm(alarm.name, {
+      onDue: deliverReminder,
+    }),
+    "Sotto could not deliver a reminder",
+  );
+});
+
+chrome.notifications?.onClicked?.addListener((notificationId) => {
+  if (!notificationId.startsWith("reminder:")) return;
+
+  // The open call is initiated in the notification click's first synchronous
+  // turn so Chrome can preserve the user gesture.
+  const panelOpening = chrome.sidePanel.open({
+    windowId: chrome.windows.WINDOW_ID_CURRENT,
+  });
+  runAndReport(
+    (async () => {
+      await panelOpening;
+      const reminder = await loadReminder(notificationId);
+      if (reminder?.sourceWindowId !== undefined) {
+        await chrome.windows.update(reminder.sourceWindowId, {
+          focused: true,
+        });
+      }
+      if (reminder?.sourceTabId !== undefined) {
+        await chrome.tabs
+          .update(reminder.sourceTabId, { active: true })
+          .catch(() => undefined);
+      }
+      await chrome.notifications.clear(notificationId);
+      if (reminder) {
+        await sendPanel({
+          type: "reminder-opened",
+          reminder: {
+            id: reminder.id,
+            text: reminder.text,
+            dueAt: reminder.dueAt,
+          },
+        });
+      }
+    })(),
+    "Sotto could not open the reminder",
+  );
+});
+
+if (chrome.storage?.local && chrome.alarms && chrome.notifications) {
+  runAndReport(
+    restrictNotesStorageAccess().then(reconcileReminders),
+    "Sotto could not restore reminders",
+  );
+}

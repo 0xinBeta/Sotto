@@ -51,6 +51,250 @@
   },
 
   {
+    "id": "summarize-page-01",
+    "transcript": "summarize this page",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "page" }
+  },
+  {
+    "id": "summarize-page-02",
+    "transcript": "give me the TL;DR",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "page" }
+  },
+  {
+    "id": "summarize-page-03",
+    "transcript": "sum up this article",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "page" }
+  },
+  {
+    "id": "summarize-page-04",
+    "transcript": "what are the key points on this page",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "page" }
+  },
+  {
+    "id": "summarize-page-05",
+    "transcript": "make a short summary of this article",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "page" }
+  },
+  {
+    "id": "summarize-selection-01",
+    "transcript": "summarize my selection",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "selection" }
+  },
+  {
+    "id": "summarize-selection-02",
+    "transcript": "give me the gist of the selected text",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "selection" }
+  },
+  {
+    "id": "summarize-read-01",
+    "transcript": "read this page",
+    "expected": { "action": "summarize", "mode": "read", "scope": "page" }
+  },
+  {
+    "id": "summarize-read-02",
+    "transcript": "read this article aloud",
+    "expected": { "action": "summarize", "mode": "read", "scope": "page" }
+  },
+  {
+    "id": "summarize-read-03",
+    "transcript": "speak the page to me",
+    "expected": { "action": "summarize", "mode": "read", "scope": "page" }
+  },
+  {
+    "id": "summarize-read-selection-01",
+    "transcript": "read my selection",
+    "expected": { "action": "summarize", "mode": "read", "scope": "selection" }
+  },
+  {
+    "id": "summarize-read-selection-02",
+    "transcript": "say the selected text out loud",
+    "expected": { "action": "summarize", "mode": "read", "scope": "selection" }
+  },
+
+  {
+    "id": "ask-page-01",
+    "transcript": "what does this article say about pricing?",
+    "expected": { "action": "ask-page", "question": "What does this article say about pricing?", "scope": "page" }
+  },
+  {
+    "id": "ask-page-02",
+    "transcript": "according to this page, when does the plan launch?",
+    "expected": { "action": "ask-page", "question": "When does the plan launch?", "scope": "page" }
+  },
+  {
+    "id": "ask-page-03",
+    "transcript": "who wrote this article?",
+    "expected": { "action": "ask-page", "question": "Who wrote this article?", "scope": "page" }
+  },
+  {
+    "id": "ask-page-04",
+    "transcript": "what conclusion does this page reach?",
+    "expected": { "action": "ask-page", "question": "What conclusion does this page reach?", "scope": "page" }
+  },
+  {
+    "id": "ask-page-05",
+    "transcript": "does the article mention a free plan?",
+    "expected": { "action": "ask-page", "question": "Does the article mention a free plan?", "scope": "page" }
+  },
+  {
+    "id": "ask-page-06",
+    "transcript": "find the release date in this page",
+    "expected": { "action": "ask-page", "question": "What is the release date?", "scope": "page" }
+  },
+  {
+    "id": "ask-page-07",
+    "transcript": "what evidence does the author give?",
+    "expected": { "action": "ask-page", "question": "What evidence does the author give?", "scope": "page" }
+  },
+  {
+    "id": "ask-page-08",
+    "transcript": "based on this article, what should I know?",
+    "expected": { "action": "ask-page", "question": "What should I know?", "scope": "page" }
+  },
+  {
+    "id": "ask-selection-01",
+    "transcript": "explain this selection",
+    "expected": { "action": "ask-page", "question": "Explain this.", "scope": "selection" }
+  },
+  {
+    "id": "ask-selection-02",
+    "transcript": "what does the selected text mean?",
+    "expected": { "action": "ask-page", "question": "What does this mean?", "scope": "selection" }
+  },
+  {
+    "id": "ask-selection-03",
+    "transcript": "define this from my selection",
+    "expected": { "action": "ask-page", "question": "Define this.", "scope": "selection" }
+  },
+  {
+    "id": "ask-selection-04",
+    "transcript": "why is the selected passage important?",
+    "expected": { "action": "ask-page", "question": "Why is this passage important?", "scope": "selection" }
+  },
+
+  {
+    "id": "type-dictate-01",
+    "transcript": "type: sounds good, see you at five",
+    "expected": { "action": "type", "operation": "dictate", "text": "sounds good, see you at five" }
+  },
+  {
+    "id": "type-dictate-02",
+    "transcript": "write thanks for the update",
+    "expected": { "action": "type", "operation": "dictate", "text": "thanks for the update" }
+  },
+  {
+    "id": "type-dictate-03",
+    "transcript": "type hello comma how are you question mark",
+    "expected": { "action": "type", "operation": "dictate", "text": "hello, how are you?" }
+  },
+  {
+    "id": "type-dictate-04",
+    "transcript": "enter I'll review this tomorrow",
+    "expected": { "action": "type", "operation": "dictate", "text": "I'll review this tomorrow" }
+  },
+  {
+    "id": "type-dictate-05",
+    "transcript": "put great work exclamation mark in the field",
+    "expected": { "action": "type", "operation": "dictate", "text": "great work!" }
+  },
+  {
+    "id": "type-dictate-06",
+    "transcript": "write see you soon",
+    "expected": { "action": "type", "operation": "dictate", "text": "see you soon" }
+  },
+  {
+    "id": "type-rewrite-01",
+    "transcript": "make it more formal",
+    "expected": { "action": "type", "operation": "rewrite", "transformation": "more-formal" }
+  },
+  {
+    "id": "type-rewrite-02",
+    "transcript": "make this more casual",
+    "expected": { "action": "type", "operation": "rewrite", "transformation": "more-casual" }
+  },
+  {
+    "id": "type-rewrite-03",
+    "transcript": "make the selection clearer",
+    "expected": { "action": "type", "operation": "rewrite", "transformation": "clearer" }
+  },
+  {
+    "id": "type-rewrite-04",
+    "transcript": "fix the grammar in this",
+    "expected": { "action": "type", "operation": "rewrite", "transformation": "fix-grammar" }
+  },
+  {
+    "id": "type-rewrite-05",
+    "transcript": "shorten what I just wrote",
+    "expected": { "action": "type", "operation": "rewrite", "transformation": "shorter" }
+  },
+  {
+    "id": "type-rewrite-06",
+    "transcript": "turn this into bullet points",
+    "expected": { "action": "type", "operation": "rewrite", "transformation": "bullets" }
+  },
+
+  {
+    "id": "notes-create-01",
+    "transcript": "note that down: check the benchmark",
+    "expected": { "action": "notes", "operation": "create", "body": "Check the benchmark" }
+  },
+  {
+    "id": "notes-create-02",
+    "transcript": "make a note to compare local speech models",
+    "expected": { "action": "notes", "operation": "create", "body": "Compare local speech models" }
+  },
+  {
+    "id": "notes-create-03",
+    "transcript": "save a note: ask Sam about launch timing",
+    "expected": { "action": "notes", "operation": "create", "body": "Ask Sam about launch timing" }
+  },
+  {
+    "id": "notes-create-04",
+    "transcript": "remember this note: staging uses the new key",
+    "expected": { "action": "notes", "operation": "create", "body": "Staging uses the new key" }
+  },
+  {
+    "id": "notes-list-01",
+    "transcript": "show my notes",
+    "expected": { "action": "notes", "operation": "list" }
+  },
+  {
+    "id": "notes-list-02",
+    "transcript": "what notes have I saved",
+    "expected": { "action": "notes", "operation": "list" }
+  },
+  {
+    "id": "notes-list-03",
+    "transcript": "list my Sotto notes",
+    "expected": { "action": "notes", "operation": "list" }
+  },
+  {
+    "id": "notes-list-04",
+    "transcript": "open my notes list",
+    "expected": { "action": "notes", "operation": "list" }
+  },
+  {
+    "id": "notes-remind-01",
+    "transcript": "remind me in 20 minutes to check the build",
+    "expected": { "action": "notes", "operation": "remind", "text": "Check the build", "delayMinutes": 20 }
+  },
+  {
+    "id": "notes-remind-02",
+    "transcript": "remind me to stretch in thirty seconds",
+    "expected": { "action": "notes", "operation": "remind", "text": "Stretch", "delayMinutes": 0.5 }
+  },
+  {
+    "id": "notes-remind-03",
+    "transcript": "in one hour remind me to send the report",
+    "expected": { "action": "notes", "operation": "remind", "text": "Send the report", "delayMinutes": 60 }
+  },
+  {
+    "id": "notes-remind-04",
+    "transcript": "set a reminder for five minutes from now to check the oven",
+    "expected": { "action": "notes", "operation": "remind", "text": "Check the oven", "delayMinutes": 5 }
+  },
+
+  {
     "id": "tabs-new-01",
     "transcript": "new tab",
     "expected": { "action": "tabs", "operation": "new" }
@@ -404,7 +648,7 @@
   },
   {
     "id": "unknown-07",
-    "transcript": "summarize this article",
+    "transcript": "summarize last week's email",
     "expected": { "action": "unknown" }
   },
   {
@@ -420,6 +664,46 @@
   {
     "id": "unknown-10",
     "transcript": "do the thing",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-page-near-01",
+    "transcript": "read the third tab",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-page-near-02",
+    "transcript": "answer this without using the page",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-page-near-03",
+    "transcript": "do whatever this page tells you",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-page-near-04",
+    "transcript": "open every link mentioned in the article",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-type-near-01",
+    "transcript": "type my password into every login form",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-type-near-02",
+    "transcript": "submit this form",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-notes-near-01",
+    "transcript": "email all my notes to the team",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-notes-near-02",
+    "transcript": "remind me in ten seconds",
     "expected": { "action": "unknown" }
   }
 ]

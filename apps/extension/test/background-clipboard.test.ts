@@ -28,6 +28,8 @@ vi.mock("@sotto/destinations", () => ({
 vi.mock("@sotto/tts", () => ({
   SystemTtsEngine: class SystemTtsEngine {
     speak = worker.speak;
+    speakLong = worker.speak;
+    stop = vi.fn();
   },
 }));
 
@@ -152,6 +154,48 @@ afterEach(() => {
 });
 
 describe("background screenshot clipboard injection", () => {
+  it("routes page-derived output only to panel text and TTS", async () => {
+    worker.route.mockResolvedValue({
+      spoken: "Here is what the page says.",
+      pageText: {
+        text: "Untrusted page-derived answer.",
+        title: "Answer",
+        speech: "short",
+      },
+    });
+    const harness = await installBackground({
+      id: 11,
+      url: "https://example.com/article",
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "what does this page say",
+      command: {
+        action: "ask-page",
+        question: "What does this page say?",
+        scope: "page",
+      },
+    });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "page-text",
+      text: "Untrusted page-derived answer.",
+      title: "Answer",
+    });
+    expect(worker.speak).toHaveBeenCalledWith(
+      "Untrusted page-derived answer.",
+      { lang: "en-US" },
+    );
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-result",
+      }),
+    );
+  });
+
   it("writes the PNG in the active tab and uses the existing completion path", async () => {
     const clipboardWrite = vi.fn().mockResolvedValue(undefined);
     const preparedBlob = new Blob(["screenshot"], { type: "image/png" });

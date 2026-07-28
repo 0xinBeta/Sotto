@@ -8,6 +8,14 @@ import { nextLogEntry, type LogEntry } from "./log.js";
 import "./styles.css";
 
 type NanoAvailability = "unavailable" | "downloadable" | "downloading" | "available";
+type ModelProgressKind = "nano" | "stt" | "summarizer" | "rewriter";
+
+interface PanelNote {
+  readonly id: string;
+  readonly body: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
 
 type PanelMessage =
   | {
@@ -24,7 +32,7 @@ type PanelMessage =
   | {
       target: "sidepanel";
       type: "model-progress";
-      model: "nano" | "stt";
+      model: ModelProgressKind;
       progress: number;
       status?: string;
       file?: string;
@@ -40,6 +48,34 @@ type PanelMessage =
       target: "sidepanel";
       type: "screenshot-permission-needed";
       workflow: ScreenshotPermissionWorkflow;
+    }
+  | {
+      target: "sidepanel";
+      type: "page-text";
+      text: string;
+      title?: string;
+    }
+  | { target: "sidepanel"; type: "rewrite-fallback"; text: string }
+  | {
+      target: "sidepanel";
+      type: "reading-progress";
+      current: number;
+      total: number;
+    }
+  | {
+      target: "sidepanel";
+      type: "notes-updated";
+      notes: readonly PanelNote[];
+    }
+  | {
+      target: "sidepanel";
+      type: "reminder-fired" | "reminder-opened";
+      reminder: {
+        readonly id: string;
+        readonly text: string;
+        readonly dueAt: string;
+        readonly notificationPermission?: string;
+      };
     }
   | { target: "sidepanel"; type: "pipeline-error"; message: string };
 
@@ -75,9 +111,18 @@ const clearLog = requiredElement<HTMLButtonElement>("#clear-log");
 const nanoProgressCard = requiredElement<HTMLElement>("#nano-progress-card");
 const nanoProgress = requiredElement<HTMLProgressElement>("#nano-progress");
 const nanoProgressValue = requiredElement<HTMLOutputElement>("#nano-progress-value");
+const nanoProgressLabel = requiredElement<HTMLElement>("#nano-progress-label");
 const sttProgressCard = requiredElement<HTMLElement>("#stt-progress-card");
 const sttProgress = requiredElement<HTMLProgressElement>("#stt-progress");
 const sttProgressValue = requiredElement<HTMLOutputElement>("#stt-progress-value");
+const pageTextCard = requiredElement<HTMLElement>("#page-text-card");
+const pageTextTitle = requiredElement<HTMLElement>("#page-text-title");
+const pageTextOutput = requiredElement<HTMLElement>("#page-text-output");
+const closePageText = requiredElement<HTMLButtonElement>("#close-page-text");
+const readingProgress = requiredElement<HTMLProgressElement>("#reading-progress");
+const notesList = requiredElement<HTMLUListElement>("#notes-list");
+const exportNotes = requiredElement<HTMLButtonElement>("#export-notes");
+const reminderBanner = requiredElement<HTMLElement>("#reminder-banner");
 
 let isListening = false;
 let pendingScreenshot: ClipboardWorkflow | undefined;
@@ -222,30 +267,75 @@ async function playEarcon(kind: "listen" | "complete"): Promise<void> {
 }
 
 function updateProgress(
-  model: "nano" | "stt",
+  model: ModelProgressKind,
   value: number,
   complete = value >= 1,
   file?: string,
 ): void {
   const normalized = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
-  const card = model === "nano" ? nanoProgressCard : sttProgressCard;
-  const bar = model === "nano" ? nanoProgress : sttProgress;
-  const output = model === "nano" ? nanoProgressValue : sttProgressValue;
+  const progressKind = model === "stt" ? "stt" : "nano";
+  const card = progressKind === "nano" ? nanoProgressCard : sttProgressCard;
+  const bar = progressKind === "nano" ? nanoProgress : sttProgress;
+  const output =
+    progressKind === "nano" ? nanoProgressValue : sttProgressValue;
+  if (progressKind === "nano") {
+    nanoProgressLabel.textContent =
+      model === "summarizer"
+        ? "Chrome Summarizer"
+        : model === "rewriter"
+          ? "Chrome Rewriter"
+          : "Gemini Nano";
+  }
   card.hidden = false;
   if (file) card.title = file;
   bar.value = normalized;
   output.value = `${Math.round(normalized * 100)}%`;
   output.textContent = output.value;
-  const previousTimer = progressHideTimers[model];
+  const previousTimer = progressHideTimers[progressKind];
   if (previousTimer !== undefined) {
     window.clearTimeout(previousTimer);
-    delete progressHideTimers[model];
+    delete progressHideTimers[progressKind];
   }
   if (complete) {
-    progressHideTimers[model] = window.setTimeout(() => {
+    progressHideTimers[progressKind] = window.setTimeout(() => {
       card.hidden = true;
-      delete progressHideTimers[model];
+      delete progressHideTimers[progressKind];
     }, 900);
+  }
+}
+
+function showPageText(text: string, title: string): void {
+  pageTextTitle.textContent = title;
+  pageTextOutput.textContent = text;
+  pageTextCard.hidden = false;
+}
+
+function renderNotes(notes: readonly PanelNote[]): void {
+  notesList.replaceChildren();
+  if (notes.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "empty-notes";
+    empty.textContent = "No notes yet.";
+    notesList.append(empty);
+    exportNotes.disabled = true;
+    return;
+  }
+  exportNotes.disabled = false;
+  for (const note of notes) {
+    const item = document.createElement("li");
+    const body = document.createElement("p");
+    const time = document.createElement("time");
+    body.textContent = note.body;
+    const created = new Date(note.createdAt);
+    time.dateTime = note.createdAt;
+    time.textContent = Number.isNaN(created.getTime())
+      ? "Saved note"
+      : created.toLocaleString([], {
+          dateStyle: "medium",
+          timeStyle: "short",
+        });
+    item.append(body, time);
+    notesList.append(item);
   }
 }
 
@@ -395,6 +485,43 @@ clearLog.addEventListener("click", () => {
   empty.className = "empty-log";
   empty.textContent = "No commands yet.";
   actionLog.append(empty);
+});
+
+closePageText.addEventListener("click", () => {
+  pageTextCard.hidden = true;
+  readingProgress.hidden = true;
+});
+
+exportNotes.addEventListener("click", async () => {
+  exportNotes.disabled = true;
+  try {
+    const result = await requestWorker<{
+      readonly filename: string;
+      readonly dataUrl: string;
+    }>({ type: "export-notes" });
+    if (
+      !result ||
+      !/^sotto-notes-\d{4}-\d{2}-\d{2}\.md$/.test(result.filename) ||
+      !result.dataUrl.startsWith("data:text/markdown;charset=utf-8,") ||
+      result.dataUrl.length > 2_500_000
+    ) {
+      throw new Error("Notes export returned invalid data");
+    }
+    const link = document.createElement("a");
+    link.href = result.dataUrl;
+    link.download = result.filename;
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+  } catch (error) {
+    appendLog(
+      "export notes",
+      error instanceof Error ? error.message : "Export failed",
+    );
+  } finally {
+    exportNotes.disabled = notesList.querySelector(".empty-notes") !== null;
+  }
 });
 
 async function prepareNanoModel(): Promise<void> {
@@ -555,6 +682,38 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
         message.file,
       );
       break;
+    case "page-text":
+      readingProgress.hidden = true;
+      showPageText(message.text, message.title ?? "PAGE");
+      break;
+    case "rewrite-fallback":
+      readingProgress.hidden = true;
+      showPageText(message.text, "REWRITE NOT INSERTED");
+      appendLog(
+        "rewrite",
+        "The editor changed; generated text is shown without inserting it",
+      );
+      break;
+    case "reading-progress":
+      readingProgress.hidden = false;
+      readingProgress.max = Math.max(1, message.total);
+      readingProgress.value = Math.max(
+        0,
+        Math.min(readingProgress.max, message.current),
+      );
+      break;
+    case "notes-updated":
+      renderNotes(message.notes);
+      break;
+    case "reminder-fired":
+    case "reminder-opened":
+      reminderBanner.textContent =
+        message.type === "reminder-fired" &&
+        message.reminder.notificationPermission === "denied"
+          ? `Reminder: ${message.reminder.text} — desktop notifications are disabled.`
+          : `Reminder: ${message.reminder.text}`;
+      reminderBanner.hidden = false;
+      break;
     case "earcon":
       void playEarcon(message.kind);
       break;
@@ -598,5 +757,15 @@ async function showAssignedShortcut(): Promise<void> {
 
 showTranscript("");
 void send({ type: "get-status" });
+void requestWorker<readonly PanelNote[]>({ type: "get-notes" })
+  .then((notes) => {
+    if (notes) renderNotes(notes);
+  })
+  .catch((error: unknown) => {
+    appendLog(
+      "notes",
+      error instanceof Error ? error.message : "Notes are unavailable",
+    );
+  });
 void loadCapturePermissionState();
 void showAssignedShortcut();
