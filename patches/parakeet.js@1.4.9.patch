@@ -1,0 +1,147 @@
+diff --git a/src/backend.js b/src/backend.js
+index b406bf0..6095efb 100644
+--- a/src/backend.js
++++ b/src/backend.js
+@@ -63,14 +63,10 @@ export function initOrt({ backend = 'webgpu', wasmPaths, numThreads } = {}) {
+   // Set up WASM paths first (needed for all backends)
+   if (wasmPaths) {
+     ort.env.wasm.wasmPaths = wasmPaths;
+   } else if (!ort.env.wasm.wasmPaths) {
+-    // Derive version from the ONNX Runtime environment
+-    const fallbackVer = '1.24.1';
+-    const ver = ort.env.versions?.common || fallbackVer;
+-    if (!ort.env.versions?.common) {
+-      console.warn('Parakeet.js: Could not auto-detect onnxruntime-web version. Using fallback version; set ort.env.wasm.wasmPaths manually for best results.');
+-    }
+-    ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ver}/dist/`;
++    throw new Error(
++      'Parakeet.js requires explicit local wasmPaths; remote runtime loading is disabled.',
++    );
+   }
+ 
+   // Configure WASM for better performance
+diff --git a/src/parakeet.js b/src/parakeet.js
+index 1f43f7d..b055cd8 100644
+--- a/src/parakeet.js
++++ b/src/parakeet.js
+@@ -175,7 +175,7 @@ export class ParakeetModel {
+     };
+ 
+     // Set execution provider based on backend
+-    if (backend === 'webgpu-hybrid') {
++    if (backend === 'webgpu-hybrid' || backend === 'webgpu') {
+       baseSessionOptions.executionProviders = [
+         {
+           name: 'webgpu',
+@@ -262,10 +262,19 @@ export class ParakeetModel {
+     console.log(`[Parakeet.js] Active preprocessor: ${actualBackend === 'js' ? 'JS (mel.js) — no ONNX preprocessor needed' : 'ONNX (nemo128.onnx)'}, ${detectedMels} mel bins`);
+ 
+     let encoderSession, joinerSession;
+-    if (backend === 'webgpu-hybrid') {
++    if (backend === 'webgpu-hybrid' || backend === 'webgpu') {
+       // avoid parallel create to prevent double initWasm race
+-      encoderSession = await createSession(encoderUrl, encoderSessionOptions);
+-      joinerSession = await createSession(decoderUrl, decoderSessionOptions);
++      try {
++        encoderSession = await createSession(encoderUrl, encoderSessionOptions);
++        joinerSession = await createSession(decoderUrl, decoderSessionOptions);
++      } catch (error) {
++        try {
++          await encoderSession?.release?.();
++        } catch {
++          // Preserve the original session-creation failure.
++        }
++        throw error;
++      }
+     } else {
+       const sessionResults = await Promise.allSettled([
+         createSession(encoderUrl, encoderSessionOptions),
+@@ -273,13 +282,28 @@ export class ParakeetModel {
+       ]);
+       const failedSession = sessionResults.find((result) => result.status === 'rejected');
+       if (failedSession) {
++        await Promise.allSettled(
++          sessionResults
++            .filter((result) => result.status === 'fulfilled')
++            .map((result) => result.value.release?.()),
++        );
+         throw failedSession.reason;
+       }
+       [encoderSession, joinerSession] = sessionResults.map((result) => result.value);
+     }
+ 
+-    const tokenizerPromise = ParakeetTokenizer.fromUrl(tokenizerUrl);
+-    const [tokenizer, preprocessor] = await Promise.all([tokenizerPromise, preprocPromise]);
++    let tokenizer, preprocessor;
++    try {
++      const tokenizerPromise = ParakeetTokenizer.fromUrl(tokenizerUrl);
++      [tokenizer, preprocessor] = await Promise.all([tokenizerPromise, preprocPromise]);
++    } catch (error) {
++      await Promise.allSettled([
++        encoderSession.release?.(),
++        joinerSession.release?.(),
++        onnxPreprocessor?.session?.release?.(),
++      ]);
++      throw error;
++    }
+ 
+     // Warm up preprocessor to avoid first-call latency (ONNX session creation / JIT)
+     try {
+@@ -520,6 +544,45 @@ export class ParakeetModel {
+   }
+ 
+   /**
++   * Release all persistent tensors and ONNX Runtime sessions.
++   * Safe to call more than once after callers have serialized in-flight work.
++   * @returns {Promise<void>}
++   */
++  async dispose() {
++    if (this._disposed) return;
++    this._disposed = true;
++    this.resetMelCache();
++    this.clearIncrementalCache();
++
++    for (const name of [
++      '_combState1',
++      '_combState2',
++      '_targetTensor',
++      '_targetLenTensor',
++      '_encoderFrameTensor',
++    ]) {
++      this[name]?.dispose?.();
++      this[name] = null;
++    }
++    this._encoderFrameBuffer = null;
++
++    const encoderSession = this.encoderSession;
++    const joinerSession = this.joinerSession;
++    const preprocessorSession = this._onnxPreprocessor?.session;
++    this.encoderSession = null;
++    this.joinerSession = null;
++    if (this._onnxPreprocessor) {
++      this._onnxPreprocessor.session = null;
++      this._onnxPreprocessor._sessionPromise = null;
++    }
++    await Promise.allSettled([
++      encoderSession?.release?.(),
++      joinerSession?.release?.(),
++      preprocessorSession?.release?.(),
++    ]);
++  }
++
++  /**
+    * Dispose ORT tensors inside a decoder state object.
+    * Safely skips null states, pre-allocated initial states, and tensors
+    * shared with a `keepState` (to avoid double-dispose when the joiner
+diff --git a/types/parakeet.d.ts b/types/parakeet.d.ts
+index aa657ae..9833448 100644
+--- a/types/parakeet.d.ts
++++ b/types/parakeet.d.ts
+@@ -161,6 +161,7 @@ export class ParakeetModel {
+   getPreprocessorBackend(): PreprocessorBackend;
+   resetMelCache(): void;
+   clearIncrementalCache(): void;
++  dispose(): Promise<void>;
+   getFrameTimeStride(): number;
+   frameToTime(frameIndex: number, timeOffset?: number): number;
+   getStreamingConstants(): {

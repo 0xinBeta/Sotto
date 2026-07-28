@@ -15,6 +15,12 @@ const ortVadDist = realpathSync(
 const ortTransformersDist = realpathSync(
   resolve(extensionRoot, "node_modules/onnxruntime-web-transformers/dist"),
 );
+const parakeetPackage = realpathSync(
+  resolve(extensionRoot, "../../packages/stt/node_modules/parakeet.js"),
+);
+const ortParakeetDist = realpathSync(
+  resolve(parakeetPackage, "../onnxruntime-web/dist"),
+);
 const kokoroPackage = realpathSync(
   resolve(extensionRoot, "../../packages/tts/node_modules/kokoro-js"),
 );
@@ -224,6 +230,12 @@ export default defineConfig({
         {
           src: `${ortTransformersDist}/ort-wasm-simd-threaded*.{wasm,mjs}`,
           dest: "assets/ort-transformers",
+          rename: { stripBase: true },
+        },
+        {
+          src:
+            `${ortParakeetDist}/ort-wasm-simd-threaded.jsep.{wasm,mjs}`,
+          dest: "assets/ort-parakeet",
           rename: { stripBase: true },
         },
         {

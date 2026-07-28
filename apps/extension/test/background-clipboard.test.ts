@@ -186,6 +186,34 @@ afterEach(() => {
 });
 
 describe("background screenshot clipboard injection", () => {
+  it("relays high-accuracy speech download and toggle requests to offscreen", async () => {
+    const harness = await installBackground({
+      id: 7,
+      url: "https://example.com/current",
+    });
+    harness.sendMessage.mockClear();
+
+    await expect(
+      harness.workerMessage({ type: "prepare-premium-stt" }),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      harness.workerMessage({
+        type: "set-premium-stt-enabled",
+        enabled: false,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "offscreen",
+      type: "prepare-premium-stt",
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "offscreen",
+      type: "set-premium-stt-enabled",
+      enabled: false,
+    });
+  });
+
   it("rejects an unknown clipboard completion instead of replaying navigation", async () => {
     const harness = await installBackground({
       id: 9,

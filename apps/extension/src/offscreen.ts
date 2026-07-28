@@ -20,6 +20,7 @@ import {
 } from "@sotto/nano";
 import {
   MoonshineEngine,
+  ParakeetSttEngine,
   type SttProgress,
 } from "@sotto/stt";
 import {
@@ -27,12 +28,29 @@ import {
   type KokoroInitProgress,
 } from "@sotto/tts/kokoro";
 import { InferenceMutex } from "./inference-mutex.js";
+import { ModelResidencyLru } from "./model-lru.js";
 import {
   PREMIUM_TTS_DOWNLOADED_KEY,
   PREMIUM_TTS_ENABLED_KEY,
   premiumEnabledByDefault,
   type PremiumTtsState,
 } from "./premium-tts.js";
+import {
+  detectPremiumSttTier,
+  PREMIUM_STT_DOWNLOADED_KEY,
+  PREMIUM_STT_ENABLED_KEY,
+  PREMIUM_STT_TIER_KEY,
+  PremiumSttManager,
+  type PremiumSttStatus,
+  type PremiumSttTier,
+} from "./premium-stt.js";
+import { loadSttSelfTestPcm } from "./stt-self-test.js";
+import {
+  SpeechContextRing,
+  transcribeWithSttGuards,
+  type SpeechRetryAudio,
+  type SttDiagnostic,
+} from "./stt-guards.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -62,8 +80,10 @@ interface MessageEnvelope<T> {
 }
 
 const registry = new ActionRegistry(actions);
-const stt = new MoonshineEngine();
+const tinyStt = new MoonshineEngine();
 const inferenceMutex = new InferenceMutex();
+const modelLru = new ModelResidencyLru();
+const speechContext = new SpeechContextRing();
 
 let vad: MicVAD | undefined;
 let micStream: MediaStream | undefined;
@@ -78,6 +98,9 @@ let stopRequested = false;
 let stopTimer: number | undefined;
 let transcriptPipeline = Promise.resolve();
 let sttReady: Promise<void> | undefined;
+let premiumStt: PremiumSttManager | undefined;
+let premiumSttStatus: PremiumSttStatus | undefined;
+let premiumSttSettingsReady: Promise<void> | undefined;
 let activeModelTask: AbortController | undefined;
 let premiumTts: KokoroTtsEngine | undefined;
 let premiumTtsState: PremiumTtsState = "absent";
@@ -89,6 +112,20 @@ let premiumTtsInit: Promise<void> | undefined;
 let premiumTtsRecovery: Promise<void> | undefined;
 let premiumSettingsReady: Promise<void> | undefined;
 let premiumTtsUtteranceId: string | undefined;
+let premiumTtsIdleReleased = false;
+
+modelLru.register("premium-stt", async () => {
+  await premiumStt?.releasePremium();
+});
+modelLru.register("premium-tts", async () => {
+  const engine = premiumTts;
+  if (!engine) return;
+  premiumTts = undefined;
+  premiumTtsIdleReleased = true;
+  await inferenceMutex.run(() => engine.dispose());
+  premiumTtsBackend = undefined;
+  await publishPremiumStatus();
+});
 
 function cancelActiveModelTask(): void {
   activeModelTask?.abort();
@@ -214,12 +251,16 @@ async function permissionState(): Promise<PermissionState | "unknown"> {
 }
 
 async function publishStatus(error?: string): Promise<void> {
-  await ensurePremiumSettings();
+  await Promise.all([
+    ensurePremiumSettings(),
+    ensurePremiumSttSettings(),
+  ]);
   if (
     premiumTtsDownloaded &&
     premiumTtsEnabled &&
     !premiumTts &&
-    !premiumTtsInit
+    !premiumTtsInit &&
+    !premiumTtsIdleReleased
   ) {
     void ensurePremiumTts().catch((setupError: unknown) => {
       console.warn("Cached premium voice could not start", setupError);
@@ -234,6 +275,7 @@ async function publishStatus(error?: string): Promise<void> {
     ...(error === undefined ? {} : { error }),
   });
   await publishPremiumStatus();
+  await publishPremiumSttStatus();
 }
 
 function progressRatioFromKokoro(
@@ -308,6 +350,135 @@ async function publishPremiumStatus(): Promise<void> {
   }).catch(() => undefined);
 }
 
+async function publishPremiumSttStatus(): Promise<void> {
+  const status = premiumSttStatus;
+  if (!status) return;
+  await sendPanel({
+    type: "premium-stt-state",
+    state: status.state,
+    enabled: status.enabled,
+    downloaded: status.downloaded,
+    resident: status.resident,
+    tier: status.tier,
+    backend: status.backend,
+    ...(status.error === undefined ? {} : { error: status.error }),
+  });
+}
+
+const STT_DIAGNOSTIC_MESSAGES: Record<SttDiagnostic, string> = {
+  "vad-rejected":
+    "Speech was too short or quiet. Keep holding the key through the full command.",
+  "blank-result":
+    "Speech reached the recognizer, but it returned no plausible words.",
+  timeout:
+    "Speech recognition timed out. Sotto kept the local fallback available.",
+  "webgpu-failed":
+    "The WebGPU speech engine failed. Sotto is retrying or using Moonshine.",
+};
+
+async function publishSttDiagnostic(
+  diagnostic: SttDiagnostic,
+): Promise<void> {
+  await sendPanel({
+    type: "stt-diagnostic",
+    diagnostic,
+    message: STT_DIAGNOSTIC_MESSAGES[diagnostic],
+  });
+}
+
+function createPremiumSttEngine(tier: PremiumSttTier) {
+  return tier === "parakeet"
+    ? new ParakeetSttEngine({
+        runtimeUrl: (path) => chrome.runtime.getURL(path),
+        runLoad: (task) => inferenceMutex.run(task),
+      })
+    : new MoonshineEngine({ model: "base", backend: "wasm" });
+}
+
+async function ensurePremiumSttSettings(): Promise<void> {
+  if (premiumSttSettingsReady) return premiumSttSettingsReady;
+  premiumSttSettingsReady = (async () => {
+    const tier = await detectPremiumSttTier();
+    let stored: Record<string, unknown> = {};
+    try {
+      const local = chrome.storage?.local;
+      if (local) {
+        stored = await local.get([
+          PREMIUM_STT_DOWNLOADED_KEY,
+          PREMIUM_STT_ENABLED_KEY,
+          PREMIUM_STT_TIER_KEY,
+        ]);
+      }
+    } catch (error) {
+      console.warn(
+        "Unable to read high-accuracy speech settings; using Moonshine tiny",
+        error,
+      );
+    }
+    const downloaded =
+      stored[PREMIUM_STT_DOWNLOADED_KEY] === true &&
+      stored[PREMIUM_STT_TIER_KEY] === tier;
+    premiumStt = new PremiumSttManager({
+      tiny: tinyStt,
+      tier,
+      downloaded,
+      storedEnabled: stored[PREMIUM_STT_ENABLED_KEY],
+      createPremium: createPremiumSttEngine,
+      runInference: (task) => inferenceMutex.run(task),
+      selfTestAudio: loadSttSelfTestPcm,
+      onStatus(status) {
+        premiumSttStatus = status;
+        void publishPremiumSttStatus();
+      },
+      onProgress(progress) {
+        const ratio = progressRatio(progress);
+        if (ratio === undefined) return;
+        void sendPanel({
+          type: "model-progress",
+          model: "premium-stt",
+          progress: Math.max(0, Math.min(1, ratio)),
+          status: progress.status,
+          ...(progress.file === undefined ? {} : { file: progress.file }),
+        });
+      },
+      onTinyProgress(progress) {
+        const ratio = progressRatio(progress);
+        if (ratio === undefined) return;
+        void sendPanel({
+          type: "model-progress",
+          model: "stt",
+          progress: Math.max(0, Math.min(1, ratio)),
+          status: progress.status,
+          ...(progress.file === undefined ? {} : { file: progress.file }),
+        });
+      },
+      onDiagnostic(diagnostic) {
+        void publishSttDiagnostic(diagnostic);
+      },
+      async onMemoryPressure() {
+        modelLru.noteMemoryPressure();
+        await modelLru.evictLeastRecentlyUsed("premium-stt");
+      },
+      onResidentChange(resident) {
+        if (resident) modelLru.markResident("premium-stt");
+        else modelLru.markReleased("premium-stt");
+      },
+    });
+    premiumSttStatus = premiumStt.status;
+  })();
+  return premiumSttSettingsReady;
+}
+
+async function persistPremiumSttStatus(): Promise<void> {
+  const status = premiumStt?.status;
+  if (!status) return;
+  await chrome.storage.local.set({
+    [PREMIUM_STT_DOWNLOADED_KEY]: status.downloaded,
+    [PREMIUM_STT_ENABLED_KEY]: status.enabled,
+    [PREMIUM_STT_TIER_KEY]: status.tier,
+  });
+}
+
 function isWebGpuFailure(error: unknown): boolean {
   const detail = error instanceof Error ? error.message : String(error);
   return /device[\s_-]*lost|out of memory|\boom\b|webgpu|gpu process/i.test(
@@ -351,6 +522,8 @@ async function ensurePremiumTts(
     premiumTtsDownloaded = true;
     premiumTtsBackend = engine.backend;
     premiumTtsState = "ready";
+    premiumTtsIdleReleased = false;
+    modelLru.markResident("premium-tts");
     const stored = await chrome.storage.local.get(PREMIUM_TTS_ENABLED_KEY);
     if (typeof stored[PREMIUM_TTS_ENABLED_KEY] !== "boolean") {
       premiumTtsEnabled = true;
@@ -390,13 +563,19 @@ function scheduleWasmRecovery(error: unknown): void {
   void publishPremiumStatus();
 
   premiumTtsRecovery = (async () => {
+    modelLru.noteMemoryPressure();
+    await modelLru.evictLeastRecentlyUsed("premium-tts");
     await inferenceMutex.run(async () => {
       if (premiumTts === engine) premiumTts = undefined;
       await engine?.dispose().catch(() => undefined);
     });
     premiumTtsBackend = undefined;
     premiumTtsError = undefined;
-    await ensurePremiumTts("wasm");
+    try {
+      await ensurePremiumTts("auto");
+    } catch {
+      await ensurePremiumTts("wasm");
+    }
   })().finally(() => {
     premiumTtsRecovery = undefined;
   });
@@ -414,6 +593,14 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
   }
   await ensurePremiumSettings();
   if (
+    premiumTtsEnabled &&
+    premiumTtsDownloaded &&
+    !premiumTts &&
+    !premiumTtsInit
+  ) {
+    await ensurePremiumTts();
+  }
+  if (
     !premiumTtsEnabled ||
     premiumTtsState !== "ready" ||
     !premiumTts
@@ -422,6 +609,7 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
   }
 
   const utteranceId = message.utteranceId;
+  modelLru.touch("premium-tts");
   premiumTtsUtteranceId = utteranceId;
   try {
     await premiumTts.speak(message.text, {
@@ -856,19 +1044,31 @@ async function processTranscript(rawTranscript: string): Promise<void> {
   });
 }
 
-async function processSpeech(audio: Float32Array): Promise<void> {
+async function processSpeech(input: SpeechRetryAudio): Promise<void> {
   try {
     await ensureStt();
-    const text = await inferenceMutex.run(() => stt.transcribe(audio));
-    if (!text) {
-      await sendPanel({
-        type: "pipeline-error",
-        message: "No speech was recognized. Try again or type the command.",
-      });
-      await speak("Sorry, say that again?");
+    const result = await transcribeWithSttGuards({
+      audio: input.audio,
+      expandedAudio: input.expanded,
+      transcribe: (audio) => {
+        if (premiumStt!.status.resident) {
+          modelLru.touch("premium-stt");
+        }
+        return premiumStt!.transcribe(audio);
+      },
+    });
+    if (!result.ok) {
+      await publishSttDiagnostic(result.diagnostic);
+      if (result.diagnostic === "blank-result") {
+        await speak("I heard speech but couldn't make out the words.");
+      } else if (result.diagnostic === "timeout") {
+        await speak("Speech recognition timed out. Try again.");
+      } else if (result.diagnostic === "webgpu-failed") {
+        await speak("The speech engine failed. Sotto kept the fallback ready.");
+      }
       return;
     }
-    await processTranscript(text);
+    await processTranscript(result.text);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Speech transcription failed";
@@ -880,19 +1080,8 @@ async function processSpeech(audio: Float32Array): Promise<void> {
 
 function ensureStt(): Promise<void> {
   if (!sttReady) {
-    const pending = inferenceMutex.run(() =>
-      stt.init((progress) => {
-        const ratio = progressRatio(progress);
-        if (ratio === undefined) return;
-        void sendPanel({
-          type: "model-progress",
-          model: "stt",
-          progress: Math.max(0, Math.min(1, ratio)),
-          status: progress.status,
-          ...(progress.file === undefined ? {} : { file: progress.file }),
-        });
-      })
-    );
+    const pending = ensurePremiumSttSettings()
+      .then(() => premiumStt!.initializeDefault());
     sttReady = pending.catch((error: unknown) => {
       sttReady = undefined;
       throw error;
@@ -953,19 +1142,30 @@ async function startListening(): Promise<void> {
       onnxWASMBasePath: chrome.runtime.getURL("assets/ort-vad/"),
       startOnLoad: false,
       submitUserSpeechOnPause: true,
+      positiveSpeechThreshold: 0.3,
+      negativeSpeechThreshold: 0.25,
+      preSpeechPadMs: 256,
+      redemptionMs: 192,
+      minSpeechMs: 320,
       getStream: async () => stream,
       ortConfig(ort) {
         ort.env.wasm.numThreads = 1;
       },
       onSpeechStart() {
+        speechContext.onSpeechStart();
         void sendPanel({ type: "speech-start" });
       },
       onVADMisfire() {
-        // Intentionally ignore too-short speech so silence is never sent to STT.
+        speechContext.onVADMisfire();
+        void publishSttDiagnostic("vad-rejected");
+      },
+      onFrameProcessed(_probabilities, frame) {
+        speechContext.onFrame(frame);
       },
       onSpeechEnd(audio) {
+        const input = speechContext.onSpeechEnd(audio);
         transcriptPipeline = transcriptPipeline
-          .then(() => processSpeech(audio))
+          .then(() => processSpeech(input))
           .catch((error: unknown) => {
             console.warn("Speech pipeline failed", error);
           });
@@ -1132,6 +1332,23 @@ async function handleOffscreenMessage(
       }
       await publishPremiumStatus();
       return;
+    case "prepare-premium-stt":
+      await ensurePremiumSttSettings();
+      await premiumStt!.prepare();
+      await persistPremiumSttStatus();
+      await publishPremiumSttStatus();
+      return;
+    case "set-premium-stt-enabled":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError(
+          "A high-accuracy speech enabled setting is required",
+        );
+      }
+      await ensurePremiumSttSettings();
+      await premiumStt!.setEnabled(message.enabled);
+      await persistPremiumSttStatus();
+      await publishPremiumSttStatus();
+      return;
     case "premium-speak":
       await speakPremium(message);
       return;
@@ -1246,12 +1463,17 @@ chrome.runtime.onMessage.addListener(
 
 window.addEventListener("unload", () => {
   cancelActiveModelTask();
+  modelLru.dispose();
+  speechContext.dispose();
   premiumTts?.stop();
   micStream?.getTracks().forEach((track) => track.stop());
   parserSession?.destroy();
   responderSession?.destroy();
-  void stt.dispose().catch((error: unknown) => {
-    console.warn("Moonshine cleanup failed", error);
+  void (premiumStt
+    ? premiumStt.dispose()
+    : inferenceMutex.run(() => tinyStt.dispose())
+  ).catch((error: unknown) => {
+    console.warn("Speech engine cleanup failed", error);
   });
   void premiumTts?.dispose().catch((error: unknown) => {
     console.warn("Kokoro cleanup failed", error);

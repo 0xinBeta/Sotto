@@ -19,7 +19,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@huggingface/transformers": "4.2.0"
+    "@huggingface/transformers": "4.2.0",
+    "parakeet.js": "https://codeload.github.com/ysdede/parakeet.js/tar.gz/c346fd04888272b05ed820896df0b188e92463b9"
   },
   "devDependencies": {
     "@types/chrome": "0.2.2",

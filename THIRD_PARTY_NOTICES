@@ -12,6 +12,7 @@ Runtime libraries (bundled)
 - @mozilla/readability — Apache-2.0 — https://github.com/mozilla/readability
 - kokoro-js — Apache-2.0 — https://github.com/hexgrad/kokoro
 - phonemizer (npm wrapper) — Apache-2.0 — https://www.npmjs.com/package/phonemizer
+- parakeet.js — MIT, © 2025 Yunus Seyhan Dede — https://github.com/ysdede/parakeet.js
 
 eSpeak NG (bundled as WebAssembly, via phonemizer)
 --------------------------------------------------
@@ -29,6 +30,7 @@ Models (downloaded on demand, pinned revisions; not distributed in this repo)
 - Moonshine (UsefulSensors, ONNX community export) — MIT — https://github.com/usefulsensors/moonshine
 - Silero VAD (via @ricky0123/vad-web assets) — MIT — https://github.com/snakers4/silero-vad
 - Kokoro-82M (onnx-community/Kokoro-82M-v1.0-ONNX) — Apache-2.0 — https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX
+- Parakeet-TDT 0.6B v3 (NVIDIA; efederici INT4 ONNX export) — CC-BY-4.0 — https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
 - Gemini Nano — provided and managed by Chrome's built-in AI; not distributed by Sotto
 
 If a notice here is inaccurate or incomplete, please open an issue.

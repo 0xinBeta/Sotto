@@ -1048,6 +1048,18 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         type: "set-premium-tts-enabled",
         enabled: message.enabled,
       });
+    case "prepare-premium-stt":
+      return sendOffscreen({ type: "prepare-premium-stt" });
+    case "set-premium-stt-enabled":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError(
+          "A high-accuracy speech enabled setting is required",
+        );
+      }
+      return sendOffscreen({
+        type: "set-premium-stt-enabled",
+        enabled: message.enabled,
+      });
     case "premium-first-audio":
       if (
         typeof message.utteranceId !== "string" ||

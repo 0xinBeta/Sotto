@@ -232,7 +232,8 @@ h2 {
   content: "";
 }
 
-.premium-voice-card[data-state="ready"] {
+.premium-voice-card[data-state="ready"],
+.premium-voice-card[data-state="active"] {
   border-color: rgba(230, 255, 151, 0.42);
 }
 
@@ -261,7 +262,8 @@ h2 {
   letter-spacing: 0.07em;
 }
 
-.premium-voice-card[data-state="ready"] .premium-state {
+.premium-voice-card[data-state="ready"] .premium-state,
+.premium-voice-card[data-state="active"] .premium-state {
   border-color: rgba(230, 255, 151, 0.38);
   color: var(--acid);
 }

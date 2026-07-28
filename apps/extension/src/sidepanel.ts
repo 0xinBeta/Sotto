@@ -13,8 +13,24 @@ type ModelProgressKind =
   | "stt"
   | "summarizer"
   | "rewriter"
-  | "premium-tts";
+  | "premium-tts"
+  | "premium-stt";
 type PremiumTtsState = "absent" | "downloading" | "ready" | "error";
+type PremiumSttState =
+  | "not-downloaded"
+  | "downloading"
+  | "validating"
+  | "loading"
+  | "warming"
+  | "ready"
+  | "active"
+  | "error";
+type PremiumSttTier = "parakeet" | "moonshine-base";
+type SttDiagnostic =
+  | "vad-rejected"
+  | "blank-result"
+  | "timeout"
+  | "webgpu-failed";
 
 interface PanelNote {
   readonly id: string;
@@ -119,6 +135,23 @@ type PanelMessage =
       enabled: boolean;
       backend?: "webgpu" | "wasm";
       error?: string;
+    }
+  | {
+      target: "sidepanel";
+      type: "premium-stt-state";
+      state: PremiumSttState;
+      enabled: boolean;
+      downloaded: boolean;
+      resident: boolean;
+      tier: PremiumSttTier;
+      backend: "webgpu" | "wasm";
+      error?: string;
+    }
+  | {
+      target: "sidepanel";
+      type: "stt-diagnostic";
+      diagnostic: SttDiagnostic;
+      message: string;
     };
 
 function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
@@ -188,7 +221,8 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           message.model === "stt" ||
           message.model === "summarizer" ||
           message.model === "rewriter" ||
-          message.model === "premium-tts") &&
+          message.model === "premium-tts" ||
+          message.model === "premium-stt") &&
         typeof message.progress === "number" &&
         Number.isFinite(message.progress) &&
         message.progress >= 0 &&
@@ -210,6 +244,34 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           message.backend === "wasm") &&
         (message.error === undefined ||
           isBoundedString(message.error, 1_000))
+      );
+    case "premium-stt-state":
+      return (
+        (message.state === "not-downloaded" ||
+          message.state === "downloading" ||
+          message.state === "validating" ||
+          message.state === "loading" ||
+          message.state === "warming" ||
+          message.state === "ready" ||
+          message.state === "active" ||
+          message.state === "error") &&
+        typeof message.enabled === "boolean" &&
+        typeof message.downloaded === "boolean" &&
+        typeof message.resident === "boolean" &&
+        (message.tier === "parakeet" ||
+          message.tier === "moonshine-base") &&
+        (message.backend === "webgpu" ||
+          message.backend === "wasm") &&
+        (message.error === undefined ||
+          isBoundedString(message.error, 1_000))
+      );
+    case "stt-diagnostic":
+      return (
+        (message.diagnostic === "vad-rejected" ||
+          message.diagnostic === "blank-result" ||
+          message.diagnostic === "timeout" ||
+          message.diagnostic === "webgpu-failed") &&
+        isBoundedString(message.message, 1_000, 1)
       );
     default:
       return true;
@@ -267,6 +329,24 @@ const premiumProgressValue =
   requiredElement<HTMLOutputElement>("#premium-progress-value");
 const premiumProgressLabel =
   requiredElement<HTMLElement>("#premium-progress-label");
+const premiumSttCard =
+  requiredElement<HTMLElement>("#premium-stt-card");
+const premiumSttState =
+  requiredElement<HTMLElement>("#premium-stt-state");
+const premiumSttCopy =
+  requiredElement<HTMLElement>("#premium-stt-copy");
+const downloadPremiumStt =
+  requiredElement<HTMLButtonElement>("#download-premium-stt");
+const premiumSttEnabled =
+  requiredElement<HTMLInputElement>("#premium-stt-enabled");
+const premiumSttProgressCard =
+  requiredElement<HTMLElement>("#premium-stt-progress-card");
+const premiumSttProgress =
+  requiredElement<HTMLProgressElement>("#premium-stt-progress");
+const premiumSttProgressValue =
+  requiredElement<HTMLOutputElement>("#premium-stt-progress-value");
+const premiumSttProgressLabel =
+  requiredElement<HTMLElement>("#premium-stt-progress-label");
 const pageTextCard = requiredElement<HTMLElement>("#page-text-card");
 const pageTextTitle = requiredElement<HTMLElement>("#page-text-title");
 const pageTextOutput = requiredElement<HTMLElement>("#page-text-output");
@@ -285,8 +365,10 @@ let earconContext: AudioContext | undefined;
 let capturePermissionGranted: boolean | undefined;
 let nanoAvailability: NanoAvailability | undefined;
 let premiumState: PremiumTtsState = "absent";
+let highAccuracyState: PremiumSttState = "not-downloaded";
+let highAccuracyTier: PremiumSttTier = "moonshine-base";
 const progressHideTimers:
-  Partial<Record<"nano" | "stt" | "premium-tts", number>> = {};
+  Partial<Record<"nano" | "stt" | "premium-tts" | "premium-stt", number>> = {};
 
 function setStatus(
   state: "booting" | "ready" | "listening" | "error",
@@ -432,24 +514,32 @@ function updateProgress(
       ? "stt"
       : model === "premium-tts"
         ? "premium-tts"
-        : "nano";
+        : model === "premium-stt"
+          ? "premium-stt"
+          : "nano";
   const card =
     progressKind === "nano"
       ? nanoProgressCard
       : progressKind === "stt"
         ? sttProgressCard
-        : premiumProgressCard;
+        : progressKind === "premium-tts"
+          ? premiumProgressCard
+          : premiumSttProgressCard;
   const bar =
     progressKind === "nano"
       ? nanoProgress
       : progressKind === "stt"
         ? sttProgress
-        : premiumProgress;
+        : progressKind === "premium-tts"
+          ? premiumProgress
+          : premiumSttProgress;
   const output = progressKind === "nano"
     ? nanoProgressValue
     : progressKind === "stt"
       ? sttProgressValue
-      : premiumProgressValue;
+      : progressKind === "premium-tts"
+        ? premiumProgressValue
+        : premiumSttProgressValue;
   if (progressKind === "nano") {
     nanoProgressLabel.textContent =
       model === "summarizer"
@@ -462,6 +552,11 @@ function updateProgress(
     premiumProgressLabel.textContent = file
       ? `Kokoro · ${file.split("/").at(-1) ?? "model"}`
       : "Kokoro voice model";
+  }
+  if (progressKind === "premium-stt") {
+    premiumSttProgressLabel.textContent = file
+      ? `Speech · ${file.split("/").at(-1) ?? "model"}`
+      : "High accuracy speech model";
   }
   card.hidden = false;
   if (file) card.title = file;
@@ -517,6 +612,87 @@ function showPremiumVoiceState(
       premiumVoiceCopy.textContent =
         error ??
         "Premium voice could not start. Sotto is continuing with your operating system voice.";
+      break;
+  }
+}
+
+function showPremiumSttState(
+  state: PremiumSttState,
+  enabled: boolean,
+  downloaded: boolean,
+  resident: boolean,
+  tier: PremiumSttTier,
+  error?: string,
+): void {
+  highAccuracyState = state;
+  highAccuracyTier = tier;
+  premiumSttCard.dataset.state = state;
+  premiumSttState.textContent = state.replace("-", " ").toUpperCase();
+  premiumSttEnabled.checked = enabled;
+  premiumSttEnabled.disabled = !downloaded ||
+    (state !== "ready" && state !== "active");
+  const busy =
+    state === "downloading" ||
+    state === "validating" ||
+    state === "loading" ||
+    state === "warming";
+  downloadPremiumStt.disabled = busy;
+  downloadPremiumStt.hidden = state === "ready" || state === "active";
+  const modelCopy = tier === "parakeet"
+    ? "Parakeet-TDT v3 uses a 409 MB pinned model with a WebGPU encoder."
+    : "This machine uses Moonshine base q8, a 63 MB WASM accuracy upgrade.";
+
+  switch (state) {
+    case "not-downloaded":
+      downloadPremiumStt.hidden = false;
+      downloadPremiumStt.disabled = false;
+      downloadPremiumStt.textContent = tier === "parakeet"
+        ? "Download 409 MB model"
+        : "Download 63 MB model";
+      premiumSttCopy.textContent =
+        `${modelCopy} Nothing downloads until you choose it; Moonshine tiny remains instant.`;
+      break;
+    case "downloading":
+      downloadPremiumStt.hidden = false;
+      downloadPremiumStt.textContent = "Downloading on device…";
+      premiumSttProgressCard.hidden = false;
+      premiumSttCopy.textContent =
+        `${modelCopy} The files are validated before activation.`;
+      break;
+    case "validating":
+      downloadPremiumStt.hidden = false;
+      downloadPremiumStt.textContent = "Validating pinned files…";
+      premiumSttProgressCard.hidden = false;
+      premiumSttCopy.textContent =
+        "Sotto is checking the complete local model before loading it.";
+      break;
+    case "loading":
+      downloadPremiumStt.hidden = false;
+      downloadPremiumStt.textContent = "Loading local model…";
+      premiumSttCopy.textContent =
+        "The model is compiling locally. Moonshine tiny stays available until validation finishes.";
+      break;
+    case "warming":
+      downloadPremiumStt.hidden = false;
+      downloadPremiumStt.textContent = "Running hardware check…";
+      premiumSttCopy.textContent =
+        "A bundled spoken-word fixture is checking recognition and warm latency.";
+      break;
+    case "ready":
+      premiumSttCopy.textContent =
+        `${modelCopy} It is ready but switched off; Moonshine tiny is active.`;
+      break;
+    case "active":
+      premiumSttCopy.textContent =
+        `${modelCopy} High accuracy is ON${resident ? "" : " and will reload from the local cache when needed"}.`;
+      break;
+    case "error":
+      downloadPremiumStt.hidden = false;
+      downloadPremiumStt.disabled = false;
+      downloadPremiumStt.textContent = "Retry high accuracy setup";
+      premiumSttCopy.textContent =
+        error ??
+        "High accuracy speech could not start. Moonshine tiny remains active.";
       break;
   }
 }
@@ -823,6 +999,38 @@ premiumVoiceEnabled.addEventListener("change", async () => {
   premiumVoiceEnabled.disabled = false;
 });
 
+downloadPremiumStt.addEventListener("click", async () => {
+  downloadPremiumStt.disabled = true;
+  updateProgress("premium-stt", 0, false);
+  if (!(await send({ type: "prepare-premium-stt" }))) {
+    showPremiumSttState(
+      "error",
+      false,
+      false,
+      false,
+      highAccuracyTier,
+      "High accuracy speech setup could not start. Moonshine tiny is still available.",
+    );
+  }
+});
+
+premiumSttEnabled.addEventListener("change", async () => {
+  if (highAccuracyState !== "ready" && highAccuracyState !== "active") {
+    return;
+  }
+  const requested = premiumSttEnabled.checked;
+  premiumSttEnabled.disabled = true;
+  if (
+    !(await send({
+      type: "set-premium-stt-enabled",
+      enabled: requested,
+    }))
+  ) {
+    premiumSttEnabled.checked = !requested;
+  }
+  premiumSttEnabled.disabled = false;
+});
+
 enableCapture.addEventListener("click", async () => {
   enableCapture.disabled = true;
   try {
@@ -934,6 +1142,21 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
         message.error,
       );
       break;
+    case "premium-stt-state":
+      showPremiumSttState(
+        message.state,
+        message.enabled,
+        message.downloaded,
+        message.resident,
+        message.tier,
+        message.error,
+      );
+      break;
+    case "stt-diagnostic":
+      showTranscript(message.message);
+      transcript.dataset.diagnostic = message.diagnostic;
+      appendLog(`speech / ${message.diagnostic}`, message.message);
+      break;
     case "listening-state":
       setListening(message.listening);
       break;
@@ -950,7 +1173,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
         message.progress,
         message.model === "stt"
           ? message.status === "ready"
-          : message.progress >= 1,
+          : message.model === "premium-stt"
+            ? message.status === "ready"
+            : message.progress >= 1,
         message.file,
       );
       break;

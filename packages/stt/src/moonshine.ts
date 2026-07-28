@@ -6,18 +6,43 @@ import type {
   SttProgressCallback,
 } from "./types.js";
 
-const MODEL_ID = "onnx-community/moonshine-tiny-ONNX";
-const MODEL_REVISION = "a6da1241cd305dcd64eab1edbd615f2bb9aabb95";
 const WASM_ASSET_PATH = "assets/ort-transformers/";
 
-const DTYPE = {
-  webgpu: {
-    encoder_model: "fp32",
-    decoder_model_merged: "q4",
+export type MoonshineModel = "tiny" | "base";
+
+export interface MoonshineEngineOptions {
+  readonly model?: MoonshineModel;
+  readonly backend?: "auto" | "wasm";
+}
+
+const MODELS = {
+  tiny: {
+    id: "onnx-community/moonshine-tiny-ONNX",
+    revision: "a6da1241cd305dcd64eab1edbd615f2bb9aabb95",
+    dtype: {
+      webgpu: {
+        encoder_model: "fp32",
+        decoder_model_merged: "q4",
+      },
+      wasm: {
+        encoder_model: "fp32",
+        decoder_model_merged: "q8",
+      },
+    },
   },
-  wasm: {
-    encoder_model: "fp32",
-    decoder_model_merged: "q8",
+  base: {
+    id: "onnx-community/moonshine-base-ONNX",
+    revision: "b1e9b6aae3c3c7298f10c3798393fdf38e8fbbad",
+    dtype: {
+      webgpu: {
+        encoder_model: "fp32",
+        decoder_model_merged: "q4",
+      },
+      wasm: {
+        encoder_model: "q8",
+        decoder_model_merged: "q8",
+      },
+    },
   },
 } as const;
 
@@ -26,7 +51,10 @@ interface MoonshineOutput {
 }
 
 interface MoonshineTranscriber {
-  (audio: Float32Array): Promise<MoonshineOutput>;
+  (
+    audio: Float32Array,
+    options?: { readonly max_new_tokens?: number },
+  ): Promise<MoonshineOutput>;
   dispose?: () => void | Promise<void>;
 }
 
@@ -40,9 +68,16 @@ function getWebGpuProvider(): WebGpuProvider | undefined {
 
 export class MoonshineEngine implements SttEngine {
   readonly #progressCallbacks = new Set<SttProgressCallback>();
+  readonly #model: MoonshineModel;
+  readonly #backend: "auto" | "wasm";
   #transcriber: MoonshineTranscriber | undefined;
   #initPromise: Promise<MoonshineTranscriber> | undefined;
   #generation = 0;
+
+  constructor(options: MoonshineEngineOptions = {}) {
+    this.#model = options.model ?? "tiny";
+    this.#backend = options.backend ?? "auto";
+  }
 
   async init(onProgress?: SttProgressCallback): Promise<void> {
     if (this.#transcriber) {
@@ -92,7 +127,13 @@ export class MoonshineEngine implements SttEngine {
       return "";
     }
 
-    const output = await this.#transcriber(audio);
+    const durationSeconds = audio.length / 16_000;
+    const output = await this.#transcriber(audio, {
+      max_new_tokens: Math.min(
+        96,
+        Math.ceil(durationSeconds * 6.5) + 8,
+      ),
+    });
     if (typeof output?.text !== "string") {
       throw new Error("Moonshine returned an invalid transcription result");
     }
@@ -130,14 +171,13 @@ export class MoonshineEngine implements SttEngine {
   }
 
   async #createTranscriber(): Promise<MoonshineTranscriber> {
-    const gpu = getWebGpuProvider();
-    const adapter = gpu
-      ? await gpu.requestAdapter().catch(() => null)
+    const adapter = this.#backend === "auto"
+      ? await getWebGpuProvider()?.requestAdapter().catch(() => null)
       : null;
 
     if (adapter) {
       try {
-        return await this.#loadPipeline("webgpu", DTYPE.webgpu);
+        return await this.#loadPipeline("webgpu");
       } catch (error) {
         console.warn(
           "Moonshine WebGPU failed; falling back to WASM",
@@ -146,20 +186,20 @@ export class MoonshineEngine implements SttEngine {
       }
     }
 
-    return this.#loadPipeline("wasm", DTYPE.wasm);
+    return this.#loadPipeline("wasm");
   }
 
   async #loadPipeline(
     device: "webgpu" | "wasm",
-    dtype: typeof DTYPE.webgpu | typeof DTYPE.wasm,
   ): Promise<MoonshineTranscriber> {
+    const model = MODELS[this.#model];
     const transcriber = await pipeline(
       "automatic-speech-recognition",
-      MODEL_ID,
+      model.id,
       {
         device,
-        dtype,
-        revision: MODEL_REVISION,
+        dtype: model.dtype[device],
+        revision: model.revision,
         progress_callback: (progress) => {
           this.#emitProgress(progress as SttProgress);
         },

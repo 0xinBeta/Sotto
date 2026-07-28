@@ -154,6 +154,15 @@ const elementIds = [
   "premium-progress",
   "premium-progress-value",
   "premium-progress-label",
+  "premium-stt-card",
+  "premium-stt-state",
+  "premium-stt-copy",
+  "download-premium-stt",
+  "premium-stt-enabled",
+  "premium-stt-progress-card",
+  "premium-stt-progress",
+  "premium-stt-progress-value",
+  "premium-stt-progress-label",
   "page-text-card",
   "page-text-title",
   "page-text-output",
@@ -297,6 +306,69 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["premium-voice-enabled"].checked).toBe(true);
     expect(elements["premium-voice-enabled"].disabled).toBe(false);
     expect(elements["premium-voice-copy"].textContent).toContain("WEBGPU");
+  });
+
+  it("renders the hardware-selected speech tier, progress, diagnostics, and persisted toggle request", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "premium-stt-state",
+      state: "not-downloaded",
+      enabled: false,
+      downloaded: false,
+      resident: false,
+      tier: "parakeet",
+      backend: "webgpu",
+    });
+    expect(elements["premium-stt-copy"].textContent).toContain("409 MB");
+    expect(elements["download-premium-stt"].textContent).toContain("409 MB");
+
+    onMessage({
+      target: "sidepanel",
+      type: "model-progress",
+      model: "premium-stt",
+      progress: 0.5,
+      status: "downloading",
+      file: "encoder-model.int4.onnx",
+    });
+    expect(elements["premium-stt-progress-value"].textContent).toBe("50%");
+    expect(elements["premium-stt-progress-label"].textContent).toContain(
+      "encoder-model.int4.onnx",
+    );
+
+    onMessage({
+      target: "sidepanel",
+      type: "premium-stt-state",
+      state: "active",
+      enabled: true,
+      downloaded: true,
+      resident: true,
+      tier: "moonshine-base",
+      backend: "wasm",
+    });
+    expect(elements["premium-stt-copy"].textContent).toContain("63 MB");
+    expect(elements["premium-stt-enabled"].checked).toBe(true);
+    expect(elements["premium-stt-enabled"].disabled).toBe(false);
+
+    elements["premium-stt-enabled"].checked = false;
+    await elements["premium-stt-enabled"].emit("change");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "set-premium-stt-enabled",
+      enabled: false,
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "stt-diagnostic",
+      diagnostic: "vad-rejected",
+      message: "Speech was too short or quiet.",
+    });
+    expect(elements.transcript.textContent).toBe(
+      "Speech was too short or quiet.",
+    );
+    expect(elements.transcript.dataset.diagnostic).toBe("vad-rejected");
   });
 
   it("shows first-run capture setup and hides it live after the one-time grant", async () => {

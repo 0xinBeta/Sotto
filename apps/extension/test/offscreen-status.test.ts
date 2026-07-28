@@ -14,9 +14,22 @@ const premium = vi.hoisted(() => ({
   probe: vi.fn(),
   dispose: vi.fn(),
 }));
+const speech = vi.hoisted(() => ({
+  moonshineOptions: [] as unknown[],
+  moonshineInit: vi.fn(),
+  moonshineTranscribe: vi.fn(),
+  moonshineDispose: vi.fn(),
+  parakeetOptions: [] as unknown[],
+  parakeetInit: vi.fn(),
+  parakeetTranscribe: vi.fn(),
+  parakeetDispose: vi.fn(),
+}));
+const vad = vi.hoisted(() => ({
+  create: vi.fn(),
+}));
 
 vi.mock("@ricky0123/vad-web", () => ({
-  MicVAD: { new: vi.fn() },
+  MicVAD: { new: vad.create },
 }));
 vi.mock("@sotto/actions", () => ({ default: [] }));
 vi.mock("@sotto/core", () => ({
@@ -34,9 +47,20 @@ vi.mock("@sotto/nano", () => ({
 }));
 vi.mock("@sotto/stt", () => ({
   MoonshineEngine: class MoonshineEngine {
-    init = vi.fn();
-    transcribe = vi.fn();
-    dispose = vi.fn();
+    constructor(options?: unknown) {
+      speech.moonshineOptions.push(options);
+    }
+    init = speech.moonshineInit;
+    transcribe = speech.moonshineTranscribe;
+    dispose = speech.moonshineDispose;
+  },
+  ParakeetSttEngine: class ParakeetSttEngine {
+    constructor(options?: unknown) {
+      speech.parakeetOptions.push(options);
+    }
+    init = speech.parakeetInit;
+    transcribe = speech.parakeetTranscribe;
+    dispose = speech.parakeetDispose;
   },
 }));
 vi.mock("@sotto/tts/kokoro", () => ({
@@ -59,10 +83,21 @@ type OffscreenListener = (
 async function installPremiumOffscreen(options: {
   readonly initialStorage?: Record<string, unknown>;
   readonly storageGetError?: Error;
+  readonly webGpu?: boolean;
 } = {}) {
   nano.getNanoAvailability.mockResolvedValue("unavailable");
   premium.init.mockResolvedValue(undefined);
   premium.dispose.mockResolvedValue(undefined);
+  speech.moonshineInit.mockResolvedValue(undefined);
+  speech.moonshineTranscribe.mockResolvedValue("ready");
+  speech.moonshineDispose.mockResolvedValue(undefined);
+  speech.parakeetInit.mockResolvedValue(undefined);
+  speech.parakeetTranscribe.mockResolvedValue("ready");
+  speech.parakeetDispose.mockResolvedValue(undefined);
+  vad.create.mockResolvedValue({
+    start: vi.fn().mockResolvedValue(undefined),
+    destroy: vi.fn().mockResolvedValue(undefined),
+  });
   const values = { ...options.initialStorage };
   const sendMessage = vi.fn().mockImplementation(
     async (message: { readonly target?: string }) =>
@@ -70,8 +105,20 @@ async function installPremiumOffscreen(options: {
   );
   let onMessage: OffscreenListener | undefined;
   vi.stubGlobal("navigator", {
+    ...(options.webGpu
+      ? {
+          gpu: {
+            requestAdapter: vi.fn().mockResolvedValue({}),
+          },
+        }
+      : {}),
     permissions: {
       query: vi.fn().mockResolvedValue({ state: "granted" }),
+    },
+    mediaDevices: {
+      getUserMedia: vi.fn().mockResolvedValue({
+        getTracks: () => [{ stop: vi.fn() }],
+      }),
     },
   });
   vi.stubGlobal("window", { addEventListener: vi.fn() });
@@ -129,6 +176,15 @@ afterEach(() => {
   premium.stop.mockReset();
   premium.probe.mockReset();
   premium.dispose.mockReset();
+  speech.moonshineOptions.splice(0);
+  speech.moonshineInit.mockReset();
+  speech.moonshineTranscribe.mockReset();
+  speech.moonshineDispose.mockReset();
+  speech.parakeetInit.mockReset();
+  speech.parakeetOptions.splice(0);
+  speech.parakeetTranscribe.mockReset();
+  speech.parakeetDispose.mockReset();
+  vad.create.mockReset();
 });
 
 describe("offscreen fail-soft status", () => {
@@ -226,6 +282,101 @@ describe("offscreen fail-soft status", () => {
         state: "ready",
         enabled: true,
         backend: "webgpu",
+      }),
+    );
+  });
+
+  it("selects and persists Parakeet on WebGPU, publishes progress, and defaults ON after warmup", async () => {
+    const harness = await installPremiumOffscreen({ webGpu: true });
+    speech.parakeetInit.mockImplementation(
+      async (
+        onProgress?: (progress: {
+          readonly status: string;
+          readonly progress: number;
+          readonly file?: string;
+        }) => void,
+      ) => {
+        onProgress?.({
+          status: "downloading",
+          progress: 0.5,
+          file: "encoder-model.int4.onnx",
+        });
+      },
+    );
+
+    await expect(
+      harness.message({ type: "prepare-premium-stt" }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(speech.parakeetOptions).toHaveLength(1);
+    expect(harness.values).toMatchObject({
+      premiumSttDownloaded: true,
+      premiumSttEnabled: true,
+      premiumSttTier: "parakeet",
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "model-progress",
+      model: "premium-stt",
+      progress: 0.5,
+      status: "downloading",
+      file: "encoder-model.int4.onnx",
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "premium-stt-state",
+        state: "active",
+        enabled: true,
+        downloaded: true,
+        tier: "parakeet",
+        backend: "webgpu",
+      }),
+    );
+  });
+
+  it("offers Moonshine base q8 WASM when WebGPU is unavailable", async () => {
+    const harness = await installPremiumOffscreen();
+
+    await expect(
+      harness.message({ type: "prepare-premium-stt" }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(speech.moonshineOptions).toContainEqual({
+      model: "base",
+      backend: "wasm",
+    });
+    expect(harness.values).toMatchObject({
+      premiumSttDownloaded: true,
+      premiumSttEnabled: true,
+      premiumSttTier: "moonshine-base",
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "premium-stt-state",
+        state: "active",
+        tier: "moonshine-base",
+        backend: "wasm",
+      }),
+    );
+  });
+
+  it("hands STT explicit 256 ms pre-roll, 192 ms post-roll, and 320 ms voiced gating", async () => {
+    const harness = await installPremiumOffscreen();
+
+    await expect(
+      harness.message({ type: "start-listening" }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(vad.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "v5",
+        positiveSpeechThreshold: 0.3,
+        negativeSpeechThreshold: 0.25,
+        preSpeechPadMs: 256,
+        redemptionMs: 192,
+        minSpeechMs: 320,
       }),
     );
   });

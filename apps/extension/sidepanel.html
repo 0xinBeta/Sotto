@@ -91,6 +91,36 @@
         </div>
       </section>
 
+      <section class="premium-voice-card" id="premium-stt-card" data-state="not-downloaded">
+        <div class="premium-voice-heading">
+          <div>
+            <p class="section-index">LOCAL INPUT / BETA</p>
+            <h2>High accuracy speech (beta)</h2>
+          </div>
+          <span class="premium-state" id="premium-stt-state">CHECKING</span>
+        </div>
+        <p class="premium-voice-copy" id="premium-stt-copy">
+          Checking local speech hardware. Moonshine tiny remains available instantly.
+        </p>
+        <div class="premium-voice-actions">
+          <button class="button primary" id="download-premium-stt" type="button" disabled>
+            Checking hardware…
+          </button>
+          <label class="voice-switch" for="premium-stt-enabled">
+            <span>Use high accuracy</span>
+            <input id="premium-stt-enabled" type="checkbox" role="switch" disabled />
+            <span class="voice-switch-track" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div class="premium-progress" id="premium-stt-progress-card" hidden>
+          <div class="progress-copy">
+            <span id="premium-stt-progress-label">Speech model</span>
+            <output id="premium-stt-progress-value">0%</output>
+          </div>
+          <progress id="premium-stt-progress" max="1" value="0"></progress>
+        </div>
+      </section>
+
       <section class="transcript-panel" aria-live="polite">
         <div class="section-heading">
           <p class="section-index">01 / HEARD</p>

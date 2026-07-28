@@ -105,4 +105,40 @@ describe("MoonshineEngine fail-soft initialization", () => {
       "ready",
     );
   });
+
+  it("loads the pinned Moonshine base q8 tier on WASM without changing tiny defaults", async () => {
+    vi.stubGlobal("navigator", {
+      gpu: {
+        requestAdapter: vi.fn().mockResolvedValue({}),
+      },
+    });
+    const transcriber = vi.fn().mockResolvedValue({ text: "base result" });
+    transformers.pipeline.mockResolvedValue(transcriber);
+
+    const engine = new MoonshineEngine({
+      model: "base",
+      backend: "wasm",
+    });
+    await engine.init();
+
+    expect(transformers.pipeline).toHaveBeenCalledTimes(1);
+    expect(transformers.pipeline).toHaveBeenCalledWith(
+      "automatic-speech-recognition",
+      "onnx-community/moonshine-base-ONNX",
+      expect.objectContaining({
+        device: "wasm",
+        revision: "b1e9b6aae3c3c7298f10c3798393fdf38e8fbbad",
+        dtype: {
+          encoder_model: "q8",
+          decoder_model_merged: "q8",
+        },
+      }),
+    );
+
+    const audio = new Float32Array(16_000);
+    await expect(engine.transcribe(audio)).resolves.toBe("base result");
+    expect(transcriber).toHaveBeenCalledWith(audio, {
+      max_new_tokens: 15,
+    });
+  });
 });
