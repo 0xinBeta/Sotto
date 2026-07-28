@@ -4,9 +4,6 @@ const nano = vi.hoisted(() => ({
   getNanoAvailability: vi.fn(),
   respondOneSentence: vi.fn(),
 }));
-const clipboard = vi.hoisted(() => ({
-  performOffscreenClipboardWorkflow: vi.fn(),
-}));
 
 vi.mock("@ricky0123/vad-web", () => ({
   MicVAD: { new: vi.fn() },
@@ -28,10 +25,6 @@ vi.mock("@sotto/stt", () => ({
     transcribe = vi.fn();
     dispose = vi.fn();
   },
-}));
-vi.mock("../src/offscreen-clipboard.js", () => ({
-  performOffscreenClipboardWorkflow:
-    clipboard.performOffscreenClipboardWorkflow,
 }));
 
 afterEach(() => {
@@ -97,91 +90,7 @@ describe("offscreen fail-soft status", () => {
     });
   });
 
-  it("returns an automatic clipboard completion without showing the panel card", async () => {
-    clipboard.performOffscreenClipboardWorkflow.mockReset();
-    clipboard.performOffscreenClipboardWorkflow.mockResolvedValue({
-      workflowId: "clipboard-test",
-      spoken: "Paste-ready — hit Control V.",
-    });
-    const sendMessage = vi.fn().mockResolvedValue(undefined);
-    let onMessage:
-      | ((
-          message: unknown,
-          sender: unknown,
-          respond: (response: unknown) => void,
-        ) => boolean | void)
-      | undefined;
-
-    vi.stubGlobal("navigator", {
-      permissions: {
-        query: vi.fn().mockResolvedValue({ state: "granted" }),
-      },
-    });
-    vi.stubGlobal("window", {
-      addEventListener: vi.fn(),
-    });
-    vi.stubGlobal("chrome", {
-      runtime: {
-        getURL: vi.fn((path: string) => `chrome-extension://sotto/${path}`),
-        sendMessage,
-        onMessage: {
-          addListener: vi.fn((listener) => {
-            onMessage = listener;
-          }),
-        },
-      },
-    });
-
-    await import("../src/offscreen.js");
-    if (!onMessage) throw new Error("Offscreen message listener was not installed");
-
-    const workflow = {
-      kind: "clipboard-write",
-      id: "clipboard-test",
-      requiresFocus: true,
-      requiresUserActivation: true,
-      buttonLabel: "Copy screenshot",
-      item: {
-        kind: "image",
-        mimeType: "image/png",
-        dataUrl: "data:image/png;base64,c2NyZWVuc2hvdA==",
-      },
-    } as const;
-    const response = new Promise<unknown>((resolve) => {
-      expect(
-        onMessage?.(
-          {
-            target: "offscreen",
-            type: "action-result",
-            transcript: "send a screenshot to Claude",
-            command: { action: "screenshot", destination: "claude" },
-            result: { spoken: "Screenshot ready.", workflow },
-          },
-          {},
-          resolve,
-        ),
-      ).toBe(true);
-    });
-
-    await expect(response).resolves.toEqual({
-      ok: true,
-      value: {
-        workflowId: "clipboard-test",
-        spoken: "Paste-ready — hit Control V.",
-      },
-    });
-    expect(
-      clipboard.performOffscreenClipboardWorkflow,
-    ).toHaveBeenCalledWith(workflow);
-    expect(sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("shows the existing panel workflow when automatic copying fails", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    clipboard.performOffscreenClipboardWorkflow.mockReset();
-    clipboard.performOffscreenClipboardWorkflow.mockRejectedValue(
-      new DOMException("copy denied", "NotAllowedError"),
-    );
+  it("shows the existing panel workflow for a clipboard action result", async () => {
     nano.getNanoAvailability.mockReset();
     nano.getNanoAvailability.mockResolvedValue("unavailable");
     nano.respondOneSentence.mockReset();
@@ -253,10 +162,6 @@ describe("offscreen fail-soft status", () => {
     });
 
     await expect(response).resolves.toEqual({ ok: true });
-    expect(warn).toHaveBeenCalledWith(
-      "Sotto automatic screenshot copy failed",
-      expect.objectContaining({ name: "NotAllowedError" }),
-    );
     expect(sendMessage).toHaveBeenCalledWith({
       target: "sidepanel",
       type: "screenshot-ready",

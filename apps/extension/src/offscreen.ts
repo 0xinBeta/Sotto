@@ -18,7 +18,6 @@ import {
   MoonshineEngine,
   type SttProgress,
 } from "@sotto/stt";
-import { performOffscreenClipboardWorkflow } from "./offscreen-clipboard.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -402,15 +401,10 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
   const command = message.command;
   const result = message.result;
   if (result.workflow?.kind === "clipboard-write") {
-    try {
-      return await performOffscreenClipboardWorkflow(result.workflow);
-    } catch (error) {
-      console.warn("Sotto automatic screenshot copy failed", error);
-      await sendPanel({
-        type: "screenshot-ready",
-        workflow: result.workflow,
-      });
-    }
+    await sendPanel({
+      type: "screenshot-ready",
+      workflow: result.workflow,
+    });
   }
   if (!result.workflow) {
     await sendPanel({ type: "earcon", kind: "complete" });

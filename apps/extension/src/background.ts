@@ -6,6 +6,7 @@ import {
   DestinationRegistry,
   type ActionCommand,
   type ActionResult,
+  type ClipboardWorkflow,
   type DestinationFollowUp,
 } from "@sotto/core";
 import destinations, {
@@ -41,9 +42,8 @@ async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
   if (!creatingOffscreen) {
     creatingOffscreen = chrome.offscreen.createDocument({
       url: path,
-      reasons: ["USER_MEDIA", "CLIPBOARD"],
-      justification:
-        "Capture microphone audio and copy screenshots to the clipboard",
+      reasons: ["USER_MEDIA"],
+      justification: "Capture microphone audio for on-device voice commands",
     });
   }
 
@@ -199,6 +199,71 @@ async function completeClipboardWorkflow(
   });
 }
 
+async function writeClipboardInActiveTab(
+  workflow: ClipboardWorkflow,
+): Promise<boolean> {
+  try {
+    const [activeTab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    if (activeTab?.id === undefined) {
+      throw new Error("No active tab is available for clipboard access");
+    }
+
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId: activeTab.id },
+      func: async (
+        dataUrl: string,
+        mimeType: "image/png",
+      ): Promise<
+        { readonly ok: true } | { readonly ok: false; readonly error: string }
+      > => {
+        try {
+          const response = await fetch(dataUrl);
+          if (!response.ok) {
+            throw new Error(
+              "Could not prepare the screenshot for the clipboard",
+            );
+          }
+          const blob = await response.blob();
+          if (blob.type !== mimeType) {
+            throw new TypeError(`Expected ${mimeType}, got ${blob.type}`);
+          }
+          if (
+            !navigator.clipboard?.write ||
+            typeof ClipboardItem === "undefined"
+          ) {
+            throw new DOMException(
+              "Image clipboard writes are unavailable in this document",
+              "NotSupportedError",
+            );
+          }
+          await navigator.clipboard.write([
+            new ClipboardItem({ [mimeType]: blob }),
+          ]);
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+      args: [workflow.item.dataUrl, workflow.item.mimeType],
+    });
+
+    if (injection?.result?.ok === true) return true;
+    throw new Error(
+      injection?.result?.error ??
+        "The active tab returned no clipboard result",
+    );
+  } catch (error) {
+    console.warn("Sotto automatic screenshot copy failed", error);
+    return false;
+  }
+}
+
 async function publishActionResult(
   transcript: string,
   command: ActionCommand,
@@ -210,20 +275,27 @@ async function publishActionResult(
       workflow: result.workflow,
     });
   }
-  const offscreenValue = await sendOffscreen({
+  if (
+    result.workflow?.kind === "clipboard-write" &&
+    (await writeClipboardInActiveTab(result.workflow))
+  ) {
+    await completeClipboardWorkflow({
+      workflowId: result.workflow.id,
+      ...(result.workflow.afterWrite?.followUp === undefined
+        ? {}
+        : { followUp: result.workflow.afterWrite.followUp }),
+      ...(result.workflow.afterWrite?.spoken === undefined
+        ? {}
+        : { spoken: result.workflow.afterWrite.spoken }),
+    });
+    return;
+  }
+  await sendOffscreen({
     type: "action-result",
     transcript,
     command,
     result,
   });
-  if (
-    result.workflow?.kind === "clipboard-write" &&
-    offscreenValue !== undefined
-  ) {
-    await completeClipboardWorkflow(
-      parseClipboardWorkflowCompletion(offscreenValue),
-    );
-  }
 }
 
 async function executeCommand(
