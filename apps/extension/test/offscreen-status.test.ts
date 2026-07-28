@@ -121,7 +121,13 @@ async function installPremiumOffscreen(options: {
       }),
     },
   });
-  vi.stubGlobal("window", { addEventListener: vi.fn() });
+  vi.stubGlobal("window", {
+    addEventListener: vi.fn(),
+    clearInterval,
+    clearTimeout,
+    setInterval,
+    setTimeout,
+  });
   vi.stubGlobal("chrome", {
     runtime: {
       getURL: vi.fn((path: string) => `chrome-extension://sotto/${path}`),
@@ -165,6 +171,7 @@ async function installPremiumOffscreen(options: {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   nano.askPageWithPrompt.mockReset();
   vi.resetModules();
   vi.unstubAllGlobals();
@@ -441,6 +448,87 @@ describe("offscreen fail-soft status", () => {
         minSpeechMs: 320,
       }),
     );
+  });
+
+  it("publishes smoothed levels until stop and reports a very low meter", async () => {
+    vi.useFakeTimers();
+    const source = {
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    };
+    const analyser = {
+      fftSize: 32,
+      smoothingTimeConstant: 1,
+      disconnect: vi.fn(),
+      getFloatTimeDomainData: vi.fn((samples: Float32Array) => {
+        samples.fill(0.01);
+      }),
+    };
+    const close = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal(
+      "AudioContext",
+      class FakeAudioContext {
+        createAnalyser() {
+          return analyser;
+        }
+
+        createMediaStreamSource() {
+          return source;
+        }
+
+        resume() {
+          return Promise.resolve();
+        }
+
+        close() {
+          return close();
+        }
+      },
+    );
+    const harness = await installPremiumOffscreen();
+
+    await expect(
+      harness.message({ type: "start-listening" }),
+    ).resolves.toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(67);
+
+    const meterMessages = harness.sendMessage.mock.calls
+      .map(([message]) => message)
+      .filter((message) => message.type === "mic-level");
+    expect(meterMessages).toHaveLength(1);
+    expect(meterMessages[0]).toMatchObject({
+      target: "sidepanel",
+      type: "mic-level",
+    });
+    expect(meterMessages[0]?.level).toBeCloseTo(0.0065);
+
+    const vadOptions = vad.create.mock.calls[0]?.[0] as {
+      onVADMisfire(): void;
+    };
+    vadOptions.onVADMisfire();
+    await Promise.resolve();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "stt-diagnostic",
+      diagnostic: "vad-rejected",
+      message: "The microphone level was very low.",
+    });
+
+    await expect(
+      harness.message({ type: "stop-listening" }),
+    ).resolves.toEqual({ ok: true });
+    const countAfterStop = harness.sendMessage.mock.calls
+      .map(([message]) => message)
+      .filter((message) => message.type === "mic-level").length;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(
+      harness.sendMessage.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.type === "mic-level"),
+    ).toHaveLength(countAfterStop);
+
+    await vi.advanceTimersByTimeAsync(150);
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("uses safe system-TTS defaults when settings storage cannot be read", async () => {

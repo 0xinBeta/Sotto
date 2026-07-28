@@ -20,6 +20,7 @@ class FakeElement {
   disabled = false;
   hidden = false;
   parent?: FakeElement;
+  readonly style: Record<string, string> = {};
   title = "";
   value: string | number = "";
   private copy = "";
@@ -129,6 +130,8 @@ const elementIds = [
   "listening-mark",
   "listen-button",
   "listen-label",
+  "mic-meter",
+  "mic-meter-fill",
   "shortcut-label",
   "grant-mic",
   "command-form",
@@ -369,6 +372,45 @@ describe("side-panel screenshot clipboard fallback", () => {
       "Speech was too short or quiet.",
     );
     expect(elements.transcript.dataset.diagnostic).toBe("vad-rejected");
+  });
+
+  it("shows idle, listening, and speech meter states", async () => {
+    const { elements, onMessage } = await installSidepanel();
+
+    expect(elements["mic-meter"].dataset.state).toBe("idle");
+    expect(elements["mic-meter-fill"].style.transform).toBe("scaleX(0)");
+
+    onMessage({
+      target: "sidepanel",
+      type: "listening-state",
+      listening: true,
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "mic-level",
+      level: 0.42,
+    });
+    expect(elements["mic-meter"].dataset.state).toBe("listening");
+    expect(elements["mic-meter-fill"].style.transform).toBe("scaleX(0.42)");
+
+    onMessage({ target: "sidepanel", type: "speech-start" });
+    expect(elements["mic-meter"].dataset.state).toBe("speech");
+
+    onMessage({ target: "sidepanel", type: "speech-end" });
+    expect(elements["mic-meter"].dataset.state).toBe("listening");
+
+    onMessage({
+      target: "sidepanel",
+      type: "listening-state",
+      listening: false,
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "mic-level",
+      level: 0.9,
+    });
+    expect(elements["mic-meter"].dataset.state).toBe("idle");
+    expect(elements["mic-meter-fill"].style.transform).toBe("scaleX(0)");
   });
 
   it("shows first-run capture setup and hides it live after the one-time grant", async () => {

@@ -78,6 +78,8 @@ type PanelMessage =
     }
   | { target: "sidepanel"; type: "listening-state"; listening: boolean }
   | { target: "sidepanel"; type: "speech-start" }
+  | { target: "sidepanel"; type: "speech-end" }
+  | { target: "sidepanel"; type: "mic-level"; level: number }
   | { target: "sidepanel"; type: "transcript"; text: string }
   | {
       target: "sidepanel";
@@ -273,6 +275,13 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           message.diagnostic === "webgpu-failed") &&
         isBoundedString(message.message, 1_000, 1)
       );
+    case "mic-level":
+      return (
+        typeof message.level === "number" &&
+        Number.isFinite(message.level) &&
+        message.level >= 0 &&
+        message.level <= 1
+      );
     default:
       return true;
   }
@@ -298,6 +307,8 @@ const transcript = requiredElement<HTMLElement>("#transcript");
 const listeningMark = requiredElement<HTMLElement>("#listening-mark");
 const listenButton = requiredElement<HTMLButtonElement>("#listen-button");
 const listenLabel = requiredElement<HTMLElement>("#listen-label");
+const micMeter = requiredElement<HTMLElement>("#mic-meter");
+const micMeterFill = requiredElement<HTMLElement>("#mic-meter-fill");
 const shortcutLabel = requiredElement<HTMLElement>("#shortcut-label");
 const grantMic = requiredElement<HTMLButtonElement>("#grant-mic");
 const commandForm = requiredElement<HTMLFormElement>("#command-form");
@@ -384,7 +395,14 @@ function setListening(listening: boolean): void {
   listenLabel.textContent = listening ? "Listening…" : "Hold to talk";
   listeningMark.textContent = listening ? "LIVE" : "IDLE";
   listeningMark.dataset.active = String(listening);
+  micMeter.dataset.state = listening ? "listening" : "idle";
+  if (!listening) micMeterFill.style.transform = "scaleX(0)";
   setStatus(listening ? "listening" : "ready", listening ? "Listening" : "On device");
+}
+
+function showMicLevel(level: number): void {
+  if (!isListening) return;
+  micMeterFill.style.transform = `scaleX(${level})`;
 }
 
 function showTranscript(text: string): void {
@@ -1163,6 +1181,17 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
     case "speech-start":
       listeningMark.textContent = "SPEECH";
       listeningMark.dataset.active = "true";
+      micMeter.dataset.state = "speech";
+      break;
+    case "speech-end":
+      if (isListening) {
+        listeningMark.textContent = "LIVE";
+        listeningMark.dataset.active = "true";
+        micMeter.dataset.state = "listening";
+      }
+      break;
+    case "mic-level":
+      showMicLevel(message.level);
       break;
     case "transcript":
       showTranscript(message.text);
@@ -1281,6 +1310,8 @@ async function showReminderFromLocation(): Promise<void> {
 }
 
 showTranscript("");
+micMeter.dataset.state = "idle";
+micMeterFill.style.transform = "scaleX(0)";
 void send({ type: "get-status" });
 void requestWorker<readonly PanelNote[]>({ type: "get-notes" })
   .then((notes) => {

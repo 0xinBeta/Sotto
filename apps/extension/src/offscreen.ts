@@ -28,6 +28,7 @@ import {
   type KokoroInitProgress,
 } from "@sotto/tts/kokoro";
 import { InferenceMutex } from "./inference-mutex.js";
+import { computeRms, smoothMicLevel } from "./mic-level.js";
 import { ModelResidencyLru } from "./model-lru.js";
 import {
   PREMIUM_TTS_DOWNLOADED_KEY,
@@ -97,6 +98,12 @@ let listening = false;
 let starting = false;
 let stopRequested = false;
 let stopTimer: number | undefined;
+let micLevelContext: AudioContext | undefined;
+let micLevelSource: MediaStreamAudioSourceNode | undefined;
+let micLevelAnalyser: AnalyserNode | undefined;
+let micLevelTimer: number | undefined;
+let micLevel = 0;
+let micLevelPeak = 0;
 let transcriptPipeline = Promise.resolve();
 let sttReady: Promise<void> | undefined;
 let premiumStt: PremiumSttManager | undefined;
@@ -377,13 +384,29 @@ const STT_DIAGNOSTIC_MESSAGES: Record<SttDiagnostic, string> = {
     "The WebGPU speech engine failed. Sotto is retrying or using Moonshine.",
 };
 
+function sttDiagnosticMessage(
+  diagnostic: SttDiagnostic,
+  observedMicLevel?: number,
+): string {
+  if (
+    (diagnostic === "vad-rejected" || diagnostic === "blank-result") &&
+    observedMicLevel !== undefined
+  ) {
+    return observedMicLevel < 0.035
+      ? "The microphone level was very low."
+      : "The meter showed sound, but Sotto found no clear words.";
+  }
+  return STT_DIAGNOSTIC_MESSAGES[diagnostic];
+}
+
 async function publishSttDiagnostic(
   diagnostic: SttDiagnostic,
+  observedMicLevel?: number,
 ): Promise<void> {
   await sendPanel({
     type: "stt-diagnostic",
     diagnostic,
-    message: STT_DIAGNOSTIC_MESSAGES[diagnostic],
+    message: sttDiagnosticMessage(diagnostic, observedMicLevel),
   });
 }
 
@@ -1084,7 +1107,10 @@ async function processTranscript(rawTranscript: string): Promise<void> {
   });
 }
 
-async function processSpeech(input: SpeechRetryAudio): Promise<void> {
+async function processSpeech(
+  input: SpeechRetryAudio,
+  observedMicLevel: number,
+): Promise<void> {
   try {
     await ensureStt();
     const result = await transcribeWithSttGuards({
@@ -1102,7 +1128,7 @@ async function processSpeech(input: SpeechRetryAudio): Promise<void> {
       },
     });
     if (!result.ok) {
-      await publishSttDiagnostic(result.diagnostic);
+      await publishSttDiagnostic(result.diagnostic, observedMicLevel);
       if (result.diagnostic === "blank-result") {
         await speak("I heard speech but couldn't make out the words.");
       } else if (result.diagnostic === "timeout") {
@@ -1156,6 +1182,54 @@ async function openMicrophone(): Promise<MediaStream> {
   return micStream;
 }
 
+const MIC_LEVEL_SAMPLE_INTERVAL_MS = Math.round(1_000 / 15);
+
+function stopMicLevelMeter(): void {
+  if (micLevelTimer !== undefined) {
+    window.clearInterval(micLevelTimer);
+    micLevelTimer = undefined;
+  }
+  micLevelSource?.disconnect();
+  micLevelAnalyser?.disconnect();
+  micLevelSource = undefined;
+  micLevelAnalyser = undefined;
+  const context = micLevelContext;
+  micLevelContext = undefined;
+  void context?.close().catch(() => undefined);
+}
+
+function startMicLevelMeter(stream: MediaStream): void {
+  stopMicLevelMeter();
+  micLevel = 0;
+  micLevelPeak = 0;
+  if (typeof AudioContext === "undefined") return;
+
+  try {
+    const context = new AudioContext();
+    const source = context.createMediaStreamSource(stream);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0;
+    source.connect(analyser);
+
+    const samples = new Float32Array(analyser.fftSize);
+    micLevelContext = context;
+    micLevelSource = source;
+    micLevelAnalyser = analyser;
+    void context.resume().catch(() => undefined);
+    micLevelTimer = window.setInterval(() => {
+      if (!listening || micLevelAnalyser !== analyser) return;
+      analyser.getFloatTimeDomainData(samples);
+      micLevel = smoothMicLevel(micLevel, computeRms(samples));
+      micLevelPeak = Math.max(micLevelPeak, micLevel);
+      void sendPanel({ type: "mic-level", level: micLevel });
+    }, MIC_LEVEL_SAMPLE_INTERVAL_MS);
+  } catch (error) {
+    console.warn("Sotto could not start the microphone meter", error);
+    stopMicLevelMeter();
+  }
+}
+
 async function startListening(): Promise<void> {
   premiumTts?.stop();
   if (starting) {
@@ -1167,6 +1241,9 @@ async function startListening(): Promise<void> {
     stopTimer = undefined;
   }
   if (listening) {
+    if (micStream && micLevelTimer === undefined) {
+      startMicLevelMeter(micStream);
+    }
     await sendPanel({ type: "listening-state", listening: true });
     return;
   }
@@ -1202,15 +1279,18 @@ async function startListening(): Promise<void> {
       },
       onVADMisfire() {
         speechContext.onVADMisfire();
-        void publishSttDiagnostic("vad-rejected");
+        void sendPanel({ type: "speech-end" });
+        void publishSttDiagnostic("vad-rejected", micLevelPeak);
       },
       onFrameProcessed(_probabilities, frame) {
         speechContext.onFrame(frame);
       },
       onSpeechEnd(audio) {
         const input = speechContext.onSpeechEnd(audio);
+        const observedMicLevel = micLevelPeak;
+        void sendPanel({ type: "speech-end" });
         transcriptPipeline = transcriptPipeline
-          .then(() => processSpeech(input))
+          .then(() => processSpeech(input, observedMicLevel))
           .catch((error: unknown) => {
             console.warn("Speech pipeline failed", error);
           });
@@ -1219,12 +1299,14 @@ async function startListening(): Promise<void> {
     await vad.start();
     listening = true;
     starting = false;
+    if (!stopRequested) startMicLevelMeter(stream);
     await sendPanel({ type: "earcon", kind: "listen" });
     await sendPanel({ type: "listening-state", listening: true });
     if (stopRequested) await stopListeningNow();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Microphone failed";
     listening = false;
+    stopMicLevelMeter();
     micStream?.getTracks().forEach((track) => track.stop());
     micStream = undefined;
     await publishStatus(message);
@@ -1239,6 +1321,7 @@ async function stopListeningNow(): Promise<void> {
   const activeVad = vad;
   vad = undefined;
   listening = false;
+  stopMicLevelMeter();
 
   try {
     await activeVad?.destroy();
@@ -1255,6 +1338,7 @@ function stopListening(): void {
     return;
   }
   if (!listening || stopTimer !== undefined) return;
+  stopMicLevelMeter();
   // Let VAD observe a short tail after push-to-talk release and emit speech.
   stopTimer = window.setTimeout(() => {
     void stopListeningNow().catch(async (error: unknown) => {
@@ -1515,6 +1599,7 @@ chrome.runtime.onMessage.addListener(
 
 window.addEventListener("unload", () => {
   cancelActiveModelTask();
+  stopMicLevelMeter();
   modelLru.dispose();
   speechContext.dispose();
   premiumTts?.stop();
