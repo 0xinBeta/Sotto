@@ -10,6 +10,7 @@ import {
 } from "@sotto/core";
 import destinations, {
   executeDestinationFollowUp,
+  type ClipboardWorkflowCompletion,
 } from "@sotto/destinations";
 import { SystemTtsEngine } from "@sotto/tts";
 
@@ -40,8 +41,9 @@ async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
   if (!creatingOffscreen) {
     creatingOffscreen = chrome.offscreen.createDocument({
       url: path,
-      reasons: ["USER_MEDIA"],
-      justification: "Capture microphone audio for local speech recognition",
+      reasons: ["USER_MEDIA", "CLIPBOARD"],
+      justification:
+        "Capture microphone audio and copy screenshots to the clipboard",
     });
   }
 
@@ -143,28 +145,85 @@ function isAllowedFollowUp(value: unknown): value is DestinationFollowUp {
   );
 }
 
+function parseClipboardWorkflowCompletion(
+  value: unknown,
+): ClipboardWorkflowCompletion {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("Rejected an invalid clipboard completion");
+  }
+  const candidate = value as {
+    workflowId?: unknown;
+    followUp?: unknown;
+    spoken?: unknown;
+  };
+  if (typeof candidate.workflowId !== "string") {
+    throw new TypeError("Clipboard completion requires a workflow id");
+  }
+  if (
+    candidate.followUp !== undefined &&
+    !isAllowedFollowUp(candidate.followUp)
+  ) {
+    throw new TypeError("Rejected an invalid destination follow-up");
+  }
+  if (
+    candidate.spoken !== undefined &&
+    typeof candidate.spoken !== "string"
+  ) {
+    throw new TypeError("Rejected an invalid clipboard confirmation");
+  }
+  return {
+    workflowId: candidate.workflowId,
+    ...(candidate.followUp === undefined
+      ? {}
+      : { followUp: candidate.followUp }),
+    ...(candidate.spoken === undefined
+      ? {}
+      : { spoken: candidate.spoken.slice(0, 240) }),
+  };
+}
+
+async function completeClipboardWorkflow(
+  completion: ClipboardWorkflowCompletion,
+): Promise<void> {
+  if (completion.followUp) {
+    await executeDestinationFollowUp(completion.followUp);
+  }
+  await sendOffscreen({
+    type: "workflow-complete",
+    spoken: completion.spoken ?? "Screenshot copied.",
+  });
+  await sendPanel({
+    type: "action-log",
+    heard: "copy screenshot",
+    did: completion.followUp ? "copied and opened Claude" : "copied",
+  });
+}
+
 async function publishActionResult(
   transcript: string,
   command: ActionCommand,
   result: ActionResult,
 ): Promise<void> {
-  if (result.workflow?.kind === "clipboard-write") {
-    await sendPanel({
-      type: "screenshot-ready",
-      workflow: result.workflow,
-    });
-  } else if (result.workflow?.kind === "screenshot-permission") {
+  if (result.workflow?.kind === "screenshot-permission") {
     await sendPanel({
       type: "screenshot-permission-needed",
       workflow: result.workflow,
     });
   }
-  await sendOffscreen({
+  const offscreenValue = await sendOffscreen({
     type: "action-result",
     transcript,
     command,
     result,
   });
+  if (
+    result.workflow?.kind === "clipboard-write" &&
+    offscreenValue !== undefined
+  ) {
+    await completeClipboardWorkflow(
+      parseClipboardWorkflowCompletion(offscreenValue),
+    );
+  }
 }
 
 async function executeCommand(
@@ -254,32 +313,9 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
     case "nano-ready":
       return sendOffscreen({ type: "nano-ready" });
     case "clipboard-complete": {
-      const completion =
-        typeof message.completion === "object" && message.completion !== null
-          ? (message.completion as {
-              followUp?: unknown;
-              spoken?: unknown;
-            })
-          : {};
-      if (completion.followUp !== undefined) {
-        if (!isAllowedFollowUp(completion.followUp)) {
-          throw new TypeError("Rejected an invalid destination follow-up");
-        }
-        await executeDestinationFollowUp(completion.followUp);
-      }
-      const spoken =
-        typeof completion.spoken === "string"
-          ? completion.spoken.slice(0, 240)
-          : "Screenshot copied.";
-      await sendPanel({
-        type: "action-log",
-        heard: "copy screenshot",
-        did: completion.followUp ? "copied and opened Claude" : "copied",
-      });
-      await sendOffscreen({
-        type: "workflow-complete",
-        spoken,
-      });
+      await completeClipboardWorkflow(
+        parseClipboardWorkflowCompletion(message.completion),
+      );
       return undefined;
     }
     default:

@@ -18,6 +18,7 @@ import {
   MoonshineEngine,
   type SttProgress,
 } from "@sotto/stt";
+import { performOffscreenClipboardWorkflow } from "./offscreen-clipboard.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -388,7 +389,7 @@ function isActionResult(value: unknown): value is ActionResult {
   );
 }
 
-async function handleActionResult(message: OffscreenMessage): Promise<void> {
+async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
   if (
     !isActionCommand(message.command) ||
     !isActionResult(message.result)
@@ -400,6 +401,17 @@ async function handleActionResult(message: OffscreenMessage): Promise<void> {
     typeof message.transcript === "string" ? message.transcript : "command";
   const command = message.command;
   const result = message.result;
+  if (result.workflow?.kind === "clipboard-write") {
+    try {
+      return await performOffscreenClipboardWorkflow(result.workflow);
+    } catch (error) {
+      console.warn("Sotto automatic screenshot copy failed", error);
+      await sendPanel({
+        type: "screenshot-ready",
+        workflow: result.workflow,
+      });
+    }
+  }
   if (!result.workflow) {
     await sendPanel({ type: "earcon", kind: "complete" });
   }
@@ -421,6 +433,7 @@ async function handleActionResult(message: OffscreenMessage): Promise<void> {
           },
         });
   await speak(spoken);
+  return undefined;
 }
 
 async function resetNanoSessions(): Promise<void> {
@@ -435,7 +448,9 @@ async function resetNanoSessions(): Promise<void> {
   await publishStatus();
 }
 
-async function handleOffscreenMessage(message: OffscreenMessage): Promise<void> {
+async function handleOffscreenMessage(
+  message: OffscreenMessage,
+): Promise<unknown> {
   switch (message.type) {
     case "get-status":
     case "refresh-permissions":
@@ -461,8 +476,7 @@ async function handleOffscreenMessage(message: OffscreenMessage): Promise<void> 
       await processTranscript(message.transcript);
       return;
     case "action-result":
-      await handleActionResult(message);
-      return;
+      return handleActionResult(message);
     case "action-error": {
       const transcript =
         typeof message.transcript === "string" ? message.transcript : "command";
@@ -506,7 +520,9 @@ chrome.runtime.onMessage.addListener(
     }
 
     void handleOffscreenMessage(raw as OffscreenMessage)
-      .then(() => sendResponse({ ok: true }))
+      .then((value) =>
+        sendResponse(value === undefined ? { ok: true } : { ok: true, value }),
+      )
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         sendResponse({ ok: false, error: { name: "Error", message } });
