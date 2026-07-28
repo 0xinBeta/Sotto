@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./kokoro": {
+      "types": "./dist/kokoro.d.ts",
+      "import": "./dist/kokoro.js"
     }
   },
   "files": [
@@ -21,5 +25,8 @@
   "devDependencies": {
     "@types/chrome": "0.2.2",
     "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "kokoro-js": "1.2.1"
   }
 }

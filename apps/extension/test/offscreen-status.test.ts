@@ -7,6 +7,13 @@ const nano = vi.hoisted(() => ({
   rewriteWithPrompt: vi.fn(),
   summarizeWithPrompt: vi.fn(),
 }));
+const premium = vi.hoisted(() => ({
+  init: vi.fn(),
+  speak: vi.fn(),
+  stop: vi.fn(),
+  probe: vi.fn(),
+  dispose: vi.fn(),
+}));
 
 vi.mock("@ricky0123/vad-web", () => ({
   MicVAD: { new: vi.fn() },
@@ -32,6 +39,16 @@ vi.mock("@sotto/stt", () => ({
     dispose = vi.fn();
   },
 }));
+vi.mock("@sotto/tts/kokoro", () => ({
+  KokoroTtsEngine: class KokoroTtsEngine {
+    backend = "webgpu" as const;
+    init = premium.init;
+    speak = premium.speak;
+    stop = premium.stop;
+    probe = premium.probe;
+    dispose = premium.dispose;
+  },
+}));
 
 afterEach(() => {
   nano.askPageWithPrompt.mockReset();
@@ -40,9 +57,112 @@ afterEach(() => {
   vi.restoreAllMocks();
   nano.rewriteWithPrompt.mockReset();
   nano.summarizeWithPrompt.mockReset();
+  premium.init.mockReset();
+  premium.speak.mockReset();
+  premium.stop.mockReset();
+  premium.probe.mockReset();
+  premium.dispose.mockReset();
 });
 
 describe("offscreen fail-soft status", () => {
+  it("downloads premium voice, persists default ON, and publishes progress", async () => {
+    nano.getNanoAvailability.mockResolvedValue("unavailable");
+    premium.init.mockImplementation(
+      async (
+        onProgress: (progress: {
+          readonly status: string;
+          readonly progress: number;
+          readonly file?: string;
+        }) => void,
+      ) => {
+        onProgress({
+          status: "progress",
+          progress: 0.5,
+          file: "onnx/model.onnx",
+        });
+      },
+    );
+    premium.dispose.mockResolvedValue(undefined);
+    const values: Record<string, unknown> = {};
+    const storageSet = vi.fn(async (updates: Record<string, unknown>) => {
+      Object.assign(values, updates);
+    });
+    const sendMessage = vi.fn().mockImplementation(
+      async (message: { readonly target?: string }) =>
+        message.target === "worker" ? { ok: true } : undefined,
+    );
+    let onMessage:
+      | ((
+          message: unknown,
+          sender: unknown,
+          respond: (response: unknown) => void,
+        ) => boolean | void)
+      | undefined;
+    vi.stubGlobal("navigator", {
+      permissions: {
+        query: vi.fn().mockResolvedValue({ state: "granted" }),
+      },
+    });
+    vi.stubGlobal("window", { addEventListener: vi.fn() });
+    vi.stubGlobal("chrome", {
+      runtime: {
+        getURL: vi.fn((path: string) => `chrome-extension://sotto/${path}`),
+        sendMessage,
+        onMessage: {
+          addListener: vi.fn((listener) => {
+            onMessage = listener;
+          }),
+        },
+      },
+      storage: {
+        local: {
+          get: vi.fn(async (keys: string | readonly string[]) => {
+            const selected = Array.isArray(keys) ? keys : [keys];
+            return Object.fromEntries(
+              selected
+                .filter((key) => key in values)
+                .map((key) => [key, values[key]]),
+            );
+          }),
+          set: storageSet,
+        },
+      },
+    });
+
+    await import("../src/offscreen.js");
+    if (!onMessage) throw new Error("Offscreen message listener was not installed");
+    const response = new Promise<unknown>((resolve) => {
+      onMessage?.(
+        { target: "offscreen", type: "prepare-premium-tts" },
+        {},
+        resolve,
+      );
+    });
+
+    await expect(response).resolves.toEqual({ ok: true });
+    expect(values).toMatchObject({
+      premiumTtsDownloaded: true,
+      premiumTtsEnabled: true,
+    });
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "model-progress",
+      model: "premium-tts",
+      progress: 0.5,
+      status: "progress",
+      file: "onnx/model.onnx",
+    });
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "premium-tts-state",
+        state: "ready",
+        enabled: true,
+        backend: "webgpu",
+      }),
+    );
+  });
+
   it("reports Nano as unavailable through the pipeline message boundary", async () => {
     nano.getNanoAvailability.mockReset();
     nano.getNanoAvailability.mockResolvedValue("unavailable");

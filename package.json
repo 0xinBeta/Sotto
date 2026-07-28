@@ -15,5 +15,10 @@
     "@types/node": "24.3.0",
     "typescript": "7.0.2",
     "vitest": "3.2.4"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "kokoro-js@1.2.1": "patches/kokoro-js@1.2.1.patch"
+    }
   }
 }

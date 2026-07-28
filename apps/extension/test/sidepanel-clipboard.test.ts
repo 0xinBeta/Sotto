@@ -15,6 +15,7 @@ class FakeElement {
   readonly dataset: Record<string, string> = {};
   readonly listeners = new Map<string, Listener[]>();
   className = "";
+  checked = false;
   dateTime = "";
   disabled = false;
   hidden = false;
@@ -144,6 +145,15 @@ const elementIds = [
   "stt-progress-card",
   "stt-progress",
   "stt-progress-value",
+  "premium-voice-card",
+  "premium-voice-state",
+  "premium-voice-copy",
+  "download-premium-voice",
+  "premium-voice-enabled",
+  "premium-progress-card",
+  "premium-progress",
+  "premium-progress-value",
+  "premium-progress-label",
   "page-text-card",
   "page-text-title",
   "page-text-output",
@@ -261,6 +271,34 @@ afterEach(() => {
 });
 
 describe("side-panel screenshot clipboard fallback", () => {
+  it("shows OS fallback while absent and enables the default-on premium toggle when ready", async () => {
+    const { elements, onMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "premium-tts-state",
+      state: "absent",
+      enabled: false,
+    });
+    expect(elements["premium-voice-copy"].textContent).toContain(
+      "operating system voice instantly",
+    );
+    expect(elements["download-premium-voice"].hidden).toBe(false);
+    expect(elements["premium-voice-enabled"].disabled).toBe(true);
+
+    onMessage({
+      target: "sidepanel",
+      type: "premium-tts-state",
+      state: "ready",
+      enabled: true,
+      backend: "webgpu",
+    });
+    expect(elements["download-premium-voice"].hidden).toBe(true);
+    expect(elements["premium-voice-enabled"].checked).toBe(true);
+    expect(elements["premium-voice-enabled"].disabled).toBe(false);
+    expect(elements["premium-voice-copy"].textContent).toContain("WEBGPU");
+  });
+
   it("shows first-run capture setup and hides it live after the one-time grant", async () => {
     const { elements, requestPermission } = await installSidepanel({
       capturePermissionGranted: false,

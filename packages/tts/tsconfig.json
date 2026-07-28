@@ -15,6 +15,7 @@
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
     "noEmitOnError": true,
     "declaration": true,
     "declarationMap": true,

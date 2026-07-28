@@ -22,6 +22,17 @@ import {
   MoonshineEngine,
   type SttProgress,
 } from "@sotto/stt";
+import {
+  KokoroTtsEngine,
+  type KokoroInitProgress,
+} from "@sotto/tts/kokoro";
+import { InferenceMutex } from "./inference-mutex.js";
+import {
+  PREMIUM_TTS_DOWNLOADED_KEY,
+  PREMIUM_TTS_ENABLED_KEY,
+  premiumEnabledByDefault,
+  type PremiumTtsState,
+} from "./premium-tts.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -34,6 +45,11 @@ interface OffscreenMessage {
   readonly task?: unknown;
   readonly sourceText?: unknown;
   readonly transformation?: unknown;
+  readonly text?: unknown;
+  readonly utteranceId?: unknown;
+  readonly enabled?: unknown;
+  readonly rate?: unknown;
+  readonly volume?: unknown;
 }
 
 interface MessageEnvelope<T> {
@@ -47,6 +63,7 @@ interface MessageEnvelope<T> {
 
 const registry = new ActionRegistry(actions);
 const stt = new MoonshineEngine();
+const inferenceMutex = new InferenceMutex();
 
 let vad: MicVAD | undefined;
 let micStream: MediaStream | undefined;
@@ -62,6 +79,15 @@ let stopTimer: number | undefined;
 let transcriptPipeline = Promise.resolve();
 let sttReady: Promise<void> | undefined;
 let activeModelTask: AbortController | undefined;
+let premiumTts: KokoroTtsEngine | undefined;
+let premiumTtsState: PremiumTtsState = "absent";
+let premiumTtsEnabled = false;
+let premiumTtsDownloaded = false;
+let premiumTtsBackend: "webgpu" | "wasm" | undefined;
+let premiumTtsError: string | undefined;
+let premiumTtsInit: Promise<void> | undefined;
+let premiumTtsRecovery: Promise<void> | undefined;
+let premiumSettingsReady: Promise<void> | undefined;
 
 function cancelActiveModelTask(): void {
   activeModelTask?.abort();
@@ -187,6 +213,17 @@ async function permissionState(): Promise<PermissionState | "unknown"> {
 }
 
 async function publishStatus(error?: string): Promise<void> {
+  await ensurePremiumSettings();
+  if (
+    premiumTtsDownloaded &&
+    premiumTtsEnabled &&
+    !premiumTts &&
+    !premiumTtsInit
+  ) {
+    void ensurePremiumTts().catch((setupError: unknown) => {
+      console.warn("Cached premium voice could not start", setupError);
+    });
+  }
   nanoAvailability = await getNanoAvailability();
   await sendPanel({
     type: "engine-status",
@@ -195,6 +232,207 @@ async function publishStatus(error?: string): Promise<void> {
     mic: await permissionState(),
     ...(error === undefined ? {} : { error }),
   });
+  await publishPremiumStatus();
+}
+
+function progressRatioFromKokoro(
+  progress: KokoroInitProgress,
+): number | undefined {
+  if (
+    typeof progress.progress === "number" &&
+    Number.isFinite(progress.progress)
+  ) {
+    return progress.progress > 1
+      ? progress.progress / 100
+      : progress.progress;
+  }
+  if (
+    typeof progress.loaded === "number" &&
+    typeof progress.total === "number" &&
+    progress.total > 0
+  ) {
+    return progress.loaded / progress.total;
+  }
+  if (progress.status === "ready") return 1;
+  return undefined;
+}
+
+async function ensurePremiumSettings(): Promise<void> {
+  if (premiumSettingsReady) return premiumSettingsReady;
+  premiumSettingsReady = (async () => {
+    const stored = await chrome.storage?.local?.get?.([
+      PREMIUM_TTS_ENABLED_KEY,
+      PREMIUM_TTS_DOWNLOADED_KEY,
+    ]) ?? {};
+    premiumTtsDownloaded =
+      stored[PREMIUM_TTS_DOWNLOADED_KEY] === true;
+    premiumTtsEnabled = premiumEnabledByDefault(
+      stored[PREMIUM_TTS_ENABLED_KEY],
+      premiumTtsDownloaded,
+    );
+    premiumTtsState = premiumTtsDownloaded ? "downloading" : "absent";
+  })();
+  return premiumSettingsReady;
+}
+
+async function publishPremiumStatus(): Promise<void> {
+  const status = {
+    type: "premium-tts-state",
+    state: premiumTtsState,
+    enabled: premiumTtsEnabled,
+    ...(premiumTtsBackend === undefined
+      ? {}
+      : { backend: premiumTtsBackend }),
+    ...(premiumTtsError === undefined ? {} : { error: premiumTtsError }),
+  };
+  await sendPanel(status);
+  void askWorker({
+    type: "premium-state-update",
+    state: premiumTtsState,
+    enabled: premiumTtsEnabled,
+    ...(premiumTtsBackend === undefined
+      ? {}
+      : { backend: premiumTtsBackend }),
+    ...(premiumTtsError === undefined ? {} : { error: premiumTtsError }),
+  }).catch(() => undefined);
+}
+
+function isWebGpuFailure(error: unknown): boolean {
+  const detail = error instanceof Error ? error.message : String(error);
+  return /device[\s_-]*lost|out of memory|\boom\b|webgpu|gpu process/i.test(
+    detail,
+  );
+}
+
+function createPremiumEngine(
+  backend: "auto" | "wasm" = "auto",
+): KokoroTtsEngine {
+  return new KokoroTtsEngine({
+    backend,
+    runtimeUrl: (path) => chrome.runtime.getURL(path),
+    runInference: (task) => inferenceMutex.run(task),
+  });
+}
+
+async function ensurePremiumTts(
+  backend: "auto" | "wasm" = "auto",
+): Promise<void> {
+  await ensurePremiumSettings();
+  if (premiumTtsState === "ready" && premiumTts) return;
+  if (premiumTtsInit) return premiumTtsInit;
+
+  premiumTtsState = "downloading";
+  premiumTtsError = undefined;
+  await publishPremiumStatus();
+  const engine = createPremiumEngine(backend);
+  premiumTts = engine;
+  const pending = engine.init((progress) => {
+    const ratio = progressRatioFromKokoro(progress);
+    if (ratio === undefined) return;
+    void sendPanel({
+      type: "model-progress",
+      model: "premium-tts",
+      progress: Math.max(0, Math.min(1, ratio)),
+      status: progress.status,
+      ...(progress.file === undefined ? {} : { file: progress.file }),
+    });
+  }).then(async () => {
+    premiumTtsDownloaded = true;
+    premiumTtsBackend = engine.backend;
+    premiumTtsState = "ready";
+    const stored = await chrome.storage.local.get(PREMIUM_TTS_ENABLED_KEY);
+    if (typeof stored[PREMIUM_TTS_ENABLED_KEY] !== "boolean") {
+      premiumTtsEnabled = true;
+      await chrome.storage.local.set({
+        [PREMIUM_TTS_ENABLED_KEY]: true,
+      });
+    }
+    await chrome.storage.local.set({
+      [PREMIUM_TTS_DOWNLOADED_KEY]: true,
+    });
+    await publishPremiumStatus();
+  }).catch(async (error: unknown) => {
+    if (premiumTts === engine) premiumTts = undefined;
+    await engine.dispose().catch(() => undefined);
+    premiumTtsState = "error";
+    premiumTtsBackend = undefined;
+    premiumTtsError =
+      error instanceof Error ? error.message : "Premium voice setup failed";
+    await publishPremiumStatus();
+    throw error;
+  });
+  premiumTtsInit = pending;
+  try {
+    await pending;
+  } finally {
+    if (premiumTtsInit === pending) premiumTtsInit = undefined;
+  }
+}
+
+function scheduleWasmRecovery(error: unknown): void {
+  if (premiumTtsRecovery) return;
+  const engine = premiumTts;
+  engine?.stop();
+  premiumTtsState = "downloading";
+  premiumTtsError =
+    error instanceof Error ? error.message : "WebGPU premium voice failed";
+  void publishPremiumStatus();
+
+  premiumTtsRecovery = (async () => {
+    await inferenceMutex.idle();
+    if (premiumTts === engine) premiumTts = undefined;
+    await engine?.dispose().catch(() => undefined);
+    premiumTtsBackend = undefined;
+    premiumTtsError = undefined;
+    await ensurePremiumTts("wasm");
+  })().finally(() => {
+    premiumTtsRecovery = undefined;
+  });
+}
+
+async function speakPremium(message: OffscreenMessage): Promise<void> {
+  if (
+    typeof message.text !== "string" ||
+    !message.text.trim() ||
+    typeof message.utteranceId !== "string" ||
+    !message.utteranceId ||
+    message.utteranceId.length > 160
+  ) {
+    throw new TypeError("A bounded premium speech request is required");
+  }
+  await ensurePremiumSettings();
+  if (
+    !premiumTtsEnabled ||
+    premiumTtsState !== "ready" ||
+    !premiumTts
+  ) {
+    throw new Error("Premium voice is not ready");
+  }
+
+  try {
+    await premiumTts.speak(message.text, {
+      ...(typeof message.rate === "number" &&
+          Number.isFinite(message.rate) &&
+          message.rate > 0
+        ? { rate: message.rate }
+        : {}),
+      ...(typeof message.volume === "number" &&
+          Number.isFinite(message.volume)
+        ? { volume: Math.max(0, Math.min(1, message.volume)) }
+        : {}),
+      onFirstAudio() {
+        void askWorker({
+          type: "premium-first-audio",
+          utteranceId: message.utteranceId,
+        }).catch(() => undefined);
+      },
+    });
+  } catch (error) {
+    if (premiumTtsBackend === "webgpu" && isWebGpuFailure(error)) {
+      scheduleWasmRecovery(error);
+    }
+    throw error;
+  }
 }
 
 function progressRatio(progress: SttProgress): number | undefined {
@@ -578,18 +816,20 @@ async function processTranscript(rawTranscript: string): Promise<void> {
   if (!transcript) return;
 
   await sendPanel({ type: "transcript", text: transcript });
-  const session = await ensureParserSession();
-  const command = await parseCommand({
-    session,
-    registry,
-    transcript,
-    onError(error) {
-      console.warn("Nano intent parsing failed closed", error);
-      void sendPanel({
-        type: "pipeline-error",
-        message: `Gemini Nano could not parse that command: ${error.message}`,
-      });
-    },
+  const command = await inferenceMutex.run(async () => {
+    const session = await ensureParserSession();
+    return await parseCommand({
+      session,
+      registry,
+      transcript,
+      onError(error) {
+        console.warn("Nano intent parsing failed closed", error);
+        void sendPanel({
+          type: "pipeline-error",
+          message: `Gemini Nano could not parse that command: ${error.message}`,
+        });
+      },
+    });
   });
   await askWorker({
     type: "execute-command",
@@ -601,7 +841,7 @@ async function processTranscript(rawTranscript: string): Promise<void> {
 async function processSpeech(audio: Float32Array): Promise<void> {
   try {
     await ensureStt();
-    const text = await stt.transcribe(audio);
+    const text = await inferenceMutex.run(() => stt.transcribe(audio));
     if (!text) {
       await sendPanel({
         type: "pipeline-error",
@@ -622,17 +862,19 @@ async function processSpeech(audio: Float32Array): Promise<void> {
 
 function ensureStt(): Promise<void> {
   if (!sttReady) {
-    const pending = stt.init((progress) => {
-      const ratio = progressRatio(progress);
-      if (ratio === undefined) return;
-      void sendPanel({
-        type: "model-progress",
-        model: "stt",
-        progress: Math.max(0, Math.min(1, ratio)),
-        status: progress.status,
-        ...(progress.file === undefined ? {} : { file: progress.file }),
-      });
-    });
+    const pending = inferenceMutex.run(() =>
+      stt.init((progress) => {
+        const ratio = progressRatio(progress);
+        if (ratio === undefined) return;
+        void sendPanel({
+          type: "model-progress",
+          model: "stt",
+          progress: Math.max(0, Math.min(1, ratio)),
+          status: progress.status,
+          ...(progress.file === undefined ? {} : { file: progress.file }),
+        });
+      })
+    );
     sttReady = pending.catch((error: unknown) => {
       sttReady = undefined;
       throw error;
@@ -663,6 +905,7 @@ async function openMicrophone(): Promise<MediaStream> {
 }
 
 async function startListening(): Promise<void> {
+  premiumTts?.stop();
   if (starting) {
     stopRequested = false;
     return;
@@ -809,17 +1052,18 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
     did: result.spoken,
   });
 
-  const spoken =
-    command.action === "unknown"
-      ? "Sorry, say that again?"
-      : await respondOneSentence({
+  const spoken = command.action === "unknown"
+    ? "Sorry, say that again?"
+    : await inferenceMutex.run(async () =>
+        await respondOneSentence({
           session: await ensureResponderSession(),
           command,
           result,
           onError(error) {
             console.warn("Nano responder used deterministic fallback", error);
           },
-        });
+        })
+      );
   await speak(spoken);
   return undefined;
 }
@@ -831,7 +1075,7 @@ async function resetNanoSessions(): Promise<void> {
   responderSession = undefined;
   nanoAvailability = await getNanoAvailability();
   if (nanoAvailability === "available") {
-    await ensureParserSession();
+    await inferenceMutex.run(() => ensureParserSession());
   }
   await publishStatus();
 }
@@ -846,6 +1090,43 @@ async function handleOffscreenMessage(
       return;
     case "nano-ready":
       await resetNanoSessions();
+      return;
+    case "prepare-premium-tts":
+      await ensurePremiumTts();
+      return;
+    case "set-premium-tts-enabled":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError("A premium voice enabled setting is required");
+      }
+      await ensurePremiumSettings();
+      premiumTtsEnabled = message.enabled;
+      await chrome.storage.local.set({
+        [PREMIUM_TTS_ENABLED_KEY]: premiumTtsEnabled,
+      });
+      if (!premiumTtsEnabled) {
+        premiumTts?.stop();
+      } else if (premiumTtsDownloaded && premiumTtsState !== "ready") {
+        void ensurePremiumTts().catch((error: unknown) => {
+          console.warn("Premium voice could not be enabled", error);
+        });
+      }
+      await publishPremiumStatus();
+      return;
+    case "premium-speak":
+      await speakPremium(message);
+      return;
+    case "premium-stop":
+      premiumTts?.stop();
+      return;
+    case "premium-probe":
+      if (
+        !premiumTtsEnabled ||
+        premiumTtsState !== "ready" ||
+        !premiumTts
+      ) {
+        throw new Error("Premium voice is not ready");
+      }
+      await premiumTts.probe();
       return;
     case "start-listening":
       cancelActiveModelTask();
@@ -867,13 +1148,17 @@ async function handleOffscreenMessage(
       await processTranscript(message.transcript);
       return;
     case "page-task":
-      return withModelTask((signal) => runPageTask(message.task, signal));
+      return withModelTask((signal) =>
+        inferenceMutex.run(() => runPageTask(message.task, signal))
+      );
     case "rewrite-task":
       return withModelTask((signal) =>
-        runRewriteTask(
-          message.sourceText,
-          message.transformation,
-          signal,
+        inferenceMutex.run(() =>
+          runRewriteTask(
+            message.sourceText,
+            message.transformation,
+            signal,
+          )
         ),
       );
     case "action-result":
@@ -934,10 +1219,14 @@ chrome.runtime.onMessage.addListener(
 
 window.addEventListener("unload", () => {
   cancelActiveModelTask();
+  premiumTts?.stop();
   micStream?.getTracks().forEach((track) => track.stop());
   parserSession?.destroy();
   responderSession?.destroy();
   void stt.dispose().catch((error: unknown) => {
     console.warn("Moonshine cleanup failed", error);
+  });
+  void premiumTts?.dispose().catch((error: unknown) => {
+    console.warn("Kokoro cleanup failed", error);
   });
 });

@@ -1,0 +1,113 @@
+diff --git a/dist/kokoro.pinned.js b/dist/kokoro.pinned.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5183f7a345c67e443b95ad404917f6d7a830938
+--- /dev/null
++++ b/dist/kokoro.pinned.js
+@@ -0,0 +1,60 @@
++import {
++  KokoroTTS as UpstreamKokoroTTS,
++  TextSplitterStream,
++  env,
++} from "./kokoro.js";
++
++const PINNED_MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
++const PINNED_REVISION = "1939ad2a8e416c0acfeecc08a694d14ef25f2231";
++const MAIN_PREFIX =
++  `https://huggingface.co/${PINNED_MODEL_ID}/resolve/main/`;
++const PINNED_PREFIX =
++  `https://huggingface.co/${PINNED_MODEL_ID}/resolve/${PINNED_REVISION}/`;
++
++let pinnedFetchInstalled = false;
++
++function installPinnedFetch() {
++  if (pinnedFetchInstalled || typeof globalThis.fetch !== "function") {
++    return;
++  }
++
++  const upstreamFetch = globalThis.fetch.bind(globalThis);
++  globalThis.fetch = (input, init) => {
++    const url =
++      typeof input === "string"
++        ? input
++        : input instanceof URL
++          ? input.href
++          : input.url;
++    if (!url.startsWith(MAIN_PREFIX)) {
++      return upstreamFetch(input, init);
++    }
++
++    const pinnedUrl = `${PINNED_PREFIX}${url.slice(MAIN_PREFIX.length)}`;
++    if (typeof input === "string") {
++      return upstreamFetch(pinnedUrl, init);
++    }
++    if (input instanceof URL) {
++      return upstreamFetch(new URL(pinnedUrl), init);
++    }
++    return upstreamFetch(new Request(pinnedUrl, input), init);
++  };
++  pinnedFetchInstalled = true;
++}
++
++class KokoroTTS extends UpstreamKokoroTTS {
++  static from_pretrained(modelId, options = {}) {
++    const { revision = PINNED_REVISION, ...upstreamOptions } = options;
++    if (modelId === PINNED_MODEL_ID) {
++      if (revision !== PINNED_REVISION) {
++        throw new Error(
++          `Kokoro revision must be pinned to ${PINNED_REVISION}`,
++        );
++      }
++      installPinnedFetch();
++    }
++    return UpstreamKokoroTTS.from_pretrained(modelId, upstreamOptions);
++  }
++}
++
++export { KokoroTTS, TextSplitterStream, env };
+diff --git a/package.json b/package.json
+index 94372d1be5c93c70b651f5175028a963d312f640..e3177f8d61af4c9ba0301d9bb4b5f233ad77c29c 100644
+--- a/package.json
++++ b/package.json
+@@ -5,10 +5,10 @@
+   "exports": {
+     "types": "./types/kokoro.d.ts",
+     "node": {
+-      "import": "./dist/kokoro.js",
++      "import": "./dist/kokoro.pinned.js",
+       "require": "./dist/kokoro.cjs"
+     },
+-    "default": "./dist/kokoro.js"
++    "default": "./dist/kokoro.pinned.js"
+   },
+   "scripts": {
+     "build": "rm -rf dist types && rollup -c && tsc && cp ../LICENSE LICENSE",
+diff --git a/types/kokoro.d.ts b/types/kokoro.d.ts
+index 040c395fdc7b71a4c622b80840c0021373f755dc..64edfd41d91f00b60417acacd82bdca0209431d3 100644
+--- a/types/kokoro.d.ts
++++ b/types/kokoro.d.ts
+@@ -18,10 +18,11 @@ export class KokoroTTS {
+      * @param {import("@huggingface/transformers").ProgressCallback} [options.progress_callback=null] A callback function that is called with progress information.
+      * @returns {Promise<KokoroTTS>} The loaded model
+      */
+-    static from_pretrained(model_id: string, { dtype, device, progress_callback }?: {
++    static from_pretrained(model_id: string, { dtype, device, progress_callback, revision }?: {
+         dtype?: "fp32" | "fp16" | "q8" | "q4" | "q4f16";
+         device?: "wasm" | "webgpu" | "cpu" | null;
+         progress_callback?: import("@huggingface/transformers").ProgressCallback;
++        revision?: string;
+     }): Promise<KokoroTTS>;
+     /**
+      * Create a new KokoroTTS instance.
+diff --git a/types/splitter.d.ts b/types/splitter.d.ts
+index dc28bdf28fe94d90caaea57b1b56a74691331a0c..e58f28402ae9e3c5b5cda3e583f1a4c7e9eda10d 100644
+--- a/types/splitter.d.ts
++++ b/types/splitter.d.ts
+@@ -44,7 +44,7 @@ export class TextSplitterStream {
+      * @type {string[]} The array of sentences.
+      * @readonly
+      */
+-    readonly get sentences(): string[];
++    get sentences(): string[];
+     /**
+      * Async iterator to yield sentences as they become available.
+      * @returns {AsyncGenerator<string, void, void>}

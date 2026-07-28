@@ -26,6 +26,10 @@ import destinations, {
   type ClipboardWorkflowCompletion,
 } from "@sotto/destinations";
 import { SystemTtsEngine } from "@sotto/tts";
+import {
+  PremiumTtsRouter,
+  type PremiumTtsState,
+} from "./premium-tts.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -35,12 +39,21 @@ interface WorkerMessage {
   readonly transcript?: unknown;
   readonly completion?: unknown;
   readonly reminderId?: unknown;
+  readonly utteranceId?: unknown;
+  readonly state?: unknown;
+  readonly enabled?: unknown;
+  readonly backend?: unknown;
+  readonly error?: unknown;
 }
 
 const actionRegistry = new ActionRegistry(actions);
 const destinationRegistry = new DestinationRegistry(destinations);
 const commandRouter = new CommandRouter(actionRegistry);
-const tts = new SystemTtsEngine();
+const systemTts = new SystemTtsEngine();
+const tts = new PremiumTtsRouter({
+  system: systemTts,
+  request: (request) => sendOffscreen({ ...request }),
+});
 
 let creatingOffscreen: Promise<void> | undefined;
 let commandGeneration = 0;
@@ -66,8 +79,9 @@ async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
   if (!creatingOffscreen) {
     creatingOffscreen = chrome.offscreen.createDocument({
       url: path,
-      reasons: ["USER_MEDIA"],
-      justification: "Capture microphone audio for on-device voice commands",
+      reasons: ["USER_MEDIA", "AUDIO_PLAYBACK"],
+      justification:
+        "Capture microphone audio and play fully local premium speech",
     });
   }
 
@@ -1024,6 +1038,53 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return sendOffscreen({ type: "refresh-permissions" });
     case "nano-ready":
       return sendOffscreen({ type: "nano-ready" });
+    case "prepare-premium-tts":
+      return sendOffscreen({ type: "prepare-premium-tts" });
+    case "set-premium-tts-enabled":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError("A premium voice enabled setting is required");
+      }
+      return sendOffscreen({
+        type: "set-premium-tts-enabled",
+        enabled: message.enabled,
+      });
+    case "premium-first-audio":
+      if (
+        typeof message.utteranceId !== "string" ||
+        message.utteranceId.length > 160
+      ) {
+        throw new TypeError("A valid premium utterance id is required");
+      }
+      tts.notifyFirstAudio(message.utteranceId);
+      return undefined;
+    case "premium-state-update": {
+      if (
+        message.state !== "absent" &&
+        message.state !== "downloading" &&
+        message.state !== "ready" &&
+        message.state !== "error"
+      ) {
+        throw new TypeError("A valid premium voice state is required");
+      }
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError("A premium voice enabled setting is required");
+      }
+      const backend =
+        message.backend === "webgpu" || message.backend === "wasm"
+          ? message.backend
+          : undefined;
+      const error =
+        typeof message.error === "string"
+          ? message.error.slice(0, 1_000)
+          : undefined;
+      tts.updateStatus({
+        state: message.state as PremiumTtsState,
+        enabled: message.enabled,
+        ...(backend === undefined ? {} : { backend }),
+        ...(error === undefined ? {} : { error }),
+      });
+      return undefined;
+    }
     case "clipboard-complete": {
       await completeClipboardWorkflow(
         parseClipboardWorkflowCompletion(message.completion),

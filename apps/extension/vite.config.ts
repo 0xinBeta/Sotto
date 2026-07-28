@@ -15,6 +15,18 @@ const ortVadDist = realpathSync(
 const ortTransformersDist = realpathSync(
   resolve(extensionRoot, "node_modules/onnxruntime-web-transformers/dist"),
 );
+const kokoroPackage = realpathSync(
+  resolve(extensionRoot, "../../packages/tts/node_modules/kokoro-js"),
+);
+const kokoroTransformers = realpathSync(
+  resolve(kokoroPackage, "../@huggingface/transformers"),
+);
+const ortKokoroDist = realpathSync(
+  resolve(kokoroTransformers, "../../onnxruntime-web/dist"),
+);
+const kokoroPhonemizerDist = realpathSync(
+  resolve(kokoroPackage, "../phonemizer/dist"),
+);
 
 function crc32(data: Uint8Array): number {
   let crc = 0xffffffff;
@@ -163,6 +175,16 @@ export default defineConfig({
         {
           src: `${ortTransformersDist}/*.{wasm,mjs}`,
           dest: "assets/ort-transformers",
+          rename: { stripBase: true },
+        },
+        {
+          src: `${ortKokoroDist}/ort-wasm-simd-threaded*.{wasm,mjs}`,
+          dest: "assets/ort-kokoro",
+          rename: { stripBase: true },
+        },
+        {
+          src: resolve(kokoroPhonemizerDist, "phonemizer.js"),
+          dest: "assets/espeak-ng",
           rename: { stripBase: true },
         },
       ],

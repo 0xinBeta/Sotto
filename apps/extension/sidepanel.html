@@ -61,6 +61,36 @@
         </div>
       </section>
 
+      <section class="premium-voice-card" id="premium-voice-card" data-state="absent">
+        <div class="premium-voice-heading">
+          <div>
+            <p class="section-index">LOCAL OUTPUT / AF_HEART</p>
+            <h2>Premium voice</h2>
+          </div>
+          <span class="premium-state" id="premium-voice-state">ABSENT</span>
+        </div>
+        <p class="premium-voice-copy" id="premium-voice-copy">
+          Download the natural on-device voice when you are ready. Until then, Sotto uses your operating system voice instantly.
+        </p>
+        <div class="premium-voice-actions">
+          <button class="button primary" id="download-premium-voice" type="button">
+            Download premium voice
+          </button>
+          <label class="voice-switch" for="premium-voice-enabled">
+            <span>Use premium</span>
+            <input id="premium-voice-enabled" type="checkbox" role="switch" disabled />
+            <span class="voice-switch-track" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div class="premium-progress" id="premium-progress-card" hidden>
+          <div class="progress-copy">
+            <span id="premium-progress-label">Kokoro voice model</span>
+            <output id="premium-progress-value">0%</output>
+          </div>
+          <progress id="premium-progress" max="1" value="0"></progress>
+        </div>
+      </section>
+
       <section class="transcript-panel" aria-live="polite">
         <div class="section-heading">
           <p class="section-index">01 / HEARD</p>

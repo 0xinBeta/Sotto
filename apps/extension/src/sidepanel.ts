@@ -8,7 +8,13 @@ import { nextLogEntry, type LogEntry } from "./log.js";
 import "./styles.css";
 
 type NanoAvailability = "unavailable" | "downloadable" | "downloading" | "available";
-type ModelProgressKind = "nano" | "stt" | "summarizer" | "rewriter";
+type ModelProgressKind =
+  | "nano"
+  | "stt"
+  | "summarizer"
+  | "rewriter"
+  | "premium-tts";
+type PremiumTtsState = "absent" | "downloading" | "ready" | "error";
 
 interface PanelNote {
   readonly id: string;
@@ -105,7 +111,15 @@ type PanelMessage =
         readonly notificationPermission?: string;
       };
     }
-  | { target: "sidepanel"; type: "pipeline-error"; message: string };
+  | { target: "sidepanel"; type: "pipeline-error"; message: string }
+  | {
+      target: "sidepanel";
+      type: "premium-tts-state";
+      state: PremiumTtsState;
+      enabled: boolean;
+      backend?: "webgpu" | "wasm";
+      error?: string;
+    };
 
 function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
   switch (message.type) {
@@ -173,7 +187,8 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         (message.model === "nano" ||
           message.model === "stt" ||
           message.model === "summarizer" ||
-          message.model === "rewriter") &&
+          message.model === "rewriter" ||
+          message.model === "premium-tts") &&
         typeof message.progress === "number" &&
         Number.isFinite(message.progress) &&
         message.progress >= 0 &&
@@ -182,6 +197,19 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           isBoundedString(message.status, 100)) &&
         (message.file === undefined ||
           isBoundedString(message.file, 1_000))
+      );
+    case "premium-tts-state":
+      return (
+        (message.state === "absent" ||
+          message.state === "downloading" ||
+          message.state === "ready" ||
+          message.state === "error") &&
+        typeof message.enabled === "boolean" &&
+        (message.backend === undefined ||
+          message.backend === "webgpu" ||
+          message.backend === "wasm") &&
+        (message.error === undefined ||
+          isBoundedString(message.error, 1_000))
       );
     default:
       return true;
@@ -224,6 +252,21 @@ const nanoProgressLabel = requiredElement<HTMLElement>("#nano-progress-label");
 const sttProgressCard = requiredElement<HTMLElement>("#stt-progress-card");
 const sttProgress = requiredElement<HTMLProgressElement>("#stt-progress");
 const sttProgressValue = requiredElement<HTMLOutputElement>("#stt-progress-value");
+const premiumVoiceCard = requiredElement<HTMLElement>("#premium-voice-card");
+const premiumVoiceState = requiredElement<HTMLElement>("#premium-voice-state");
+const premiumVoiceCopy = requiredElement<HTMLElement>("#premium-voice-copy");
+const downloadPremiumVoice =
+  requiredElement<HTMLButtonElement>("#download-premium-voice");
+const premiumVoiceEnabled =
+  requiredElement<HTMLInputElement>("#premium-voice-enabled");
+const premiumProgressCard =
+  requiredElement<HTMLElement>("#premium-progress-card");
+const premiumProgress =
+  requiredElement<HTMLProgressElement>("#premium-progress");
+const premiumProgressValue =
+  requiredElement<HTMLOutputElement>("#premium-progress-value");
+const premiumProgressLabel =
+  requiredElement<HTMLElement>("#premium-progress-label");
 const pageTextCard = requiredElement<HTMLElement>("#page-text-card");
 const pageTextTitle = requiredElement<HTMLElement>("#page-text-title");
 const pageTextOutput = requiredElement<HTMLElement>("#page-text-output");
@@ -241,7 +284,9 @@ let pointerIsDown = false;
 let earconContext: AudioContext | undefined;
 let capturePermissionGranted: boolean | undefined;
 let nanoAvailability: NanoAvailability | undefined;
-const progressHideTimers: Partial<Record<"nano" | "stt", number>> = {};
+let premiumState: PremiumTtsState = "absent";
+const progressHideTimers:
+  Partial<Record<"nano" | "stt" | "premium-tts", number>> = {};
 
 function setStatus(
   state: "booting" | "ready" | "listening" | "error",
@@ -382,11 +427,29 @@ function updateProgress(
   file?: string,
 ): void {
   const normalized = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
-  const progressKind = model === "stt" ? "stt" : "nano";
-  const card = progressKind === "nano" ? nanoProgressCard : sttProgressCard;
-  const bar = progressKind === "nano" ? nanoProgress : sttProgress;
-  const output =
-    progressKind === "nano" ? nanoProgressValue : sttProgressValue;
+  const progressKind =
+    model === "stt"
+      ? "stt"
+      : model === "premium-tts"
+        ? "premium-tts"
+        : "nano";
+  const card =
+    progressKind === "nano"
+      ? nanoProgressCard
+      : progressKind === "stt"
+        ? sttProgressCard
+        : premiumProgressCard;
+  const bar =
+    progressKind === "nano"
+      ? nanoProgress
+      : progressKind === "stt"
+        ? sttProgress
+        : premiumProgress;
+  const output = progressKind === "nano"
+    ? nanoProgressValue
+    : progressKind === "stt"
+      ? sttProgressValue
+      : premiumProgressValue;
   if (progressKind === "nano") {
     nanoProgressLabel.textContent =
       model === "summarizer"
@@ -394,6 +457,11 @@ function updateProgress(
         : model === "rewriter"
           ? "Chrome Rewriter"
           : "Gemini Nano";
+  }
+  if (progressKind === "premium-tts") {
+    premiumProgressLabel.textContent = file
+      ? `Kokoro · ${file.split("/").at(-1) ?? "model"}`
+      : "Kokoro voice model";
   }
   card.hidden = false;
   if (file) card.title = file;
@@ -410,6 +478,46 @@ function updateProgress(
       card.hidden = true;
       delete progressHideTimers[progressKind];
     }, 900);
+  }
+}
+
+function showPremiumVoiceState(
+  state: PremiumTtsState,
+  enabled: boolean,
+  backend?: "webgpu" | "wasm",
+  error?: string,
+): void {
+  premiumState = state;
+  premiumVoiceCard.dataset.state = state;
+  premiumVoiceState.textContent = state.toUpperCase();
+  premiumVoiceEnabled.checked = enabled;
+  premiumVoiceEnabled.disabled = state !== "ready";
+  downloadPremiumVoice.hidden = state === "ready";
+  downloadPremiumVoice.disabled = state === "downloading";
+
+  switch (state) {
+    case "absent":
+      downloadPremiumVoice.textContent = "Download premium voice";
+      premiumVoiceCopy.textContent =
+        "Download the natural on-device voice when you are ready. Until then, Sotto uses your operating system voice instantly.";
+      break;
+    case "downloading":
+      downloadPremiumVoice.hidden = false;
+      downloadPremiumVoice.textContent = "Downloading on device…";
+      premiumProgressCard.hidden = false;
+      premiumVoiceCopy.textContent =
+        "Sotto stays responsive while the model downloads. Spoken feedback continues through your operating system voice.";
+      break;
+    case "ready":
+      premiumVoiceCopy.textContent =
+        `Kokoro af_heart is ready at 24 kHz${backend ? ` via ${backend.toUpperCase()}` : ""}. Your operating system voice remains the instant fallback.`;
+      break;
+    case "error":
+      downloadPremiumVoice.textContent = "Retry premium download";
+      premiumVoiceCopy.textContent =
+        error ??
+        "Premium voice could not start. Sotto is continuing with your operating system voice.";
+      break;
   }
 }
 
@@ -687,6 +795,34 @@ async function prepareNanoModel(): Promise<void> {
 prepareNano.addEventListener("click", () => void prepareNanoModel());
 setupPrepareNano.addEventListener("click", () => void prepareNanoModel());
 
+downloadPremiumVoice.addEventListener("click", async () => {
+  showPremiumVoiceState("downloading", true);
+  updateProgress("premium-tts", 0, false);
+  if (!(await send({ type: "prepare-premium-tts" }))) {
+    showPremiumVoiceState(
+      "error",
+      false,
+      undefined,
+      "Premium voice setup could not start. Sotto is still using your operating system voice.",
+    );
+  }
+});
+
+premiumVoiceEnabled.addEventListener("change", async () => {
+  if (premiumState !== "ready") return;
+  const requested = premiumVoiceEnabled.checked;
+  premiumVoiceEnabled.disabled = true;
+  if (
+    !(await send({
+      type: "set-premium-tts-enabled",
+      enabled: requested,
+    }))
+  ) {
+    premiumVoiceEnabled.checked = !requested;
+  }
+  premiumVoiceEnabled.disabled = false;
+});
+
 enableCapture.addEventListener("click", async () => {
   enableCapture.disabled = true;
   try {
@@ -789,6 +925,14 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       showNanoState(message.nano);
       showMicrophoneState(message.mic);
       if (message.error) appendLog("system", message.error);
+      break;
+    case "premium-tts-state":
+      showPremiumVoiceState(
+        message.state,
+        message.enabled,
+        message.backend,
+        message.error,
+      );
       break;
     case "listening-state":
       setListening(message.listening);
