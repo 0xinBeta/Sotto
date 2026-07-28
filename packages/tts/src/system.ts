@@ -88,7 +88,13 @@ export class SystemTtsEngine implements LongFormTtsEngine {
       return;
     }
 
-    await this.speakUntilFinalEvent(utterance, voice, options);
+    await this.speakUntilFinalEvent(
+      utterance,
+      voice,
+      options,
+      undefined,
+      options.onFirstAudio,
+    );
   }
 
   async speakLong(
@@ -117,6 +123,7 @@ export class SystemTtsEngine implements LongFormTtsEngine {
 
     let searchStart = 0;
     let lastProgress = -1;
+    let firstAudioEmitted = false;
 
     for (const [chunkIndex, chunk] of chunks.entries()) {
       if (generation !== this.generation) {
@@ -178,6 +185,11 @@ export class SystemTtsEngine implements LongFormTtsEngine {
             reportProgress(event.charIndex, event.type);
           }
         },
+        () => {
+          if (firstAudioEmitted) return;
+          firstAudioEmitted = true;
+          options.onFirstAudio?.();
+        },
       );
 
       if (generation !== this.generation || finalEvent !== "end") {
@@ -238,6 +250,7 @@ export class SystemTtsEngine implements LongFormTtsEngine {
     voice: VoiceSelection,
     options: TtsSpeakOptions,
     onEvent?: (event: chrome.tts.TtsEvent) => void,
+    onFirstAudio?: () => void,
   ): Promise<SuccessfulFinalEvent> {
     assertUtteranceLength(utterance);
 
@@ -294,6 +307,15 @@ export class SystemTtsEngine implements LongFormTtsEngine {
           }
 
           switch (event.type) {
+            case "start":
+              try {
+                onFirstAudio?.();
+              } catch (error) {
+                console.warn("System TTS first audio callback failed", error);
+              }
+              resetWatchdog();
+              onEvent?.(event);
+              break;
             case "end":
               finish("end");
               break;

@@ -3,6 +3,7 @@ export interface TtsSpeakOptions {
   readonly rate?: number;
   readonly pitch?: number;
   readonly volume?: number;
+  readonly onFirstAudio?: () => void;
 }
 
 export type TtsProgressEventType =

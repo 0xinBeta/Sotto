@@ -32,8 +32,10 @@ afterEach(() => {
 
 describe("SystemTtsEngine", () => {
   it("selects a local matching voice and resolves on playback end", async () => {
+    const firstAudio = vi.fn();
     const speak = vi.fn(
       (_text: string, options: chrome.tts.TtsOptions) => {
+        options.onEvent?.({ type: "start" } as chrome.tts.TtsEvent);
         options.onEvent?.({ type: "end" } as chrome.tts.TtsEvent);
       },
     );
@@ -46,7 +48,10 @@ describe("SystemTtsEngine", () => {
     );
 
     await expect(
-      new SystemTtsEngine().speak("Done", { lang: "en-US" }),
+      new SystemTtsEngine().speak("Done", {
+        lang: "en-US",
+        onFirstAudio: firstAudio,
+      }),
     ).resolves.toBeUndefined();
     expect(speak).toHaveBeenCalledWith(
       "Done",
@@ -56,6 +61,7 @@ describe("SystemTtsEngine", () => {
         enqueue: false,
       }),
     );
+    expect(firstAudio).toHaveBeenCalledOnce();
   });
 
   it("rejects instead of silently accepting a missing local voice", async () => {

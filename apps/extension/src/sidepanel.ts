@@ -5,6 +5,11 @@ import type {
 } from "@sotto/core";
 import { performClipboardWorkflow } from "@sotto/destinations";
 import { nextLogEntry, type LogEntry } from "./log.js";
+import {
+  formatExchangeTimings,
+  isExchangeTimings,
+  type ExchangeTimings,
+} from "./timings.js";
 import "./styles.css";
 
 type NanoAvailability = "unavailable" | "downloadable" | "downloading" | "available";
@@ -90,7 +95,13 @@ type PanelMessage =
       file?: string;
     }
   | { target: "sidepanel"; type: "earcon"; kind: "listen" | "complete" }
-  | { target: "sidepanel"; type: "action-log"; heard: string; did: string }
+  | {
+      target: "sidepanel";
+      type: "action-log";
+      heard: string;
+      did: string;
+      timings?: ExchangeTimings;
+    }
   | {
       target: "sidepanel";
       type: "screenshot-ready";
@@ -158,6 +169,13 @@ type PanelMessage =
 
 function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
   switch (message.type) {
+    case "action-log":
+      return (
+        isBoundedString(message.heard, 2_000, 1) &&
+        isBoundedString(message.did, 2_000, 1) &&
+        (message.timings === undefined ||
+          isExchangeTimings(message.timings))
+      );
     case "screenshot-permission-needed": {
       if (!isRecord(message.workflow)) return false;
       const workflow = message.workflow;
@@ -772,9 +790,34 @@ function updateLogTime(time: HTMLTimeElement, now: Date): void {
   });
 }
 
-function appendLog(heard: string, did: string): void {
+function createTimingLine(
+  timings: ExchangeTimings | undefined,
+): HTMLParagraphElement | undefined {
+  if (!timings) return undefined;
+  const display = formatExchangeTimings(timings);
+  if (!display) return undefined;
+
+  const line = document.createElement("p");
+  const total = document.createElement("span");
+  line.className = "log-timing";
+  line.dataset.tone = display.tone;
+  total.className = "log-timing-total";
+  total.textContent = display.total;
+  line.append(
+    document.createTextNode(`${display.stages} · `),
+    total,
+  );
+  return line;
+}
+
+function appendLog(
+  heard: string,
+  did: string,
+  timings?: ExchangeTimings,
+): void {
   const decision = nextLogEntry(newestLogEntry, heard, did);
   const now = new Date();
+  const timingLine = createTimingLine(timings);
   if (decision.collapsed) {
     const newest = actionLog.firstElementChild;
     const time = newest?.querySelector<HTMLTimeElement>("time");
@@ -783,6 +826,8 @@ function appendLog(heard: string, did: string): void {
       updateLogTime(time, now);
       count.hidden = false;
       count.textContent = `×${decision.entry.count}`;
+      newest?.querySelector(".log-timing")?.remove();
+      if (timingLine) newest?.append(timingLine);
       newestLogEntry = decision.entry;
       return;
     }
@@ -804,6 +849,7 @@ function appendLog(heard: string, did: string): void {
     count,
   );
   item.append(time, copy);
+  if (timingLine) item.append(timingLine);
   actionLog.prepend(item);
   newestLogEntry = decision.entry;
 }
@@ -1239,7 +1285,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       void playEarcon(message.kind);
       break;
     case "action-log":
-      appendLog(message.heard, message.did);
+      appendLog(message.heard, message.did, message.timings);
       break;
     case "screenshot-ready":
       void receiveClipboardWorkflow(message.workflow);

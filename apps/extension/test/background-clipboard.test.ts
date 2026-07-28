@@ -299,7 +299,10 @@ describe("background screenshot clipboard injection", () => {
     });
     expect(worker.speak).toHaveBeenCalledWith(
       hostilePageOutput,
-      { lang: "en-US" },
+      {
+        lang: "en-US",
+        onFirstAudio: expect.any(Function),
+      },
     );
     expect(harness.sendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -468,6 +471,10 @@ describe("background screenshot clipboard injection", () => {
       transcript: "take a screenshot",
       command: { action: "screenshot", destination: "claude" },
       result,
+      timings: {
+        input: "voice",
+        actionMs: expect.any(Number),
+      },
     });
     expect(worker.followUp).not.toHaveBeenCalled();
     expect(harness.sendMessage).not.toHaveBeenCalledWith(
@@ -507,6 +514,10 @@ describe("background screenshot clipboard injection", () => {
       transcript: "take a screenshot",
       command: { action: "screenshot", destination: "claude" },
       result,
+      timings: {
+        input: "voice",
+        actionMs: expect.any(Number),
+      },
     });
     expect(worker.followUp).not.toHaveBeenCalled();
   });

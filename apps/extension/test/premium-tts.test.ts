@@ -226,7 +226,10 @@ describe("PremiumTtsRouter", () => {
 
     await router.speakLong("First sentence. Second sentence.");
 
-    expect(system.speak).toHaveBeenCalledWith("First sentence.", {});
+    expect(system.speak).toHaveBeenCalledWith(
+      "First sentence.",
+      expect.objectContaining({ onFirstAudio: expect.any(Function) }),
+    );
     expect(request).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "premium-speak",
@@ -256,7 +259,10 @@ describe("PremiumTtsRouter", () => {
 
     await router.speakLong("System first. Premium second.");
 
-    expect(system.speak).toHaveBeenCalledWith("System first.", {});
+    expect(system.speak).toHaveBeenCalledWith(
+      "System first.",
+      expect.objectContaining({ onFirstAudio: expect.any(Function) }),
+    );
     expect(request).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "premium-speak",
@@ -280,6 +286,25 @@ describe("PremiumTtsRouter", () => {
     const chunks = splitPremiumSentences(longWord);
     expect(chunks.map((chunk) => chunk.length)).toEqual([200, 200, 1]);
     expect(chunks.join("")).toBe(longWord);
+  });
+
+  it("reports the existing premium first-audio signal once", async () => {
+    const system = systemHarness();
+    const firstAudio = vi.fn();
+    let router!: PremiumTtsRouter;
+    const request = vi.fn(async (message: PremiumTtsRequest) => {
+      if (message.type !== "premium-speak") return;
+      queueMicrotask(() => {
+        router.notifyFirstAudio(message.utteranceId ?? "");
+        router.notifyFirstAudio(message.utteranceId ?? "");
+      });
+    });
+    router = new PremiumTtsRouter({ system, request });
+    router.updateStatus({ state: "ready", enabled: true });
+
+    await router.speak("Ready.", { onFirstAudio: firstAudio });
+
+    expect(firstAudio).toHaveBeenCalledOnce();
   });
 });
 

@@ -727,6 +727,30 @@ progress::-webkit-progress-value {
   line-height: 1.45;
 }
 
+.action-log .log-timing {
+  grid-column: 2;
+  margin-top: -8px;
+  color: var(--paper-dim);
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 9px;
+}
+
+.log-timing-total {
+  font-weight: 700;
+}
+
+.log-timing[data-tone="green"] .log-timing-total {
+  color: #9de37b;
+}
+
+.log-timing[data-tone="amber"] .log-timing-total {
+  color: #ffc45f;
+}
+
+.log-timing[data-tone="red"] .log-timing-total {
+  color: var(--danger);
+}
+
 .action-log strong {
   color: var(--acid);
   font-weight: 600;

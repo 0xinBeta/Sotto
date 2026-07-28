@@ -33,13 +33,9 @@ export interface KokoroInitProgress {
 
 export type KokoroProgressCallback = (progress: KokoroInitProgress) => void;
 
-export interface KokoroSpeakOptions extends TtsSpeakOptions {
-  readonly onFirstAudio?: () => void;
-}
+export interface KokoroSpeakOptions extends TtsSpeakOptions {}
 
-export interface KokoroLongSpeakOptions extends TtsLongSpeakOptions {
-  readonly onFirstAudio?: () => void;
-}
+export interface KokoroLongSpeakOptions extends TtsLongSpeakOptions {}
 
 interface RawKokoroAudio {
   readonly data: Float32Array;

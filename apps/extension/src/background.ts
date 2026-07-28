@@ -30,6 +30,10 @@ import {
   PremiumTtsRouter,
   type PremiumTtsState,
 } from "./premium-tts.js";
+import {
+  isExchangeTimings,
+  type ExchangeTimings,
+} from "./timings.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -44,6 +48,9 @@ interface WorkerMessage {
   readonly enabled?: unknown;
   readonly backend?: unknown;
   readonly error?: unknown;
+  readonly heard?: unknown;
+  readonly did?: unknown;
+  readonly timings?: unknown;
 }
 
 const actionRegistry = new ActionRegistry(actions);
@@ -142,6 +149,36 @@ async function sendPanel(message: Record<string, unknown>): Promise<boolean> {
   } catch {
     // The panel is intentionally optional; hotkey voice commands still work.
     return false;
+  }
+}
+
+async function speakAndPublishActionLog(
+  heard: string,
+  did: string,
+  timings: ExchangeTimings,
+  speak: (onFirstAudio: () => void) => Promise<void>,
+): Promise<void> {
+  const speakStartedAt = performance.now();
+  let publication: Promise<boolean> | undefined;
+  const publish = (voiceMs?: number): Promise<boolean> => {
+    publication ??= sendPanel({
+      type: "action-log",
+      heard,
+      did,
+      timings:
+        voiceMs === undefined
+          ? timings
+          : { ...timings, voiceMs },
+    });
+    return publication;
+  };
+
+  try {
+    await speak(() => {
+      void publish(Math.max(0, performance.now() - speakStartedAt));
+    });
+  } finally {
+    await publish();
   }
 }
 
@@ -833,6 +870,7 @@ async function publishActionResult(
   command: ActionCommand,
   result: ActionResult,
   generation: number,
+  timings: ExchangeTimings,
 ): Promise<void> {
   if (!commandIsCurrent(generation)) return;
   if (command.action === "notes") {
@@ -860,27 +898,38 @@ async function publishActionResult(
     });
     if (!commandIsCurrent(generation)) return;
     await sendPanel({ type: "earcon", kind: "complete" });
-    await sendPanel({
-      type: "action-log",
-      heard: transcript,
-      did: result.spoken,
-    });
     if (!commandIsCurrent(generation)) return;
     const speechLanguage = safeTtsLanguage(lang);
     if (speech === "long") {
-      await tts.speakLong(text, {
-        lang: speechLanguage,
-        onProgress(progress) {
-          if (!commandIsCurrent(generation)) return;
-          void sendPanel({
-            type: "reading-progress",
-            current: progress.charIndex,
-            total: progress.totalChars,
-          });
-        },
-      });
+      await speakAndPublishActionLog(
+        transcript,
+        result.spoken,
+        timings,
+        (onFirstAudio) =>
+          tts.speakLong(text, {
+            lang: speechLanguage,
+            onFirstAudio,
+            onProgress(progress) {
+              if (!commandIsCurrent(generation)) return;
+              void sendPanel({
+                type: "reading-progress",
+                current: progress.charIndex,
+                total: progress.totalChars,
+              });
+            },
+          }),
+      );
     } else {
-      await tts.speak(text, { lang: speechLanguage });
+      await speakAndPublishActionLog(
+        transcript,
+        result.spoken,
+        timings,
+        (onFirstAudio) =>
+          tts.speak(text, {
+            lang: speechLanguage,
+            onFirstAudio,
+          }),
+      );
     }
     return;
   }
@@ -906,6 +955,7 @@ async function publishActionResult(
     transcript,
     command,
     result,
+    timings,
   });
 }
 
@@ -913,17 +963,34 @@ async function executeCommand(
   command: unknown,
   transcript: string,
   generation: number,
+  timings: ExchangeTimings,
 ): Promise<ActionResult | undefined> {
+  let completedTimings = timings;
   try {
     const validated = commandRouter.parse(command);
-    const result = await commandRouter.route(validated, {
-      dispatchDestination: (id, input) =>
-        destinationRegistry.dispatch(id, input),
-      page: pageActionServices,
-      type: editableActionServices,
-    });
+    const actionStartedAt = performance.now();
+    let result: ActionResult;
+    try {
+      result = await commandRouter.route(validated, {
+        dispatchDestination: (id, input) =>
+          destinationRegistry.dispatch(id, input),
+        page: pageActionServices,
+        type: editableActionServices,
+      });
+    } finally {
+      completedTimings = {
+        ...timings,
+        actionMs: Math.max(0, performance.now() - actionStartedAt),
+      };
+    }
     if (!commandIsCurrent(generation)) return undefined;
-    await publishActionResult(transcript, validated, result, generation);
+    await publishActionResult(
+      transcript,
+      validated,
+      result,
+      generation,
+      completedTimings,
+    );
     return result;
   } catch (error) {
     if (!commandIsCurrent(generation)) return undefined;
@@ -947,6 +1014,7 @@ async function executeCommand(
       transcript,
       spoken,
       detail: rejected ? "rejected invalid command" : detail,
+      timings: completedTimings,
     });
     return undefined;
   }
@@ -1005,12 +1073,24 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       beginCommandGeneration();
       const text = safeTranscript(message.text);
       if (!text) throw new TypeError("A non-empty text command is required");
-      return sendOffscreen({ type: "parse-transcript", transcript: text });
+      return sendOffscreen({
+        type: "parse-transcript",
+        transcript: text,
+        timings: { input: "typed" },
+      });
     }
     case "execute-command": {
       const generation = beginCommandGeneration();
       const transcript = safeTranscript(message.transcript);
-      return executeCommand(message.command, transcript, generation);
+      const timings = isExchangeTimings(message.timings)
+        ? message.timings
+        : { input: "voice" as const };
+      return executeCommand(
+        message.command,
+        transcript,
+        generation,
+        timings,
+      );
     }
     case "retry-screenshot":
       return retryScreenshot(message.command);
@@ -1018,7 +1098,22 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       const text = safeTranscript(message.text);
       if (text) {
         try {
-          await tts.speak(text, { lang: "en-US" });
+          const heard = safeTranscript(message.heard);
+          const did = safeTranscript(message.did);
+          if (heard && did && isExchangeTimings(message.timings)) {
+            await speakAndPublishActionLog(
+              heard,
+              did,
+              message.timings,
+              (onFirstAudio) =>
+                tts.speak(text, {
+                  lang: "en-US",
+                  onFirstAudio,
+                }),
+            );
+          } else {
+            await tts.speak(text, { lang: "en-US" });
+          }
         } catch (error) {
           const detail = errorMessage(error);
           console.warn("Sotto speech feedback failed", error);

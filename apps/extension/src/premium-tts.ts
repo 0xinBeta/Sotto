@@ -70,7 +70,8 @@ export interface PremiumTtsRouterOptions {
 
 interface FirstAudioWaiter {
   readonly promise: Promise<void>;
-  resolve(): void;
+  cancel(): void;
+  notify(): void;
 }
 
 function safeUtf16End(text: string, end: number): number {
@@ -228,7 +229,7 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
   }
 
   notifyFirstAudio(utteranceId: string): void {
-    this.#waiters.get(utteranceId)?.resolve();
+    this.#waiters.get(utteranceId)?.notify();
   }
 
   async speak(
@@ -256,11 +257,20 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     const generation = this.#begin();
     this.#active = true;
     let charIndex = 0;
+    let firstAudioEmitted = false;
+    const sentenceOptions: TtsLongSpeakOptions = {
+      ...options,
+      onFirstAudio() {
+        if (firstAudioEmitted) return;
+        firstAudioEmitted = true;
+        options.onFirstAudio?.();
+      },
+    };
 
     try {
       for (const [chunkIndex, chunk] of chunks.entries()) {
         if (generation !== this.#generation) return;
-        await this.#speakSentence(chunk, options, generation);
+        await this.#speakSentence(chunk, sentenceOptions, generation);
         if (generation !== this.#generation) return;
         charIndex = Math.min(
           normalized.length,
@@ -289,7 +299,7 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     this.#active = false;
     this.#system.stop();
     const utteranceIds = [...this.#waiters.keys()];
-    for (const waiter of this.#waiters.values()) waiter.resolve();
+    for (const waiter of this.#waiters.values()) waiter.cancel();
     this.#waiters.clear();
     for (const utteranceId of utteranceIds) {
       void this.#request({ type: "premium-stop", utteranceId })
@@ -321,12 +331,27 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     const utteranceId =
       `premium-${Date.now()}-${++this.#utteranceSequence}`;
     let resolveFirst!: () => void;
+    let firstAudioSettled = false;
     const firstAudio = new Promise<void>((resolve) => {
       resolveFirst = resolve;
     });
     this.#waiters.set(utteranceId, {
       promise: firstAudio,
-      resolve: resolveFirst,
+      cancel() {
+        if (firstAudioSettled) return;
+        firstAudioSettled = true;
+        resolveFirst();
+      },
+      notify() {
+        if (firstAudioSettled) return;
+        firstAudioSettled = true;
+        try {
+          options.onFirstAudio?.();
+        } catch (error) {
+          console.warn("Premium TTS first audio callback failed", error);
+        }
+        resolveFirst();
+      },
     });
 
     let timeout!: ReturnType<typeof setTimeout>;

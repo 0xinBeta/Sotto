@@ -53,6 +53,10 @@ import {
   type SpeechRetryAudio,
   type SttDiagnostic,
 } from "./stt-guards.js";
+import {
+  isExchangeTimings,
+  type ExchangeTimings,
+} from "./timings.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -70,6 +74,7 @@ interface OffscreenMessage {
   readonly enabled?: unknown;
   readonly rate?: unknown;
   readonly volume?: unknown;
+  readonly timings?: unknown;
 }
 
 interface MessageEnvelope<T> {
@@ -1080,36 +1085,47 @@ async function runRewriteTask(
   );
 }
 
-async function processTranscript(rawTranscript: string): Promise<void> {
+async function processTranscript(
+  rawTranscript: string,
+  timings: ExchangeTimings,
+): Promise<void> {
   const transcript = cleanTranscript(rawTranscript);
   if (!transcript) return;
 
   await sendPanel({ type: "transcript", text: transcript });
+  let parseMs = 0;
   const command = await inferenceMutex.run(async () => {
     const session = await ensureParserSession();
-    return await parseCommand({
-      session,
-      registry,
-      transcript,
-      onError(error) {
-        console.warn("Nano intent parsing failed closed", error);
-        void sendPanel({
-          type: "pipeline-error",
-          message: `Gemini Nano could not parse that command: ${error.message}`,
-        });
-      },
-    });
+    const parseStartedAt = performance.now();
+    try {
+      return await parseCommand({
+        session,
+        registry,
+        transcript,
+        onError(error) {
+          console.warn("Nano intent parsing failed closed", error);
+          void sendPanel({
+            type: "pipeline-error",
+            message: `Gemini Nano could not parse that command: ${error.message}`,
+          });
+        },
+      });
+    } finally {
+      parseMs = Math.max(0, performance.now() - parseStartedAt);
+    }
   });
   await askWorker({
     type: "execute-command",
     transcript,
     command,
+    timings: { ...timings, parseMs },
   });
 }
 
 async function processSpeech(
   input: SpeechRetryAudio,
   observedMicLevel: number,
+  sttStartedAt: number,
 ): Promise<void> {
   try {
     await ensureStt();
@@ -1139,7 +1155,10 @@ async function processSpeech(
       }
       return;
     }
-    await processTranscript(result.text);
+    await processTranscript(result.text, {
+      input: "voice",
+      sttMs: Math.max(0, performance.now() - sttStartedAt),
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Speech transcription failed";
@@ -1286,11 +1305,12 @@ async function startListening(): Promise<void> {
         speechContext.onFrame(frame);
       },
       onSpeechEnd(audio) {
+        const sttStartedAt = performance.now();
         const input = speechContext.onSpeechEnd(audio);
         const observedMicLevel = micLevelPeak;
         void sendPanel({ type: "speech-end" });
         transcriptPipeline = transcriptPipeline
-          .then(() => processSpeech(input, observedMicLevel))
+          .then(() => processSpeech(input, observedMicLevel, sttStartedAt))
           .catch((error: unknown) => {
             console.warn("Speech pipeline failed", error);
           });
@@ -1350,8 +1370,19 @@ function stopListening(): void {
   }, 650);
 }
 
-async function speak(text: string): Promise<void> {
-  await askWorker({ type: "speak", text });
+async function speak(
+  text: string,
+  log?: {
+    readonly heard: string;
+    readonly did: string;
+    readonly timings: ExchangeTimings;
+  },
+): Promise<void> {
+  await askWorker({
+    type: "speak",
+    text,
+    ...(log === undefined ? {} : log),
+  });
 }
 
 function isActionCommand(value: unknown): value is ActionCommand {
@@ -1393,11 +1424,6 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
   if (!result.workflow) {
     await sendPanel({ type: "earcon", kind: "complete" });
   }
-  await sendPanel({
-    type: "action-log",
-    heard: transcript,
-    did: result.spoken,
-  });
 
   const spoken = command.action === "unknown"
     ? "Sorry, say that again?"
@@ -1411,7 +1437,13 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
           },
         })
       );
-  await speak(spoken);
+  await speak(spoken, {
+    heard: transcript,
+    did: result.spoken,
+    timings: isExchangeTimings(message.timings)
+      ? message.timings
+      : { input: "voice" },
+  });
   return undefined;
 }
 
@@ -1525,7 +1557,12 @@ async function handleOffscreenMessage(
       if (typeof message.transcript !== "string") {
         throw new TypeError("A transcript string is required");
       }
-      await processTranscript(message.transcript);
+      await processTranscript(
+        message.transcript,
+        isExchangeTimings(message.timings)
+          ? message.timings
+          : { input: "typed" },
+      );
       return;
     case "page-task":
       return withModelTask((signal) =>
@@ -1550,15 +1587,16 @@ async function handleOffscreenMessage(
         typeof message.spoken === "string"
           ? message.spoken
           : "That action could not be completed.";
-      await sendPanel({
-        type: "action-log",
+      await speak(spoken, {
         heard: transcript,
         did:
           typeof message.detail === "string"
             ? message.detail
             : "action failed",
+        timings: isExchangeTimings(message.timings)
+          ? message.timings
+          : { input: "voice" },
       });
-      await speak(spoken);
       return;
     }
     case "workflow-complete":

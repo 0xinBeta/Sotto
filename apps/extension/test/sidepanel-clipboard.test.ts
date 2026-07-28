@@ -537,6 +537,44 @@ describe("side-panel screenshot clipboard fallback", () => {
     });
   });
 
+  it("keeps log deduplication and replaces the timing line", async () => {
+    const { elements, onMessage } = await installSidepanel();
+    const baseMessage = {
+      target: "sidepanel",
+      type: "action-log",
+      heard: "open calendar",
+      did: "Opened Calendar.",
+    } as const;
+
+    onMessage({
+      ...baseMessage,
+      timings: {
+        input: "voice",
+        sttMs: 420,
+        parseMs: 310,
+        actionMs: 45,
+        voiceMs: 380,
+      },
+    });
+    onMessage({
+      ...baseMessage,
+      timings: {
+        input: "typed",
+        parseMs: 500,
+        actionMs: 500,
+        voiceMs: 1_000,
+      },
+    });
+
+    const newest = elements["action-log"].firstElementChild;
+    expect(elements["action-log"].children).toHaveLength(1);
+    expect(newest?.querySelector(".log-count")?.textContent).toBe("×2");
+    expect(newest?.querySelector(".log-timing")?.textContent).toBe(
+      "typed · parse 500ms · act 500ms · voice 1000ms · total 2.0s",
+    );
+    expect(newest?.querySelector(".log-timing")?.dataset.tone).toBe("amber");
+  });
+
   it("clears a successful automatic workflow so a later click cannot write twice", async () => {
     clipboard.perform.mockResolvedValue(completion);
     const { elements, onMessage, sendMessage } = await installSidepanel();

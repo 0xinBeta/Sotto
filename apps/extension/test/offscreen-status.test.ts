@@ -755,15 +755,12 @@ describe("offscreen fail-soft status", () => {
       workflow,
     });
     expect(sendMessage).toHaveBeenCalledWith({
-      target: "sidepanel",
-      type: "action-log",
-      heard: "take a screenshot",
-      did: "Screenshot ready. Click Copy in Sotto.",
-    });
-    expect(sendMessage).toHaveBeenCalledWith({
       target: "worker",
       type: "speak",
       text: "Screenshot ready. Click Copy in Sotto.",
+      heard: "take a screenshot",
+      did: "Screenshot ready. Click Copy in Sotto.",
+      timings: { input: "voice" },
     });
   });
 
