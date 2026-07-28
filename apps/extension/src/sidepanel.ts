@@ -468,6 +468,24 @@ async function completeClipboardWorkflow(
   }
 }
 
+async function receiveClipboardWorkflow(
+  workflow: ClipboardWorkflow,
+): Promise<void> {
+  pendingScreenshot = workflow;
+  pendingScreenshotPermission = undefined;
+  clipboardCard.hidden = true;
+
+  try {
+    await completeClipboardWorkflow(workflow);
+  } catch {
+    showClipboardWorkflow(workflow);
+    const message =
+      "Chrome blocks clipboard writes while Sotto and the page are both unfocused — click Copy.";
+    clipboardCopy.textContent = message;
+    appendLog("copy screenshot", message);
+  }
+}
+
 copyScreenshot.addEventListener("click", async () => {
   const permissionWorkflow = pendingScreenshotPermission;
   const clipboardWorkflow = pendingScreenshot;
@@ -491,9 +509,7 @@ copyScreenshot.addEventListener("click", async () => {
       if (result?.workflow?.kind !== "clipboard-write") {
         throw new Error("Screenshot was not ready to copy");
       }
-      pendingScreenshotPermission = undefined;
-      showClipboardWorkflow(result.workflow);
-      await completeClipboardWorkflow(result.workflow);
+      await receiveClipboardWorkflow(result.workflow);
       return;
     }
 
@@ -546,8 +562,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       appendLog(message.heard, message.did);
       break;
     case "screenshot-ready":
-      pendingScreenshotPermission = undefined;
-      showClipboardWorkflow(message.workflow);
+      void receiveClipboardWorkflow(message.workflow);
       break;
     case "screenshot-permission-needed":
       pendingScreenshot = undefined;
