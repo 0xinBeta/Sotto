@@ -280,6 +280,11 @@ progress::-webkit-progress-value {
   transform: scale(1.025);
 }
 
+.listen-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .listen-button:active,
 .listen-button[aria-pressed="true"] {
   transform: scale(0.96);

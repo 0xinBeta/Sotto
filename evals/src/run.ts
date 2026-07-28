@@ -1,18 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import type { ActionCommand } from "@sotto/core";
-
-export interface EvalTab {
-  readonly id: number;
-  readonly title: string;
-  readonly url: string;
-}
 
 export interface EvalCase {
   readonly id: string;
   readonly transcript: string;
-  readonly openTabs?: readonly EvalTab[];
   readonly expected: ActionCommand;
 }
 
@@ -29,10 +23,7 @@ export interface EvalSummary {
   readonly outcomes: readonly EvalOutcome[];
 }
 
-export type EvalParser = (
-  transcript: string,
-  openTabs: readonly EvalTab[],
-) => Promise<ActionCommand>;
+export type EvalParser = (transcript: string) => Promise<ActionCommand>;
 
 export async function loadCases(
   url = new URL("../cases.json", import.meta.url),
@@ -50,10 +41,10 @@ export async function runEvals(
 ): Promise<EvalSummary> {
   const outcomes: EvalOutcome[] = [];
   for (const testCase of cases) {
-    const actual = await parse(testCase.transcript, testCase.openTabs ?? []);
+    const actual = await parse(testCase.transcript);
     outcomes.push({
       id: testCase.id,
-      pass: JSON.stringify(actual) === JSON.stringify(testCase.expected),
+      pass: isDeepStrictEqual(actual, testCase.expected),
       actual,
       expected: testCase.expected,
     });

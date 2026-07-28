@@ -10,7 +10,7 @@ describe("screenshot action", () => {
     chromeStub = installChromeStub();
   });
 
-  it("captures the active window and dispatches its image with tab metadata", async () => {
+  it("captures the active window and dispatches only the PNG", async () => {
     chromeStub.tabs.query.mockResolvedValue([
       chromeTab({
         id: 7,
@@ -43,16 +43,10 @@ describe("screenshot action", () => {
       kind: "image",
       mimeType: "image/png",
       dataUrl: "data:image/png;base64,c2NyZWVuc2hvdA==",
-      source: {
-        kind: "screenshot",
-        tabId: 7,
-        title: "Sotto",
-        url: "https://example.test/page",
-      },
     });
   });
 
-  it("omits unavailable optional tab metadata", async () => {
+  it("captures without collecting optional tab metadata", async () => {
     chromeStub.tabs.query.mockResolvedValue([chromeTab({ windowId: 4 })]);
     chromeStub.tabs.captureVisibleTab.mockResolvedValue("data:image/png;base64,");
     const dispatchDestination = vi
@@ -66,9 +60,11 @@ describe("screenshot action", () => {
 
     expect(dispatchDestination).toHaveBeenCalledWith(
       "claude",
-      expect.objectContaining({
-        source: { kind: "screenshot" },
-      }),
+      {
+        kind: "image",
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,",
+      },
     );
   });
 

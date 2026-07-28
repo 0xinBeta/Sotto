@@ -44,8 +44,6 @@ export async function getNanoAvailability(): Promise<NanoAvailability> {
   }
 }
 
-export const availability = getNanoAvailability;
-
 /**
  * Creates and owns one Prompt API session. Model download must still be
  * initiated from a user activation; NotAllowedError is returned as data.

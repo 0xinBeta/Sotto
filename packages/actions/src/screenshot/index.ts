@@ -56,12 +56,6 @@ const screenshot = defineAction<ScreenshotCommand>({
       kind: "image",
       mimeType: "image/png",
       dataUrl,
-      source: {
-        kind: "screenshot",
-        ...(activeTab.id === undefined ? {} : { tabId: activeTab.id }),
-        ...(activeTab.title === undefined ? {} : { title: activeTab.title }),
-        ...(activeTab.url === undefined ? {} : { url: activeTab.url }),
-      },
     });
   },
 });

@@ -13,7 +13,6 @@ import {
   respondOneSentence,
   type NanoAvailability,
   type NanoSession,
-  type OpenTabData,
 } from "@sotto/nano";
 import {
   MoonshineEngine,
@@ -53,7 +52,6 @@ let listening = false;
 let starting = false;
 let stopRequested = false;
 let stopTimer: number | undefined;
-let audioContext: AudioContext | undefined;
 let transcriptPipeline = Promise.resolve();
 let sttReady: Promise<void> | undefined;
 
@@ -118,30 +116,6 @@ function progressRatio(progress: SttProgress): number | undefined {
   return undefined;
 }
 
-async function playEarcon(kind: "listen" | "complete"): Promise<void> {
-  try {
-    audioContext ??= new AudioContext();
-    if (audioContext.state === "suspended") await audioContext.resume();
-
-    const now = audioContext.currentTime;
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(kind === "listen" ? 660 : 880, now);
-    if (kind === "complete") {
-      oscillator.frequency.exponentialRampToValueAtTime(1_140, now + 0.07);
-    }
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.09, now + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.095);
-    oscillator.connect(gain).connect(audioContext.destination);
-    oscillator.start(now);
-    oscillator.stop(now + 0.105);
-  } catch (error) {
-    console.warn("Sotto earcon could not play", error);
-  }
-}
-
 async function ensureParserSession(): Promise<NanoSession | undefined> {
   if (parserSession && !parserSession.destroyed) return parserSession;
   if (parserSessionPromise) return parserSessionPromise;
@@ -162,6 +136,13 @@ async function ensureParserSession(): Promise<NanoSession | undefined> {
     });
     if (!created.ok) {
       nanoAvailability = created.availability;
+      if (created.error) {
+        console.warn("Gemini Nano parser session creation failed", created.error);
+        await sendPanel({
+          type: "pipeline-error",
+          message: `Gemini Nano could not start: ${created.error.message}`,
+        });
+      }
       return undefined;
     }
     parserSession = created.session;
@@ -203,17 +184,17 @@ async function processTranscript(rawTranscript: string): Promise<void> {
   if (!transcript) return;
 
   await sendPanel({ type: "transcript", text: transcript });
-  const tabsResponse = await askWorker<{ tabs: OpenTabData[] }>({
-    type: "get-open-tabs",
-  });
   const session = await ensureParserSession();
   const command = await parseCommand({
     session,
     registry,
     transcript,
-    openTabs: tabsResponse?.tabs ?? [],
     onError(error) {
       console.warn("Nano intent parsing failed closed", error);
+      void sendPanel({
+        type: "pipeline-error",
+        message: `Gemini Nano could not parse that command: ${error.message}`,
+      });
     },
   });
   await askWorker({
@@ -227,11 +208,21 @@ async function processSpeech(audio: Float32Array): Promise<void> {
   try {
     await ensureStt();
     const text = await stt.transcribe(audio);
+    if (!text) {
+      await sendPanel({
+        type: "pipeline-error",
+        message: "No speech was recognized. Try again or type the command.",
+      });
+      await speak("Sorry, say that again?");
+      return;
+    }
     await processTranscript(text);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Speech transcription failed";
+    console.warn("Sotto speech transcription failed", error);
     await sendPanel({ type: "pipeline-error", message });
+    await speak("I couldn't transcribe that. Try again or type the command.");
   }
 }
 
@@ -244,6 +235,7 @@ function ensureStt(): Promise<void> {
         type: "model-progress",
         model: "stt",
         progress: Math.max(0, Math.min(1, ratio)),
+        status: progress.status,
         ...(progress.file === undefined ? {} : { file: progress.file }),
       });
     });
@@ -277,13 +269,20 @@ async function openMicrophone(): Promise<MediaStream> {
 }
 
 async function startListening(): Promise<void> {
-  if (listening || starting) return;
-  starting = true;
-  stopRequested = false;
+  if (starting) {
+    stopRequested = false;
+    return;
+  }
   if (stopTimer !== undefined) {
     window.clearTimeout(stopTimer);
     stopTimer = undefined;
   }
+  if (listening) {
+    await sendPanel({ type: "listening-state", listening: true });
+    return;
+  }
+  starting = true;
+  stopRequested = false;
 
   try {
     const stream = await openMicrophone();
@@ -320,7 +319,7 @@ async function startListening(): Promise<void> {
     await vad.start();
     listening = true;
     starting = false;
-    await playEarcon("listen");
+    await sendPanel({ type: "earcon", kind: "listen" });
     await sendPanel({ type: "listening-state", listening: true });
     if (stopRequested) await stopListeningNow();
   } catch (error) {
@@ -358,7 +357,12 @@ function stopListening(): void {
   if (!listening || stopTimer !== undefined) return;
   // Let VAD observe a short tail after push-to-talk release and emit speech.
   stopTimer = window.setTimeout(() => {
-    void stopListeningNow();
+    void stopListeningNow().catch(async (error: unknown) => {
+      const message =
+        error instanceof Error ? error.message : "Microphone cleanup failed";
+      console.warn("Sotto could not stop listening cleanly", error);
+      await sendPanel({ type: "pipeline-error", message });
+    });
   }, 650);
 }
 
@@ -396,7 +400,9 @@ async function handleActionResult(message: OffscreenMessage): Promise<void> {
     typeof message.transcript === "string" ? message.transcript : "command";
   const command = message.command;
   const result = message.result;
-  await playEarcon("complete");
+  if (!result.workflow) {
+    await sendPanel({ type: "earcon", kind: "complete" });
+  }
   await sendPanel({
     type: "action-log",
     heard: transcript,
@@ -476,13 +482,15 @@ async function handleOffscreenMessage(message: OffscreenMessage): Promise<void> 
       return;
     }
     case "workflow-complete":
-      await playEarcon("complete");
+      await sendPanel({ type: "earcon", kind: "complete" });
       await speak(
         typeof message.spoken === "string"
           ? message.spoken
           : "Screenshot copied.",
       );
       return;
+    default:
+      throw new TypeError(`Unsupported offscreen message type: ${message.type}`);
   }
 }
 
@@ -511,6 +519,7 @@ window.addEventListener("unload", () => {
   micStream?.getTracks().forEach((track) => track.stop());
   parserSession?.destroy();
   responderSession?.destroy();
-  void stt.dispose();
-  void audioContext?.close();
+  void stt.dispose().catch((error: unknown) => {
+    console.warn("Moonshine cleanup failed", error);
+  });
 });

@@ -5,7 +5,7 @@ import { createClipboardWorkflow } from "../workflow.js";
 const copyDestination = defineDestination<ImageDestinationInput>({
   id: "copy",
   title: "Copy",
-  permissions: [],
+  permissions: ["clipboardWrite"],
   async execute(input) {
     return {
       spoken: "Screenshot ready. Click Copy in Sotto.",

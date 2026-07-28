@@ -155,92 +155,52 @@
   {
     "id": "tabs-switch-01",
     "transcript": "switch to the GitHub tab",
-    "openTabs": [
-      { "id": 101, "title": "GitHub", "url": "https://github.com/" },
-      { "id": 102, "title": "Inbox", "url": "https://mail.google.com/" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 101 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "GitHub" }
   },
   {
     "id": "tabs-switch-02",
     "transcript": "go to my inbox",
-    "openTabs": [
-      { "id": 103, "title": "Pull requests · GitHub", "url": "https://github.com/pulls" },
-      { "id": 104, "title": "Inbox (4)", "url": "https://mail.google.com/mail/u/0/#inbox" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 104 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "inbox" }
   },
   {
     "id": "tabs-switch-03",
     "transcript": "show me the Figma tab",
-    "openTabs": [
-      { "id": 105, "title": "Dashboard – Figma", "url": "https://figma.com/files" },
-      { "id": 106, "title": "Linear", "url": "https://linear.app/" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 105 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "Figma" }
   },
   {
     "id": "tabs-switch-04",
     "transcript": "take me back to the docs",
-    "openTabs": [
-      { "id": 107, "title": "Sotto – Google Docs", "url": "https://docs.google.com/document/d/1" },
-      { "id": 108, "title": "Calendar", "url": "https://calendar.google.com/" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 107 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "docs" }
   },
   {
     "id": "tabs-switch-05",
     "transcript": "open the stack overflow tab",
-    "openTabs": [
-      { "id": 109, "title": "typescript - Stack Overflow", "url": "https://stackoverflow.com/questions/1" },
-      { "id": 110, "title": "TypeScript Handbook", "url": "https://typescriptlang.org/docs/" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 109 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "stack overflow" }
   },
   {
     "id": "tabs-switch-06",
     "transcript": "switch over to YouTube",
-    "openTabs": [
-      { "id": 111, "title": "YouTube", "url": "https://youtube.com/" },
-      { "id": 112, "title": "Music", "url": "https://music.apple.com/" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 111 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "YouTube" }
   },
   {
     "id": "tabs-switch-07",
     "transcript": "go to the local app",
-    "openTabs": [
-      { "id": 113, "title": "Sotto", "url": "http://localhost:5173/" },
-      { "id": 114, "title": "Vite", "url": "https://vite.dev/" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 113 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "local app" }
   },
   {
     "id": "tabs-switch-08",
     "transcript": "find my calendar tab",
-    "openTabs": [
-      { "id": 115, "title": "July 2026 – Calendar", "url": "https://calendar.google.com/" },
-      { "id": 116, "title": "Inbox", "url": "https://mail.google.com/" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 115 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "calendar" }
   },
   {
     "id": "tabs-switch-09",
     "transcript": "jump to linear",
-    "openTabs": [
-      { "id": 117, "title": "Issues – Linear", "url": "https://linear.app/acme/team/ENG" },
-      { "id": 118, "title": "GitHub", "url": "https://github.com/" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 117 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "linear" }
   },
   {
     "id": "tabs-switch-10",
     "transcript": "bring up the Claude conversation",
-    "openTabs": [
-      { "id": 119, "title": "Claude", "url": "https://claude.ai/chat/abc" },
-      { "id": 120, "title": "ChatGPT", "url": "https://chatgpt.com/" }
-    ],
-    "expected": { "action": "tabs", "operation": "switch", "tabId": 119 }
+    "expected": { "action": "tabs", "operation": "switch", "target": "Claude" }
   },
 
   {

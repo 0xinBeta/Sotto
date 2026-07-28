@@ -27,8 +27,8 @@ export class SystemTtsEngine implements TtsEngine {
     try {
       voices = await chrome.tts.getVoices();
     } catch (error) {
-      console.warn("Unable to enumerate system TTS voices", error);
-      return;
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Unable to enumerate system TTS voices: ${detail}`);
     }
 
     const voice = voices.find((candidate) =>
@@ -38,27 +38,35 @@ export class SystemTtsEngine implements TtsEngine {
     );
 
     if (!voice) {
-      console.warn(`No local TTS voice is available for ${lang}`);
-      return;
+      throw new Error(`No local TTS voice is available for ${lang}`);
     }
 
     const voiceLanguage = voice.lang;
     if (!voiceLanguage) {
-      console.warn(`No local TTS voice is available for ${lang}`);
-      return;
+      throw new Error(`No local TTS voice is available for ${lang}`);
     }
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       let finished = false;
+      const timeout = setTimeout(
+        () => finish(new Error("System TTS playback timed out")),
+        Math.max(5_000, Math.min(30_000, utterance.length * 120)),
+      );
 
       const finish = (error?: unknown): void => {
         if (finished) {
           return;
         }
         finished = true;
+        clearTimeout(timeout);
 
         if (error !== undefined) {
-          console.warn("System TTS playback failed", error);
+          reject(
+            error instanceof Error
+              ? error
+              : new Error(`System TTS playback failed: ${String(error)}`),
+          );
+          return;
         }
         resolve();
       };

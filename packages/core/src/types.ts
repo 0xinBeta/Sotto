@@ -54,12 +54,6 @@ export interface ImageDestinationInput {
   readonly kind: "image";
   readonly mimeType: "image/png";
   readonly dataUrl: string;
-  readonly source?: {
-    readonly kind: "screenshot";
-    readonly tabId?: number;
-    readonly title?: string;
-    readonly url?: string;
-  };
 }
 
 export type DestinationInput = ImageDestinationInput;

@@ -8,7 +8,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@huggingface/transformers": "4.2.0",
     "@ricky0123/vad-web": "0.0.30",
     "@sotto/actions": "workspace:*",
     "@sotto/core": "workspace:*",

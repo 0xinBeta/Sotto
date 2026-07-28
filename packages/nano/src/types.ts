@@ -47,16 +47,9 @@ export type NanoSessionResult = NanoSessionReady | NanoSessionUnavailable;
  */
 export type NanoPromptSession = Pick<LanguageModel, "prompt">;
 
-export interface OpenTabData {
-  readonly id: number;
-  readonly title: string;
-  readonly url: string;
-}
-
 export interface ParserPromptInput {
   readonly registry: ActionRegistry;
   readonly transcript: string;
-  readonly openTabs?: readonly OpenTabData[];
 }
 
 export interface ParseCommandOptions extends ParserPromptInput {

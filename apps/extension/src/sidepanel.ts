@@ -21,8 +21,10 @@ type PanelMessage =
       type: "model-progress";
       model: "nano" | "stt";
       progress: number;
+      status?: string;
       file?: string;
     }
+  | { target: "sidepanel"; type: "earcon"; kind: "listen" | "complete" }
   | { target: "sidepanel"; type: "action-log"; heard: string; did: string }
   | {
       target: "sidepanel";
@@ -47,10 +49,12 @@ const transcript = requiredElement<HTMLElement>("#transcript");
 const listeningMark = requiredElement<HTMLElement>("#listening-mark");
 const listenButton = requiredElement<HTMLButtonElement>("#listen-button");
 const listenLabel = requiredElement<HTMLElement>("#listen-label");
+const shortcutLabel = requiredElement<HTMLElement>("#shortcut-label");
 const grantMic = requiredElement<HTMLButtonElement>("#grant-mic");
 const commandForm = requiredElement<HTMLFormElement>("#command-form");
 const commandInput = requiredElement<HTMLInputElement>("#command-input");
 const clipboardCard = requiredElement<HTMLElement>("#clipboard-card");
+const clipboardCopy = requiredElement<HTMLElement>("#clipboard-copy");
 const copyScreenshot = requiredElement<HTMLButtonElement>("#copy-screenshot");
 const actionLog = requiredElement<HTMLOListElement>("#action-log");
 const clearLog = requiredElement<HTMLButtonElement>("#clear-log");
@@ -64,6 +68,8 @@ const sttProgressValue = requiredElement<HTMLOutputElement>("#stt-progress-value
 let isListening = false;
 let pendingScreenshot: ClipboardWorkflow | undefined;
 let pointerIsDown = false;
+let earconContext: AudioContext | undefined;
+const progressHideTimers: Partial<Record<"nano" | "stt", number>> = {};
 
 function setStatus(
   state: "booting" | "ready" | "listening" | "error",
@@ -115,18 +121,70 @@ function showNanoState(availability: NanoAvailability): void {
   setStatus(isListening ? "listening" : "ready", isListening ? "Listening" : "On device");
 }
 
-function updateProgress(model: "nano" | "stt", value: number): void {
+function showMicrophoneState(state: PermissionState | "unknown"): void {
+  const granted = state === "granted";
+  listenButton.disabled = !granted;
+  grantMic.textContent =
+    state === "denied"
+      ? "Review microphone settings"
+      : "Grant microphone access";
+  if (granted) return;
+
+  listenLabel.textContent = "Use text command";
+  setStatus(
+    state === "denied" ? "error" : "booting",
+    state === "denied" ? "Microphone blocked" : "Microphone setup",
+  );
+}
+
+async function playEarcon(kind: "listen" | "complete"): Promise<void> {
+  try {
+    earconContext ??= new AudioContext();
+    if (earconContext.state === "suspended") await earconContext.resume();
+
+    const now = earconContext.currentTime;
+    const oscillator = earconContext.createOscillator();
+    const gain = earconContext.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(kind === "listen" ? 660 : 880, now);
+    if (kind === "complete") {
+      oscillator.frequency.exponentialRampToValueAtTime(1_140, now + 0.07);
+    }
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.09, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.095);
+    oscillator.connect(gain).connect(earconContext.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.105);
+  } catch (error) {
+    console.warn("Sotto earcon could not play", error);
+  }
+}
+
+function updateProgress(
+  model: "nano" | "stt",
+  value: number,
+  complete = value >= 1,
+  file?: string,
+): void {
   const normalized = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
   const card = model === "nano" ? nanoProgressCard : sttProgressCard;
   const bar = model === "nano" ? nanoProgress : sttProgress;
   const output = model === "nano" ? nanoProgressValue : sttProgressValue;
   card.hidden = false;
+  if (file) card.title = file;
   bar.value = normalized;
   output.value = `${Math.round(normalized * 100)}%`;
   output.textContent = output.value;
-  if (normalized >= 1) {
-    window.setTimeout(() => {
+  const previousTimer = progressHideTimers[model];
+  if (previousTimer !== undefined) {
+    window.clearTimeout(previousTimer);
+    delete progressHideTimers[model];
+  }
+  if (complete) {
+    progressHideTimers[model] = window.setTimeout(() => {
       card.hidden = true;
+      delete progressHideTimers[model];
     }, 900);
   }
 }
@@ -148,7 +206,7 @@ function appendLog(heard: string, did: string): void {
   actionLog.prepend(item);
 }
 
-async function send(message: Record<string, unknown>): Promise<void> {
+async function send(message: Record<string, unknown>): Promise<boolean> {
   try {
     const response = (await chrome.runtime.sendMessage({
       target: "worker",
@@ -162,23 +220,31 @@ async function send(message: Record<string, unknown>): Promise<void> {
     if (response?.ok === false) {
       throw new Error(response.error?.message ?? "Extension request failed");
     }
+    return true;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Extension worker unavailable";
     setStatus("error", "Needs attention");
     appendLog("system", detail);
+    return false;
   }
 }
 
 async function startListening(): Promise<void> {
   if (isListening) return;
   setListening(true);
-  await send({ type: "start-listening" });
+  if (!(await send({ type: "start-listening" }))) {
+    setListening(false);
+    setStatus("error", "Needs attention");
+  }
 }
 
 async function stopListening(): Promise<void> {
   if (!isListening) return;
   setListening(false);
-  await send({ type: "stop-listening" });
+  if (!(await send({ type: "stop-listening" }))) {
+    setListening(true);
+    setStatus("error", "Needs attention");
+  }
 }
 
 listenButton.addEventListener("pointerdown", (event) => {
@@ -274,9 +340,10 @@ copyScreenshot.addEventListener("click", async () => {
 
   try {
     const completion = await performClipboardWorkflow(pendingScreenshot);
-    pendingScreenshot = undefined;
-    clipboardCard.hidden = true;
-    await send({ type: "clipboard-complete", completion });
+    if (await send({ type: "clipboard-complete", completion })) {
+      pendingScreenshot = undefined;
+      clipboardCard.hidden = true;
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Clipboard write failed";
     appendLog("copy screenshot", message);
@@ -285,13 +352,16 @@ copyScreenshot.addEventListener("click", async () => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message: PanelMessage) => {
+chrome.runtime.onMessage.addListener((raw: unknown) => {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return;
+  const message = raw as PanelMessage;
   if (message.target !== "sidepanel") return;
 
   switch (message.type) {
     case "engine-status":
       setListening(message.listening);
       showNanoState(message.nano);
+      showMicrophoneState(message.mic);
       if (message.error) appendLog("system", message.error);
       break;
     case "listening-state":
@@ -305,7 +375,17 @@ chrome.runtime.onMessage.addListener((message: PanelMessage) => {
       showTranscript(message.text);
       break;
     case "model-progress":
-      updateProgress(message.model, message.progress);
+      updateProgress(
+        message.model,
+        message.progress,
+        message.model === "stt"
+          ? message.status === "ready"
+          : message.progress >= 1,
+        message.file,
+      );
+      break;
+    case "earcon":
+      void playEarcon(message.kind);
       break;
     case "action-log":
       appendLog(message.heard, message.did);
@@ -313,6 +393,9 @@ chrome.runtime.onMessage.addListener((message: PanelMessage) => {
     case "screenshot-ready":
       pendingScreenshot = message.workflow;
       copyScreenshot.textContent = message.workflow.buttonLabel;
+      clipboardCopy.textContent = message.workflow.afterWrite?.followUp
+        ? "Copy the PNG, then Sotto will move you to Claude."
+        : "Copy the PNG to your clipboard.";
       clipboardCard.hidden = false;
       break;
     case "pipeline-error":
@@ -322,5 +405,23 @@ chrome.runtime.onMessage.addListener((message: PanelMessage) => {
   }
 });
 
+async function showAssignedShortcut(): Promise<void> {
+  try {
+    const commands = await chrome.commands.getAll();
+    const shortcut =
+      commands.find((command) => command.name === "toggle-sotto")?.shortcut ?? "";
+    shortcutLabel.textContent = shortcut || "UNASSIGNED";
+    if (!shortcut) {
+      appendLog(
+        "shortcut",
+        "Assign Toggle Sotto at chrome://extensions/shortcuts",
+      );
+    }
+  } catch (error) {
+    console.warn("Sotto could not read its assigned shortcut", error);
+  }
+}
+
 showTranscript("");
 void send({ type: "get-status" });
+void showAssignedShortcut();

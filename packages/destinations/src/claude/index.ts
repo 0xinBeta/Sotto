@@ -5,7 +5,7 @@ import { createClipboardWorkflow } from "../workflow.js";
 const claudeDestination = defineDestination<ImageDestinationInput>({
   id: "claude",
   title: "Claude",
-  permissions: ["tabs"],
+  permissions: ["clipboardWrite", "tabs"],
   async execute(input) {
     return {
       spoken: "Screenshot ready. Click Copy to open Claude.",

@@ -18,35 +18,21 @@ export type TabsCommand =
   | {
       readonly action: "tabs";
       readonly operation: "switch";
-      readonly tabId: number;
+      readonly target: string;
     }
   | {
       readonly action: "tabs";
       readonly operation: "mute" | "unmute";
-      readonly tabId?: number;
     };
 
-const tabIdSchema = {
-  type: "integer",
-  minimum: 0,
-  description: "The id of a tab selected from the open-tab parser context",
-} as const satisfies JsonSchema;
-
-function operationSchema(
-  operation: TabOperation,
-  tabId: "forbidden" | "optional" | "required" = "forbidden",
-): JsonSchema {
+function operationSchema(operation: TabOperation): JsonSchema {
   return {
     type: "object",
     properties: {
       action: { const: "tabs" },
       operation: { const: operation },
-      ...(tabId === "forbidden" ? {} : { tabId: tabIdSchema }),
     },
-    required:
-      tabId === "required"
-        ? ["action", "operation", "tabId"]
-        : ["action", "operation"],
+    required: ["action", "operation"],
     additionalProperties: false,
   };
 }
@@ -55,9 +41,23 @@ const schema = {
   oneOf: [
     operationSchema("new"),
     operationSchema("close"),
-    operationSchema("switch", "required"),
-    operationSchema("mute", "optional"),
-    operationSchema("unmute", "optional"),
+    {
+      type: "object",
+      properties: {
+        action: { const: "tabs" },
+        operation: { const: "switch" },
+        target: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description: "A concise tab target copied only from the transcript",
+        },
+      },
+      required: ["action", "operation", "target"],
+      additionalProperties: false,
+    },
+    operationSchema("mute"),
+    operationSchema("unmute"),
     operationSchema("reopen"),
   ],
 } as const satisfies JsonSchema;
@@ -68,8 +68,7 @@ async function activeTab(): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
-async function getTargetTab(tabId?: number): Promise<chrome.tabs.Tab> {
-  if (tabId === undefined) return activeTab();
+async function getTab(tabId: number): Promise<chrome.tabs.Tab> {
   try {
     return await chrome.tabs.get(tabId);
   } catch {
@@ -78,7 +77,7 @@ async function getTargetTab(tabId?: number): Promise<chrome.tabs.Tab> {
 }
 
 async function focusTab(tabId: number): Promise<chrome.tabs.Tab> {
-  const tab = await getTargetTab(tabId);
+  const tab = await getTab(tabId);
   await chrome.tabs.update(tabId, { active: true });
   await chrome.windows.update(tab.windowId, { focused: true });
   return tab;
@@ -95,11 +94,6 @@ async function reopenLastTab(): Promise<void> {
   await chrome.sessions.restore(restorable.tab.sessionId);
 }
 
-/**
- * Use this before prompting Nano when a raw voice target must be resolved to
- * the canonical tabs command. The selected id can then be included in the
- * constrained command as `{ action: "tabs", operation: "switch", tabId }`.
- */
 export function matchTabTarget(
   tabs: readonly chrome.tabs.Tab[],
   target: string,
@@ -116,8 +110,8 @@ const tabsAction = defineAction<TabsCommand>({
     { say: "open a new tab", emit: { action: "tabs", operation: "new" } },
     { say: "close this tab", emit: { action: "tabs", operation: "close" } },
     {
-      say: "switch to the matched GitHub tab with id 42",
-      emit: { action: "tabs", operation: "switch", tabId: 42 },
+      say: "switch to the GitHub tab",
+      emit: { action: "tabs", operation: "switch", target: "GitHub" },
     },
     { say: "mute that video", emit: { action: "tabs", operation: "mute" } },
     {
@@ -141,12 +135,17 @@ const tabsAction = defineAction<TabsCommand>({
         return { spoken: "Closed the tab." };
       }
       case "switch": {
-        const tab = await focusTab(command.tabId);
+        const tabs = await chrome.tabs.query({});
+        const matched = matchTabTarget(tabs, command.target);
+        if (matched?.id === undefined) {
+          throw new Error(`No open tab matches "${command.target}"`);
+        }
+        const tab = await focusTab(matched.id);
         return { spoken: `Switched to ${tab.title || "the tab"}.` };
       }
       case "mute":
       case "unmute": {
-        const tab = await getTargetTab(command.tabId);
+        const tab = await activeTab();
         const muted = command.operation === "mute";
         await chrome.tabs.update(tab.id!, { muted });
         return {

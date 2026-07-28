@@ -319,6 +319,52 @@ describe("CommandRouter", () => {
     ).rejects.toThrow("Invalid unknown command");
   });
 
+  it("fails closed instead of executing an action that requires confirmation", async () => {
+    const execute = vi.fn(async () => ({ spoken: "Should not run." }));
+    const confirmed = defineAction<CountCommand>({
+      ...countAction(execute),
+      confirm: true,
+    });
+    const router = new CommandRouter(new ActionRegistry([confirmed]));
+
+    await expect(
+      router.route({ action: "count", amount: 1 }),
+    ).rejects.toThrow("Action requires confirmation before execution: count");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("revalidates against the merged registry schema at the execution boundary", async () => {
+    const execute = vi.fn(async () => ({ spoken: "Should not run." }));
+    const count = countAction(execute);
+    const overlapping = defineAction({
+      id: "second",
+      title: "Overlapping",
+      permissions: [],
+      schema: {
+        type: "object",
+        properties: {
+          action: { enum: ["count", "second"] },
+          amount: { type: "integer", minimum: 1 },
+        },
+        required: ["action", "amount"],
+        additionalProperties: false,
+      },
+      examples: [],
+      confirm: false,
+      async execute() {
+        return { spoken: "Should not run." };
+      },
+    });
+    const router = new CommandRouter(new ActionRegistry([count, overlapping]));
+
+    await expect(
+      router.route({ action: "count", amount: 1 }),
+    ).rejects.toMatchObject({
+      validationErrors: ["$ must match exactly one allowed schema"],
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed JSON and unregistered actions", () => {
     const router = new CommandRouter(new ActionRegistry());
 

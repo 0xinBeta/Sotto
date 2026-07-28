@@ -40,9 +40,8 @@ async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
   if (!creatingOffscreen) {
     creatingOffscreen = chrome.offscreen.createDocument({
       url: path,
-      reasons: ["USER_MEDIA", "AUDIO_PLAYBACK"],
-      justification:
-        "Capture microphone audio locally and play short Web Audio earcons",
+      reasons: ["USER_MEDIA"],
+      justification: "Capture microphone audio for local speech recognition",
     });
   }
 
@@ -54,11 +53,23 @@ async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
 }
 
 async function sendOffscreen(message: Record<string, unknown>): Promise<unknown> {
-  await ensureOffscreen();
-  const response = (await chrome.runtime.sendMessage({
+  const request = {
     target: "offscreen",
     ...message,
-  })) as
+  };
+  await ensureOffscreen();
+
+  let rawResponse: unknown;
+  try {
+    rawResponse = await chrome.runtime.sendMessage(request);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (!detail.includes("Receiving end does not exist")) throw error;
+    await ensureOffscreen();
+    rawResponse = await chrome.runtime.sendMessage(request);
+  }
+
+  const response = rawResponse as
     | {
         readonly ok: boolean;
         readonly value?: unknown;
@@ -77,6 +88,37 @@ async function sendPanel(message: Record<string, unknown>): Promise<void> {
   } catch {
     // The panel is intentionally optional; hotkey voice commands still work.
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function reportBackgroundFailure(
+  context: string,
+  error: unknown,
+  spoken?: string,
+): Promise<void> {
+  const detail = errorMessage(error);
+  console.warn(context, error);
+  await sendPanel({ type: "pipeline-error", message: `${context}: ${detail}` });
+  if (spoken) {
+    try {
+      await tts.speak(spoken, { lang: "en-US" });
+    } catch (ttsError) {
+      console.warn("Sotto could not speak an error response", ttsError);
+    }
+  }
+}
+
+function runAndReport(
+  promise: Promise<unknown>,
+  context: string,
+  spoken?: string,
+): void {
+  void promise.catch((error: unknown) =>
+    reportBackgroundFailure(context, error, spoken),
+  );
 }
 
 function safeTranscript(value: unknown): string {
@@ -167,25 +209,20 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       await executeCommand(message.command, transcript);
       return undefined;
     }
-    case "get-open-tabs": {
-      const tabs = await chrome.tabs.query({});
-      return {
-        tabs: tabs.flatMap((tab) =>
-          tab.id === undefined
-            ? []
-            : [
-                {
-                  id: tab.id,
-                  title: tab.title ?? "",
-                  url: tab.url ?? "",
-                },
-              ],
-        ),
-      };
-    }
     case "speak": {
       const text = safeTranscript(message.text);
-      if (text) await tts.speak(text, { lang: "en-US" });
+      if (text) {
+        try {
+          await tts.speak(text, { lang: "en-US" });
+        } catch (error) {
+          const detail = errorMessage(error);
+          console.warn("Sotto speech feedback failed", error);
+          await sendPanel({
+            type: "pipeline-error",
+            message: `Speech feedback unavailable: ${detail}`,
+          });
+        }
+      }
       return undefined;
     }
     case "open-microphone-page":
@@ -227,7 +264,7 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return undefined;
     }
     default:
-      return undefined;
+      throw new TypeError(`Unsupported worker message type: ${message.type}`);
   }
 }
 
@@ -255,16 +292,28 @@ chrome.runtime.onMessage.addListener(
 
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command !== "toggle-sotto") return;
+  let panelOpening: Promise<void> = Promise.resolve();
   if (tab?.id !== undefined) {
-    void chrome.sidePanel.open({ tabId: tab.id });
+    panelOpening = chrome.sidePanel.open({ tabId: tab.id });
   } else if (tab?.windowId !== undefined) {
-    void chrome.sidePanel.open({ windowId: tab.windowId });
+    panelOpening = chrome.sidePanel.open({ windowId: tab.windowId });
   }
-  void sendOffscreen({ type: "toggle-listening" });
+  runAndReport(
+    panelOpening
+      .catch((error: unknown) =>
+        reportBackgroundFailure("Sotto could not open the side panel", error),
+      )
+      .then(() => sendOffscreen({ type: "toggle-listening" })),
+    "Sotto could not toggle listening",
+    "I couldn't start listening. Open Sotto to check microphone access.",
+  );
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  void chrome.sidePanel.setPanelBehavior({
-    openPanelOnActionClick: true,
-  });
+  runAndReport(
+    chrome.sidePanel.setPanelBehavior({
+      openPanelOnActionClick: true,
+    }),
+    "Sotto could not configure its side panel",
+  );
 });

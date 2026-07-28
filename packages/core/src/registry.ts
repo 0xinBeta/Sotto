@@ -158,12 +158,16 @@ export class CommandRouter {
       throw new CommandValidationError("Command action must be a string");
     }
 
+    const validation = validateSchema(this.registry.schema, candidate);
+
     if (actionId === "unknown") {
-      const validation = validateSchema(UNKNOWN_SCHEMA, candidate);
       if (!validation.valid) {
+        const unknownValidation = validateSchema(UNKNOWN_SCHEMA, candidate);
         throw new CommandValidationError(
           "Invalid unknown command",
-          validation.errors,
+          unknownValidation.valid
+            ? validation.errors
+            : unknownValidation.errors,
         );
       }
       return candidate as ActionCommand;
@@ -174,11 +178,11 @@ export class CommandRouter {
       throw new CommandValidationError(`Action is not registered: ${actionId}`);
     }
 
-    const validation = validateSchema(action.schema, candidate);
     if (!validation.valid) {
+      const actionValidation = validateSchema(action.schema, candidate);
       throw new CommandValidationError(
         `Invalid command for action: ${actionId}`,
-        validation.errors,
+        actionValidation.valid ? validation.errors : actionValidation.errors,
       );
     }
     return candidate as ActionCommand;
@@ -199,6 +203,11 @@ export class CommandRouter {
     if (!action) {
       throw new CommandValidationError(
         `Action is not registered: ${command.action}`,
+      );
+    }
+    if (action.confirm) {
+      throw new CommandValidationError(
+        `Action requires confirmation before execution: ${command.action}`,
       );
     }
     return action.execute(command, context);

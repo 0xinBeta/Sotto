@@ -6,9 +6,9 @@
   "packageManager": "pnpm@9.13.2",
   "scripts": {
     "build": "pnpm -r --filter './packages/**' build && pnpm --filter @sotto/extension build",
-    "typecheck": "pnpm -r --if-present typecheck",
-    "test": "vitest run",
-    "evals": "pnpm --filter @sotto/evals eval"
+    "typecheck": "pnpm -r --filter './packages/**' build && pnpm -r --if-present typecheck",
+    "test": "pnpm -r --filter './packages/**' build && vitest run",
+    "evals": "pnpm --filter @sotto/core build && pnpm --filter @sotto/evals eval"
   },
   "devDependencies": {
     "@types/chrome": "0.2.2",

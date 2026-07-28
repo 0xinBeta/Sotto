@@ -43,13 +43,16 @@ describe("tabs action", () => {
   });
 
   it("switches tabs and focuses the containing window", async () => {
+    chromeStub.tabs.query.mockResolvedValue([
+      chromeTab({ id: 42, windowId: 5, title: "GitHub" }),
+    ]);
     chromeStub.tabs.get.mockResolvedValue(
       chromeTab({ id: 42, windowId: 5, title: "GitHub" }),
     );
 
     await expect(
       tabsAction.execute(
-        { action: "tabs", operation: "switch", tabId: 42 },
+        { action: "tabs", operation: "switch", target: "GitHub" },
         {},
       ),
     ).resolves.toEqual({ spoken: "Switched to GitHub." });
@@ -61,24 +64,35 @@ describe("tabs action", () => {
   });
 
   it("uses a generic switch confirmation for an untitled tab", async () => {
+    chromeStub.tabs.query.mockResolvedValue([
+      chromeTab({
+        id: 42,
+        windowId: 5,
+        title: "",
+        url: "https://example.test",
+      }),
+    ]);
     chromeStub.tabs.get.mockResolvedValue(
       chromeTab({ id: 42, windowId: 5, title: "" }),
     );
 
     await expect(
       tabsAction.execute(
-        { action: "tabs", operation: "switch", tabId: 42 },
+        { action: "tabs", operation: "switch", target: "example" },
         {},
       ),
     ).resolves.toEqual({ spoken: "Switched to the tab." });
   });
 
   it("turns stale tab lookup failures into a stable error", async () => {
+    chromeStub.tabs.query.mockResolvedValue([
+      chromeTab({ id: 12, windowId: 5, title: "Closed target" }),
+    ]);
     chromeStub.tabs.get.mockRejectedValue(new Error("No tab with id: 12"));
 
     await expect(
       tabsAction.execute(
-        { action: "tabs", operation: "switch", tabId: 12 },
+        { action: "tabs", operation: "switch", target: "Closed target" },
         {},
       ),
     ).rejects.toThrow("Tab 12 is no longer open");
@@ -86,30 +100,43 @@ describe("tabs action", () => {
     expect(chromeStub.windows.update).not.toHaveBeenCalled();
   });
 
+  it("fails clearly when no open tab matches the transcript-derived target", async () => {
+    chromeStub.tabs.query.mockResolvedValue([
+      chromeTab({ id: 12, windowId: 5, title: "Inbox" }),
+    ]);
+
+    await expect(
+      tabsAction.execute(
+        { action: "tabs", operation: "switch", target: "weather forecast" },
+        {},
+      ),
+    ).rejects.toThrow('No open tab matches "weather forecast"');
+    expect(chromeStub.tabs.get).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["mute", true, "Muted"],
     ["unmute", false, "Unmuted"],
   ] as const)(
-    "%ss an explicitly selected tab",
+    "%ss the active tab",
     async (operation, muted, spokenVerb) => {
-      chromeStub.tabs.get.mockResolvedValue(
+      chromeStub.tabs.query.mockResolvedValue([
         chromeTab({ id: 20, windowId: 1, title: "Video" }),
-      );
+      ]);
 
       await expect(
-        tabsAction.execute(
-          { action: "tabs", operation, tabId: 20 },
-          {},
-        ),
+        tabsAction.execute({ action: "tabs", operation }, {}),
       ).resolves.toEqual({ spoken: `${spokenVerb} Video.` });
 
-      expect(chromeStub.tabs.get).toHaveBeenCalledWith(20);
+      expect(chromeStub.tabs.query).toHaveBeenCalledWith({
+        active: true,
+        currentWindow: true,
+      });
       expect(chromeStub.tabs.update).toHaveBeenCalledWith(20, { muted });
-      expect(chromeStub.tabs.query).not.toHaveBeenCalled();
     },
   );
 
-  it("falls back to the active tab when mute has no selected id", async () => {
+  it("uses a generic mute confirmation for an untitled active tab", async () => {
     chromeStub.tabs.query.mockResolvedValue([
       chromeTab({ id: 21, windowId: 1 }),
     ]);
