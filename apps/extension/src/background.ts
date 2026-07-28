@@ -153,6 +153,11 @@ async function publishActionResult(
       type: "screenshot-ready",
       workflow: result.workflow,
     });
+  } else if (result.workflow?.kind === "screenshot-permission") {
+    await sendPanel({
+      type: "screenshot-permission-needed",
+      workflow: result.workflow,
+    });
   }
   await sendOffscreen({
     type: "action-result",
@@ -165,7 +170,7 @@ async function publishActionResult(
 async function executeCommand(
   command: unknown,
   transcript: string,
-): Promise<void> {
+): Promise<ActionResult | undefined> {
   try {
     const validated = commandRouter.parse(command);
     const result = await commandRouter.route(validated, {
@@ -173,6 +178,7 @@ async function executeCommand(
         destinationRegistry.dispatch(id, input),
     });
     await publishActionResult(transcript, validated, result);
+    return result;
   } catch (error) {
     const rejected = error instanceof CommandValidationError;
     const spoken = rejected
@@ -186,7 +192,19 @@ async function executeCommand(
       spoken,
       detail: rejected ? "rejected invalid command" : detail,
     });
+    return undefined;
   }
+}
+
+async function retryScreenshot(command: unknown): Promise<ActionResult> {
+  const validated = commandRouter.parse(command);
+  if (validated.action !== "screenshot") {
+    throw new TypeError("Only a pending screenshot can be retried");
+  }
+  return commandRouter.route(validated, {
+    dispatchDestination: (id, input) =>
+      destinationRegistry.dispatch(id, input),
+  });
 }
 
 async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
@@ -206,9 +224,10 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
     }
     case "execute-command": {
       const transcript = safeTranscript(message.transcript);
-      await executeCommand(message.command, transcript);
-      return undefined;
+      return executeCommand(message.command, transcript);
     }
+    case "retry-screenshot":
+      return retryScreenshot(message.command);
     case "speak": {
       const text = safeTranscript(message.text);
       if (text) {

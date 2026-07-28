@@ -47,7 +47,9 @@ describe("screenshot action", () => {
   });
 
   it("captures without collecting optional tab metadata", async () => {
-    chromeStub.tabs.query.mockResolvedValue([chromeTab({ windowId: 4 })]);
+    chromeStub.tabs.query.mockResolvedValue([
+      chromeTab({ windowId: 4, url: "https://example.test/page" }),
+    ]);
     chromeStub.tabs.captureVisibleTab.mockResolvedValue("data:image/png;base64,");
     const dispatchDestination = vi
       .fn()
@@ -90,6 +92,64 @@ describe("screenshot action", () => {
         { dispatchDestination },
       ),
     ).rejects.toThrow("No active tab is available to capture");
+    expect(chromeStub.tabs.captureVisibleTab).not.toHaveBeenCalled();
+    expect(dispatchDestination).not.toHaveBeenCalled();
+  });
+
+  it("returns a permission workflow without capturing when the site is not granted", async () => {
+    chromeStub.tabs.query.mockResolvedValue([
+      chromeTab({
+        id: 7,
+        windowId: 3,
+        url: "https://github.com/openai/sotto",
+      }),
+    ]);
+    chromeStub.permissions.contains.mockResolvedValue(false);
+    const dispatchDestination = vi.fn();
+
+    await expect(
+      screenshot.execute(
+        { action: "screenshot", destination: "claude" },
+        { dispatchDestination },
+      ),
+    ).resolves.toEqual({
+      spoken: "Screenshot access is needed for github.com.",
+      workflow: {
+        kind: "screenshot-permission",
+        originPattern: "https://github.com/*",
+        host: "github.com",
+        pendingCommand: {
+          action: "screenshot",
+          destination: "claude",
+        },
+      },
+    });
+
+    expect(chromeStub.permissions.contains).toHaveBeenCalledWith({
+      origins: ["https://github.com/*"],
+    });
+    expect(chromeStub.tabs.captureVisibleTab).not.toHaveBeenCalled();
+    expect(dispatchDestination).not.toHaveBeenCalled();
+  });
+
+  it("fails clearly without requesting permission for a restricted page", async () => {
+    chromeStub.tabs.query.mockResolvedValue([
+      chromeTab({
+        id: 7,
+        windowId: 3,
+        url: "chrome://extensions/",
+      }),
+    ]);
+    const dispatchDestination = vi.fn();
+
+    await expect(
+      screenshot.execute(
+        { action: "screenshot", destination: "copy" },
+        { dispatchDestination },
+      ),
+    ).resolves.toEqual({ spoken: "I can't capture this page." });
+
+    expect(chromeStub.permissions.contains).not.toHaveBeenCalled();
     expect(chromeStub.tabs.captureVisibleTab).not.toHaveBeenCalled();
     expect(dispatchDestination).not.toHaveBeenCalled();
   });

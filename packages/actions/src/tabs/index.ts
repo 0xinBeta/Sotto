@@ -5,6 +5,7 @@ import { findBestTabMatch } from "./match.js";
 export type TabOperation =
   | "new"
   | "close"
+  | "count"
   | "switch"
   | "mute"
   | "unmute"
@@ -13,7 +14,7 @@ export type TabOperation =
 export type TabsCommand =
   | {
       readonly action: "tabs";
-      readonly operation: "new" | "close" | "reopen";
+      readonly operation: "new" | "close" | "count" | "reopen";
     }
   | {
       readonly action: "tabs";
@@ -41,6 +42,7 @@ const schema = {
   oneOf: [
     operationSchema("new"),
     operationSchema("close"),
+    operationSchema("count"),
     {
       type: "object",
       properties: {
@@ -110,6 +112,14 @@ const tabsAction = defineAction<TabsCommand>({
     { say: "open a new tab", emit: { action: "tabs", operation: "new" } },
     { say: "close this tab", emit: { action: "tabs", operation: "close" } },
     {
+      say: "how many tabs are open",
+      emit: { action: "tabs", operation: "count" },
+    },
+    {
+      say: "how many tabs do I have",
+      emit: { action: "tabs", operation: "count" },
+    },
+    {
       say: "switch to the GitHub tab",
       emit: { action: "tabs", operation: "switch", target: "GitHub" },
     },
@@ -133,6 +143,12 @@ const tabsAction = defineAction<TabsCommand>({
         const tab = await activeTab();
         await chrome.tabs.remove(tab.id!);
         return { spoken: "Closed the tab." };
+      }
+      case "count": {
+        const tabs = await chrome.tabs.query({});
+        return {
+          spoken: `You have ${tabs.length} ${tabs.length === 1 ? "tab" : "tabs"} open.`,
+        };
       }
       case "switch": {
         const tabs = await chrome.tabs.query({});

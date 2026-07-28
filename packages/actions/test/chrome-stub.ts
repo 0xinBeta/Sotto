@@ -17,6 +17,9 @@ export function installChromeStub() {
       getRecentlyClosed: vi.fn(),
       restore: vi.fn(),
     },
+    permissions: {
+      contains: vi.fn().mockResolvedValue(true),
+    },
   };
 
   Object.defineProperty(globalThis, "chrome", {

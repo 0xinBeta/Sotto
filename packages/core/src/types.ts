@@ -83,7 +83,16 @@ export interface ClipboardWorkflow {
   };
 }
 
-export type ClientWorkflow = ClipboardWorkflow;
+export interface ScreenshotPermissionWorkflow {
+  readonly kind: "screenshot-permission";
+  readonly originPattern: string;
+  readonly host: string;
+  readonly pendingCommand: ActionCommand;
+}
+
+export type ClientWorkflow =
+  | ClipboardWorkflow
+  | ScreenshotPermissionWorkflow;
 
 export interface ActionResult {
   readonly spoken: string;

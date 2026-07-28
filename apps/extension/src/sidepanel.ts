@@ -1,5 +1,10 @@
-import type { ClipboardWorkflow } from "@sotto/core";
+import type {
+  ActionResult,
+  ClipboardWorkflow,
+  ScreenshotPermissionWorkflow,
+} from "@sotto/core";
 import { performClipboardWorkflow } from "@sotto/destinations";
+import { nextLogEntry, type LogEntry } from "./log.js";
 import "./styles.css";
 
 type NanoAvailability = "unavailable" | "downloadable" | "downloading" | "available";
@@ -30,6 +35,11 @@ type PanelMessage =
       target: "sidepanel";
       type: "screenshot-ready";
       workflow: ClipboardWorkflow;
+    }
+  | {
+      target: "sidepanel";
+      type: "screenshot-permission-needed";
+      workflow: ScreenshotPermissionWorkflow;
     }
   | { target: "sidepanel"; type: "pipeline-error"; message: string };
 
@@ -67,6 +77,8 @@ const sttProgressValue = requiredElement<HTMLOutputElement>("#stt-progress-value
 
 let isListening = false;
 let pendingScreenshot: ClipboardWorkflow | undefined;
+let pendingScreenshotPermission: ScreenshotPermissionWorkflow | undefined;
+let newestLogEntry: LogEntry | undefined;
 let pointerIsDown = false;
 let earconContext: AudioContext | undefined;
 const progressHideTimers: Partial<Record<"nano" | "stt", number>> = {};
@@ -189,37 +201,72 @@ function updateProgress(
   }
 }
 
+function updateLogTime(time: HTMLTimeElement, now: Date): void {
+  time.dateTime = now.toISOString();
+  time.textContent = now.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function appendLog(heard: string, did: string): void {
+  const decision = nextLogEntry(newestLogEntry, heard, did);
+  const now = new Date();
+  if (decision.collapsed) {
+    const newest = actionLog.firstElementChild;
+    const time = newest?.querySelector<HTMLTimeElement>("time");
+    const count = newest?.querySelector<HTMLElement>(".log-count");
+    if (time && count) {
+      updateLogTime(time, now);
+      count.hidden = false;
+      count.textContent = `×${decision.entry.count}`;
+      newestLogEntry = decision.entry;
+      return;
+    }
+  }
+
   actionLog.querySelector(".empty-log")?.remove();
   const item = document.createElement("li");
   const time = document.createElement("time");
   const copy = document.createElement("p");
   const heardText = document.createElement("strong");
-  time.dateTime = new Date().toISOString();
-  time.textContent = new Date().toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const count = document.createElement("span");
+  updateLogTime(time, now);
   heardText.textContent = heard;
-  copy.append(heardText, document.createTextNode(` → ${did}`));
+  count.className = "log-count";
+  count.hidden = true;
+  copy.append(
+    heardText,
+    document.createTextNode(` → ${did}`),
+    count,
+  );
   item.append(time, copy);
   actionLog.prepend(item);
+  newestLogEntry = decision.entry;
+}
+
+async function requestWorker<T>(
+  message: Record<string, unknown>,
+): Promise<T | undefined> {
+  const response = (await chrome.runtime.sendMessage({
+    target: "worker",
+    ...message,
+  })) as
+    | {
+        readonly ok: boolean;
+        readonly value?: T;
+        readonly error?: { readonly message?: string };
+      }
+    | undefined;
+  if (response?.ok === false) {
+    throw new Error(response.error?.message ?? "Extension request failed");
+  }
+  return response?.value;
 }
 
 async function send(message: Record<string, unknown>): Promise<boolean> {
   try {
-    const response = (await chrome.runtime.sendMessage({
-      target: "worker",
-      ...message,
-    })) as
-      | {
-          readonly ok: boolean;
-          readonly error?: { readonly message?: string };
-        }
-      | undefined;
-    if (response?.ok === false) {
-      throw new Error(response.error?.message ?? "Extension request failed");
-    }
+    await requestWorker(message);
     return true;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Extension worker unavailable";
@@ -293,6 +340,7 @@ commandForm.addEventListener("submit", (event) => {
 
 clearLog.addEventListener("click", () => {
   actionLog.replaceChildren();
+  newestLogEntry = undefined;
   const empty = document.createElement("li");
   empty.className = "empty-log";
   empty.textContent = "No commands yet.";
@@ -334,18 +382,66 @@ prepareNano.addEventListener("click", async () => {
   }
 });
 
+function showClipboardWorkflow(workflow: ClipboardWorkflow): void {
+  pendingScreenshot = workflow;
+  copyScreenshot.textContent = workflow.buttonLabel;
+  clipboardCopy.textContent = workflow.afterWrite?.followUp
+    ? "Copy the PNG, then Sotto will move you to Claude."
+    : "Copy the PNG to your clipboard.";
+  clipboardCard.hidden = false;
+}
+
+async function completeClipboardWorkflow(
+  workflow: ClipboardWorkflow,
+): Promise<void> {
+  const completion = await performClipboardWorkflow(workflow);
+  if (await send({ type: "clipboard-complete", completion })) {
+    pendingScreenshot = undefined;
+    pendingScreenshotPermission = undefined;
+    clipboardCard.hidden = true;
+  }
+}
+
 copyScreenshot.addEventListener("click", async () => {
-  if (!pendingScreenshot) return;
+  const permissionWorkflow = pendingScreenshotPermission;
+  const clipboardWorkflow = pendingScreenshot;
+  if (!permissionWorkflow && !clipboardWorkflow) return;
   copyScreenshot.disabled = true;
 
   try {
-    const completion = await performClipboardWorkflow(pendingScreenshot);
-    if (await send({ type: "clipboard-complete", completion })) {
-      pendingScreenshot = undefined;
-      clipboardCard.hidden = true;
+    if (permissionWorkflow) {
+      const granted = await chrome.permissions
+        .request({
+          origins: [permissionWorkflow.originPattern],
+        })
+        .catch((error: unknown) => {
+          console.warn("Sotto screenshot permission request failed", error);
+          return false;
+        });
+      if (!granted) {
+        const spoken = "Screenshot needs permission for this site.";
+        appendLog("screenshot", spoken);
+        await send({ type: "speak", text: spoken });
+        return;
+      }
+
+      const result = await requestWorker<ActionResult>({
+        type: "retry-screenshot",
+        command: permissionWorkflow.pendingCommand,
+      });
+      if (result?.workflow?.kind !== "clipboard-write") {
+        throw new Error("Screenshot was not ready to copy");
+      }
+      pendingScreenshotPermission = undefined;
+      showClipboardWorkflow(result.workflow);
+      await completeClipboardWorkflow(result.workflow);
+      return;
     }
+
+    await completeClipboardWorkflow(clipboardWorkflow!);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Clipboard write failed";
+    const message =
+      error instanceof Error ? error.message : "Clipboard write failed";
     appendLog("copy screenshot", message);
   } finally {
     copyScreenshot.disabled = false;
@@ -391,11 +487,16 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       appendLog(message.heard, message.did);
       break;
     case "screenshot-ready":
-      pendingScreenshot = message.workflow;
-      copyScreenshot.textContent = message.workflow.buttonLabel;
-      clipboardCopy.textContent = message.workflow.afterWrite?.followUp
-        ? "Copy the PNG, then Sotto will move you to Claude."
-        : "Copy the PNG to your clipboard.";
+      pendingScreenshotPermission = undefined;
+      showClipboardWorkflow(message.workflow);
+      break;
+    case "screenshot-permission-needed":
+      pendingScreenshot = undefined;
+      pendingScreenshotPermission = message.workflow;
+      copyScreenshot.textContent =
+        `Allow capturing ${message.workflow.host} and copy`;
+      clipboardCopy.textContent =
+        `Sotto needs one-time access to capture ${message.workflow.host}.`;
       clipboardCard.hidden = false;
       break;
     case "pipeline-error":

@@ -18,6 +18,24 @@ const schema = {
   additionalProperties: false,
 } as const satisfies JsonSchema;
 
+function captureOrigin(
+  url: string | undefined,
+): { originPattern: string; host: string } | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return undefined;
+    }
+    return {
+      originPattern: `${parsed.origin}/*`,
+      host: parsed.host,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 const screenshot = defineAction<ScreenshotCommand>({
   id: "screenshot",
   title: "Screenshot",
@@ -47,6 +65,26 @@ const screenshot = defineAction<ScreenshotCommand>({
     });
     if (!activeTab || activeTab.windowId === undefined) {
       throw new Error("No active tab is available to capture");
+    }
+
+    const captureSite = captureOrigin(activeTab.url);
+    if (!captureSite) {
+      return { spoken: "I can't capture this page." };
+    }
+
+    const hasPermission = await chrome.permissions.contains({
+      origins: [captureSite.originPattern],
+    });
+    if (!hasPermission) {
+      return {
+        spoken: `Screenshot access is needed for ${captureSite.host}.`,
+        workflow: {
+          kind: "screenshot-permission",
+          originPattern: captureSite.originPattern,
+          host: captureSite.host,
+          pendingCommand: command,
+        },
+      };
     }
 
     const dataUrl = await chrome.tabs.captureVisibleTab(activeTab.windowId, {

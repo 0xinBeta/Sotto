@@ -42,6 +42,22 @@ describe("tabs action", () => {
     expect(chromeStub.tabs.remove).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [1, "You have 1 tab open."],
+    [4, "You have 4 tabs open."],
+  ] as const)("counts %i open tabs", async (count, spoken) => {
+    chromeStub.tabs.query.mockResolvedValue(
+      Array.from({ length: count }, (_, index) =>
+        chromeTab({ id: index + 1, windowId: 1 }),
+      ),
+    );
+
+    await expect(
+      tabsAction.execute({ action: "tabs", operation: "count" }, {}),
+    ).resolves.toEqual({ spoken });
+    expect(chromeStub.tabs.query).toHaveBeenCalledWith({});
+  });
+
   it("switches tabs and focuses the containing window", async () => {
     chromeStub.tabs.query.mockResolvedValue([
       chromeTab({ id: 42, windowId: 5, title: "GitHub" }),

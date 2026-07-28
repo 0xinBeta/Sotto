@@ -102,6 +102,22 @@
   },
 
   {
+    "id": "tabs-count-01",
+    "transcript": "how many tabs are open",
+    "expected": { "action": "tabs", "operation": "count" }
+  },
+  {
+    "id": "tabs-count-02",
+    "transcript": "how many tabs do I have",
+    "expected": { "action": "tabs", "operation": "count" }
+  },
+  {
+    "id": "tabs-count-03",
+    "transcript": "how many taps are open right now",
+    "expected": { "action": "tabs", "operation": "count" }
+  },
+
+  {
     "id": "tabs-close-01",
     "transcript": "close this tab",
     "expected": { "action": "tabs", "operation": "close" }
