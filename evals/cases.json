@@ -617,6 +617,47 @@
   },
 
   {
+    "id": "help-show-01",
+    "transcript": "what can I say",
+    "expected": { "action": "help", "mode": "show" }
+  },
+  {
+    "id": "help-show-02",
+    "transcript": "help",
+    "expected": { "action": "help", "mode": "show" }
+  },
+  {
+    "id": "help-show-03",
+    "transcript": "show commands",
+    "expected": { "action": "help", "mode": "show" }
+  },
+  {
+    "id": "help-show-04",
+    "transcript": "what commands can I use",
+    "expected": { "action": "help", "mode": "show" }
+  },
+  {
+    "id": "help-read-01",
+    "transcript": "read the commands",
+    "expected": { "action": "help", "mode": "read" }
+  },
+  {
+    "id": "help-read-02",
+    "transcript": "read all commands aloud",
+    "expected": { "action": "help", "mode": "read" }
+  },
+  {
+    "id": "unknown-help-near-01",
+    "transcript": "help me send an email",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-help-near-02",
+    "transcript": "show Chrome keyboard shortcuts",
+    "expected": { "action": "unknown" }
+  },
+
+  {
     "id": "unknown-01",
     "transcript": "what is the weather tomorrow",
     "expected": { "action": "unknown" }

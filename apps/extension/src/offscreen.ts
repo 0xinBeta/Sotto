@@ -1537,18 +1537,21 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
     await sendPanel({ type: "earcon", kind: "complete" });
   }
 
-  const spoken = command.action === "unknown"
-    ? "Sorry, say that again?"
-    : await inferenceMutex.run(async () =>
-        await respondOneSentence({
-          session: await ensureResponderSession(),
-          command,
-          result,
-          onError(error) {
-            console.warn("Nano responder used deterministic fallback", error);
-          },
-        })
-      );
+  const spoken =
+    command.action === "unknown"
+      ? "Sorry, say that again?"
+      : command.action === "help"
+        ? result.spoken
+        : await inferenceMutex.run(async () =>
+            await respondOneSentence({
+              session: await ensureResponderSession(),
+              command,
+              result,
+              onError(error) {
+                console.warn("Nano responder used deterministic fallback", error);
+              },
+            })
+          );
   await speak(spoken, {
     heard: transcript,
     did: result.spoken,

@@ -20,6 +20,7 @@ class FakeElement {
   dateTime = "";
   disabled = false;
   hidden = false;
+  open = false;
   parent?: FakeElement;
   readonly style: Record<string, string> = {};
   textUpdateCount = 0;
@@ -100,6 +101,7 @@ class FakeElement {
   }
   setPointerCapture(): void {}
   releasePointerCapture(): void {}
+  scrollIntoView = vi.fn();
 
   async emit(
     type: string,
@@ -189,6 +191,8 @@ const elementIds = [
   "notes-list",
   "export-notes",
   "reminder-banner",
+  "command-reference",
+  "command-reference-list",
 ] as const;
 
 const workflow = {
@@ -608,6 +612,20 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["notes-list"].firstElementChild?.textContent).toContain(
       untrusted,
     );
+  });
+
+  it("opens and scrolls to the command reference on request", async () => {
+    const { elements, onMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "show-command-reference",
+    });
+
+    expect(elements["command-reference"].open).toBe(true);
+    expect(
+      elements["command-reference"].scrollIntoView,
+    ).toHaveBeenCalledWith({ block: "start" });
   });
 
   it("rejects malformed v0.2 panel payloads before rendering", async () => {

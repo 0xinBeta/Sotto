@@ -1,4 +1,5 @@
 import askPageAction from "./ask-page/index.js";
+import helpAction from "./help/index.js";
 import notesAction from "./notes/index.js";
 import screenshotAction from "./screenshot/index.js";
 import summarizeAction from "./summarize/index.js";
@@ -7,6 +8,17 @@ import typeAction from "./type/index.js";
 
 export { default as askPageAction } from "./ask-page/index.js";
 export type { AskPageCommand } from "./ask-page/index.js";
+export {
+  default as helpAction,
+  HELP_SUMMARY_MAX_CHARACTERS,
+  createCommandReading,
+  createHelpSummary,
+  helpSchema,
+} from "./help/index.js";
+export type {
+  HelpCommand,
+  HelpMode,
+} from "./help/index.js";
 export {
   default as notesAction,
   notesSchema,
@@ -46,5 +58,6 @@ export const actions = [
   askPageAction,
   notesAction,
   typeAction,
+  helpAction,
 ] as const;
 export default actions;

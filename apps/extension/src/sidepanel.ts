@@ -10,6 +10,10 @@ import {
   isExchangeTimings,
   type ExchangeTimings,
 } from "./timings.js";
+import {
+  isCommandReference,
+  renderCommandReference,
+} from "./command-reference.js";
 import "./styles.css";
 
 type NanoAvailability = "unavailable" | "downloadable" | "downloading" | "available";
@@ -168,7 +172,8 @@ type PanelMessage =
       type: "stt-diagnostic";
       diagnostic: SttDiagnostic;
       message: string;
-    };
+    }
+  | { target: "sidepanel"; type: "show-command-reference" };
 
 function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
   switch (message.type) {
@@ -318,6 +323,10 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         message.level >= 0 &&
         message.level <= 1
       );
+    case "show-command-reference":
+      return Object.keys(message).every((key) =>
+        key === "target" || key === "type"
+      );
     default:
       return true;
   }
@@ -405,6 +414,10 @@ const readingProgress = requiredElement<HTMLProgressElement>("#reading-progress"
 const notesList = requiredElement<HTMLUListElement>("#notes-list");
 const exportNotes = requiredElement<HTMLButtonElement>("#export-notes");
 const reminderBanner = requiredElement<HTMLElement>("#reminder-banner");
+const commandReference =
+  requiredElement<HTMLDetailsElement>("#command-reference");
+const commandReferenceList =
+  requiredElement<HTMLElement>("#command-reference-list");
 
 let isListening = false;
 let pendingScreenshot: ClipboardWorkflow | undefined;
@@ -846,6 +859,11 @@ function renderNotes(notes: readonly PanelNote[]): void {
     item.append(body, time);
     notesList.append(item);
   }
+}
+
+function showCommandReference(): void {
+  commandReference.open = true;
+  commandReference.scrollIntoView({ block: "start" });
 }
 
 function showReminder(
@@ -1329,6 +1347,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       transcript.dataset.diagnostic = message.diagnostic;
       appendLog(`speech / ${message.diagnostic}`, message.message);
       break;
+    case "show-command-reference":
+      showCommandReference();
+      break;
     case "listening-state":
       setListening(message.listening);
       break;
@@ -1466,6 +1487,15 @@ async function showReminderFromLocation(): Promise<void> {
   }
 }
 
+async function loadCommandReference(): Promise<void> {
+  const reference = await requestWorker<unknown>({
+    type: "get-command-reference",
+  });
+  if (isCommandReference(reference)) {
+    renderCommandReference(reference, commandReferenceList);
+  }
+}
+
 showTranscript("");
 micMeter.dataset.state = "idle";
 micMeterFill.style.transform = "scaleX(0)";
@@ -1483,3 +1513,4 @@ void requestWorker<readonly PanelNote[]>({ type: "get-notes" })
 void loadCapturePermissionState();
 void showAssignedShortcut();
 void showReminderFromLocation();
+void loadCommandReference().catch(() => undefined);

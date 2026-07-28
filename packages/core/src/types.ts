@@ -90,9 +90,14 @@ export interface ScreenshotPermissionWorkflow {
   readonly pendingCommand: ActionCommand;
 }
 
+export interface PanelCommandReferenceWorkflow {
+  readonly kind: "panel-command-reference";
+}
+
 export type ClientWorkflow =
   | ClipboardWorkflow
-  | ScreenshotPermissionWorkflow;
+  | ScreenshotPermissionWorkflow
+  | PanelCommandReferenceWorkflow;
 
 export interface ActionResult {
   readonly spoken: string;
@@ -176,6 +181,10 @@ export interface EditableActionServices {
   }>;
 }
 
+export interface ActionCatalog {
+  list(): readonly ActionDefinition[];
+}
+
 export interface ActionContext {
   /**
    * Supplied by the service-worker router. Actions use it instead of importing
@@ -189,6 +198,8 @@ export interface ActionContext {
   readonly page?: PageActionServices;
   /** Worker-owned bridge to the captured editable range. */
   readonly type?: EditableActionServices;
+  /** Registry metadata for actions that present command help. */
+  readonly actionCatalog?: ActionCatalog;
 }
 
 export interface DestinationContext {

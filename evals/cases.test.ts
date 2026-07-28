@@ -25,6 +25,24 @@ describe("intent eval schema drift", () => {
     },
   );
 
+  it("keeps at least six help cases, including near-misses", () => {
+    const helpCases = cases.filter((testCase) =>
+      testCase.id.startsWith("help-") ||
+      testCase.id.startsWith("unknown-help-near-")
+    );
+    const nearMisses = helpCases.filter((testCase) =>
+      testCase.id.startsWith("unknown-help-near-")
+    );
+
+    expect(helpCases.length).toBeGreaterThanOrEqual(6);
+    expect(nearMisses.length).toBeGreaterThanOrEqual(2);
+    expect(
+      nearMisses.every(
+        (testCase) => testCase.expected.action === "unknown",
+      ),
+    ).toBe(true);
+  });
+
   it("keeps security near-misses on the unknown path", () => {
     const nearMisses = cases.filter((testCase) =>
       testCase.id.startsWith("unknown-") &&

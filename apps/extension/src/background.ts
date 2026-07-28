@@ -34,6 +34,7 @@ import {
   isExchangeTimings,
   type ExchangeTimings,
 } from "./timings.js";
+import { createCommandReference } from "./command-reference.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -939,6 +940,10 @@ async function publishActionResult(
       workflow: result.workflow,
     });
   }
+  if (result.workflow?.kind === "panel-command-reference") {
+    await sendPanel({ type: "show-command-reference" });
+    await sendPanel({ type: "earcon", kind: "complete" });
+  }
   if (
     result.workflow?.kind === "clipboard-write"
   ) {
@@ -976,6 +981,7 @@ async function executeCommand(
           destinationRegistry.dispatch(id, input),
         page: pageActionServices,
         type: editableActionServices,
+        actionCatalog: actionRegistry,
       });
     } finally {
       completedTimings = {
@@ -1041,6 +1047,8 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return sendOffscreen({ type: "get-status" });
     case "get-notes":
       return (await publishNotes()).map(panelNote);
+    case "get-command-reference":
+      return createCommandReference(actionRegistry);
     case "get-reminder": {
       if (
         typeof message.reminderId !== "string" ||

@@ -186,6 +186,36 @@ afterEach(() => {
 });
 
 describe("background screenshot clipboard injection", () => {
+  it("sends the help workflow to the command reference", async () => {
+    const helpResult = {
+      spoken: "Sotto supports 7 commands; open the panel for the list.",
+      workflow: { kind: "panel-command-reference" },
+    } as const;
+    worker.route.mockResolvedValue(helpResult);
+    const harness = await installBackground({
+      id: 5,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "what can I say",
+        command: { action: "help", mode: "show" },
+      }),
+    ).resolves.toEqual({ ok: true, value: helpResult });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "show-command-reference",
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "earcon",
+      kind: "complete",
+    });
+  });
+
   it("relays high-accuracy speech download and toggle requests to offscreen", async () => {
     const harness = await installBackground({
       id: 7,
