@@ -107,4 +107,4 @@ Easiest first PRs, no code required: add phrasing cases to `evals/` — every wa
 
 ## License
 
-[MIT](LICENSE)
+Sotto's source is [MIT](LICENSE). The built extension bundles third-party components under their own licenses — notably the eSpeak NG phonemizer (GPL-3.0-or-later, WebAssembly, used by the premium local voice). See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
