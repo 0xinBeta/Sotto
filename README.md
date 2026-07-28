@@ -26,7 +26,7 @@ No API keys. No server. No telemetry. The only network traffic is a one-time mod
 | "take a screenshot" | Captures the visible tab to your clipboard |
 | "screenshot this and send it to my Claude chat" | Captures, copies, focuses claude.ai — paste-ready |
 | "new tab" / "close this tab" | Tab control |
-| "switch to the GitHub tab" | Fuzzy tab matching — Nano maps your words to open tab titles |
+| "switch to the GitHub tab" | Nano extracts the target from your words; deterministic local code fuzzy-matches it against open tabs — tab titles never enter the model |
 | "mute that video" / "reopen what I just closed" | Tab audio & session restore |
 | *(anything it doesn't know)* | "Sorry, say that again?" — it never guesses |
 
@@ -77,7 +77,7 @@ pnpm build
 1. Open `chrome://extensions`, enable **Developer mode**
 2. **Load unpacked** → select `apps/extension/dist`
 3. Open the Sotto side panel and follow onboarding (mic permission + model downloads)
-4. Hold <kbd>Alt</kbd>+<kbd>S</kbd> and talk
+4. Press <kbd>Alt</kbd>+<kbd>S</kbd> (<kbd>Option</kbd>+<kbd>S</kbd> on macOS), speak, and pause — voice activity detection ends the capture, or press the hotkey again
 
 ## Repository layout
 
