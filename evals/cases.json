@@ -1,0 +1,449 @@
+[
+  {
+    "id": "screenshot-copy-01",
+    "transcript": "take a screenshot",
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "screenshot-copy-02",
+    "transcript": "screenshot this page",
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "screenshot-copy-03",
+    "transcript": "capture what I am looking at",
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "screenshot-copy-04",
+    "transcript": "grab the visible tab",
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "screenshot-copy-05",
+    "transcript": "copy a screenshot for me",
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "screenshot-copy-06",
+    "transcript": "can you capture this screen",
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "screenshot-claude-01",
+    "transcript": "send a screenshot to Claude",
+    "expected": { "action": "screenshot", "destination": "claude" }
+  },
+  {
+    "id": "screenshot-claude-02",
+    "transcript": "screenshot this and send it to my Claude chat",
+    "expected": { "action": "screenshot", "destination": "claude" }
+  },
+  {
+    "id": "screenshot-claude-03",
+    "transcript": "capture this page for Claude",
+    "expected": { "action": "screenshot", "destination": "claude" }
+  },
+  {
+    "id": "screenshot-claude-04",
+    "transcript": "grab the screen and open Claude",
+    "expected": { "action": "screenshot", "destination": "claude" }
+  },
+
+  {
+    "id": "tabs-new-01",
+    "transcript": "new tab",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tabs-new-02",
+    "transcript": "open a new tab",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tabs-new-03",
+    "transcript": "give me another tab",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tabs-new-04",
+    "transcript": "create a fresh tab",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tabs-new-05",
+    "transcript": "add a browser tab",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tabs-new-06",
+    "transcript": "I need a blank tab",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tabs-new-07",
+    "transcript": "start another tab",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tabs-new-08",
+    "transcript": "open one more tab please",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tabs-new-09",
+    "transcript": "make a new browser tab",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tabs-new-10",
+    "transcript": "another tab",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+
+  {
+    "id": "tabs-close-01",
+    "transcript": "close this tab",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "tabs-close-02",
+    "transcript": "close this",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "tabs-close-03",
+    "transcript": "get rid of this tab",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "tabs-close-04",
+    "transcript": "shut the current tab",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "tabs-close-05",
+    "transcript": "dismiss this page",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "tabs-close-06",
+    "transcript": "remove the active tab",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "tabs-close-07",
+    "transcript": "close the page I am on",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "tabs-close-08",
+    "transcript": "kill this tab",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "tabs-close-09",
+    "transcript": "exit the current tab",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "tabs-close-10",
+    "transcript": "please close the tab",
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+
+  {
+    "id": "tabs-switch-01",
+    "transcript": "switch to the GitHub tab",
+    "openTabs": [
+      { "id": 101, "title": "GitHub", "url": "https://github.com/" },
+      { "id": 102, "title": "Inbox", "url": "https://mail.google.com/" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 101 }
+  },
+  {
+    "id": "tabs-switch-02",
+    "transcript": "go to my inbox",
+    "openTabs": [
+      { "id": 103, "title": "Pull requests · GitHub", "url": "https://github.com/pulls" },
+      { "id": 104, "title": "Inbox (4)", "url": "https://mail.google.com/mail/u/0/#inbox" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 104 }
+  },
+  {
+    "id": "tabs-switch-03",
+    "transcript": "show me the Figma tab",
+    "openTabs": [
+      { "id": 105, "title": "Dashboard – Figma", "url": "https://figma.com/files" },
+      { "id": 106, "title": "Linear", "url": "https://linear.app/" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 105 }
+  },
+  {
+    "id": "tabs-switch-04",
+    "transcript": "take me back to the docs",
+    "openTabs": [
+      { "id": 107, "title": "Sotto – Google Docs", "url": "https://docs.google.com/document/d/1" },
+      { "id": 108, "title": "Calendar", "url": "https://calendar.google.com/" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 107 }
+  },
+  {
+    "id": "tabs-switch-05",
+    "transcript": "open the stack overflow tab",
+    "openTabs": [
+      { "id": 109, "title": "typescript - Stack Overflow", "url": "https://stackoverflow.com/questions/1" },
+      { "id": 110, "title": "TypeScript Handbook", "url": "https://typescriptlang.org/docs/" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 109 }
+  },
+  {
+    "id": "tabs-switch-06",
+    "transcript": "switch over to YouTube",
+    "openTabs": [
+      { "id": 111, "title": "YouTube", "url": "https://youtube.com/" },
+      { "id": 112, "title": "Music", "url": "https://music.apple.com/" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 111 }
+  },
+  {
+    "id": "tabs-switch-07",
+    "transcript": "go to the local app",
+    "openTabs": [
+      { "id": 113, "title": "Sotto", "url": "http://localhost:5173/" },
+      { "id": 114, "title": "Vite", "url": "https://vite.dev/" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 113 }
+  },
+  {
+    "id": "tabs-switch-08",
+    "transcript": "find my calendar tab",
+    "openTabs": [
+      { "id": 115, "title": "July 2026 – Calendar", "url": "https://calendar.google.com/" },
+      { "id": 116, "title": "Inbox", "url": "https://mail.google.com/" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 115 }
+  },
+  {
+    "id": "tabs-switch-09",
+    "transcript": "jump to linear",
+    "openTabs": [
+      { "id": 117, "title": "Issues – Linear", "url": "https://linear.app/acme/team/ENG" },
+      { "id": 118, "title": "GitHub", "url": "https://github.com/" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 117 }
+  },
+  {
+    "id": "tabs-switch-10",
+    "transcript": "bring up the Claude conversation",
+    "openTabs": [
+      { "id": 119, "title": "Claude", "url": "https://claude.ai/chat/abc" },
+      { "id": 120, "title": "ChatGPT", "url": "https://chatgpt.com/" }
+    ],
+    "expected": { "action": "tabs", "operation": "switch", "tabId": 119 }
+  },
+
+  {
+    "id": "tabs-mute-01",
+    "transcript": "mute this tab",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "tabs-mute-02",
+    "transcript": "mute that video",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "tabs-mute-03",
+    "transcript": "turn off the tab audio",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "tabs-mute-04",
+    "transcript": "silence this page",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "tabs-mute-05",
+    "transcript": "stop the sound here",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "tabs-mute-06",
+    "transcript": "quiet this tab",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "tabs-mute-07",
+    "transcript": "disable audio for this tab",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "tabs-mute-08",
+    "transcript": "make this video silent",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "tabs-mute-09",
+    "transcript": "no sound from this page",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "tabs-mute-10",
+    "transcript": "mute the current browser tab",
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+
+  {
+    "id": "tabs-unmute-01",
+    "transcript": "unmute this tab",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+  {
+    "id": "tabs-unmute-02",
+    "transcript": "turn the sound back on",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+  {
+    "id": "tabs-unmute-03",
+    "transcript": "let me hear this video",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+  {
+    "id": "tabs-unmute-04",
+    "transcript": "restore audio on this tab",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+  {
+    "id": "tabs-unmute-05",
+    "transcript": "enable sound here",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+  {
+    "id": "tabs-unmute-06",
+    "transcript": "unsilence this page",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+  {
+    "id": "tabs-unmute-07",
+    "transcript": "audio back on please",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+  {
+    "id": "tabs-unmute-08",
+    "transcript": "make the tab audible again",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+  {
+    "id": "tabs-unmute-09",
+    "transcript": "I want sound from this tab",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+  {
+    "id": "tabs-unmute-10",
+    "transcript": "remove the mute",
+    "expected": { "action": "tabs", "operation": "unmute" }
+  },
+
+  {
+    "id": "tabs-reopen-01",
+    "transcript": "reopen the last tab",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "tabs-reopen-02",
+    "transcript": "reopen what I just closed",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "tabs-reopen-03",
+    "transcript": "bring back that tab",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "tabs-reopen-04",
+    "transcript": "restore my closed tab",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "tabs-reopen-05",
+    "transcript": "undo closing the tab",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "tabs-reopen-06",
+    "transcript": "get the previous tab back",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "tabs-reopen-07",
+    "transcript": "recover the tab I closed",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "tabs-reopen-08",
+    "transcript": "open my recently closed tab",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "tabs-reopen-09",
+    "transcript": "restore the most recent page",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "tabs-reopen-10",
+    "transcript": "take me back to the tab I accidentally closed",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+
+  {
+    "id": "unknown-01",
+    "transcript": "what is the weather tomorrow",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-02",
+    "transcript": "send an email to Alex",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-03",
+    "transcript": "delete my browsing history",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-04",
+    "transcript": "play some jazz",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-05",
+    "transcript": "turn on the kitchen lights",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-06",
+    "transcript": "book a table for two",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-07",
+    "transcript": "summarize this article",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-08",
+    "transcript": "scroll down a little",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-09",
+    "transcript": "click the blue button",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-10",
+    "transcript": "do the thing",
+    "expected": { "action": "unknown" }
+  }
+]

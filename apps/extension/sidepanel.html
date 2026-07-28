@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Sotto</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">ON-DEVICE VOICE UTILITY</p>
+          <h1>Sotto<span aria-hidden="true">.</span></h1>
+        </div>
+        <div class="status-chip" id="status-chip" data-state="booting">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="status-label">Checking hardware</span>
+        </div>
+      </header>
+
+      <section class="onboarding" id="onboarding" hidden>
+        <p class="section-index">00 / SETUP</p>
+        <h2 id="onboarding-title">Nano needs a capable machine.</h2>
+        <p id="onboarding-copy">
+          Sotto keeps every command on this device. Chrome’s built-in model must be available before voice commands can run.
+        </p>
+        <ul class="hardware-list">
+          <li>Chrome 138 or newer</li>
+          <li>macOS 13+, Windows 10/11, Linux, or Chromebook Plus</li>
+          <li>22 GB free storage</li>
+          <li>&gt;4 GB GPU memory, or 16 GB RAM and 4 CPU cores</li>
+        </ul>
+        <button class="button primary" id="prepare-nano" type="button" hidden>Prepare Gemini Nano</button>
+      </section>
+
+      <section class="progress-stack" aria-label="Model setup">
+        <div class="progress-card" id="nano-progress-card" hidden>
+          <div class="progress-copy"><span>Gemini Nano</span><output id="nano-progress-value">0%</output></div>
+          <progress id="nano-progress" max="1" value="0"></progress>
+        </div>
+        <div class="progress-card" id="stt-progress-card" hidden>
+          <div class="progress-copy"><span>Moonshine speech model</span><output id="stt-progress-value">0%</output></div>
+          <progress id="stt-progress" max="1" value="0"></progress>
+        </div>
+      </section>
+
+      <section class="transcript-panel" aria-live="polite">
+        <div class="section-heading">
+          <p class="section-index">01 / HEARD</p>
+          <span class="listening-mark" id="listening-mark">IDLE</span>
+        </div>
+        <p class="transcript" id="transcript">Your words will appear here.</p>
+      </section>
+
+      <section class="control-panel">
+        <button class="listen-button" id="listen-button" type="button" aria-pressed="false">
+          <span class="listen-rings" aria-hidden="true"></span>
+          <span id="listen-label">Hold to talk</span>
+          <kbd>⌥ S</kbd>
+        </button>
+        <p class="mic-help" id="mic-help">
+          Voice unavailable?
+          <button class="link-button" id="grant-mic" type="button">Grant microphone access</button>
+        </p>
+      </section>
+
+      <form class="command-form" id="command-form">
+        <label for="command-input">TYPE A COMMAND</label>
+        <div class="command-row">
+          <input id="command-input" name="command" type="text" autocomplete="off" placeholder="switch to the GitHub tab" />
+          <button type="submit" aria-label="Run command">→</button>
+        </div>
+        <p>Uses the same private parse → validate → act pipeline.</p>
+      </form>
+
+      <section class="clipboard-card" id="clipboard-card" hidden>
+        <div>
+          <p class="section-index">SCREENSHOT READY</p>
+          <p>Copy the PNG, then Sotto will move you to Claude.</p>
+        </div>
+        <button class="button primary" id="copy-screenshot" type="button">Copy &amp; continue</button>
+      </section>
+
+      <section class="log-panel">
+        <div class="section-heading">
+          <p class="section-index">02 / DID</p>
+          <button class="link-button" id="clear-log" type="button">Clear</button>
+        </div>
+        <ol class="action-log" id="action-log">
+          <li class="empty-log">No commands yet.</li>
+        </ol>
+      </section>
+    </main>
+    <script type="module" src="/src/sidepanel.ts"></script>
+  </body>
+</html>

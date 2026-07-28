@@ -1,0 +1,17 @@
+{
+  "name": "sotto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.13.2",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' build && pnpm --filter @sotto/extension build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "evals": "pnpm --filter @sotto/evals eval"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.2.2",
+    "@types/node": "24.3.0",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Allow microphone · Sotto</title>
+  </head>
+  <body>
+    <main class="permission-shell">
+      <p class="eyebrow">SOTTO / ONE-TIME SETUP</p>
+      <h1>Let Sotto hear you.</h1>
+      <p class="permission-lede">
+        Chrome needs a visible page for the first microphone prompt. Audio stays in memory, is transcribed on this device, and is never saved.
+      </p>
+      <div class="privacy-stamp">
+        <span aria-hidden="true">◎</span>
+        <p><strong>No recordings.</strong><br />The temporary permission-check stream is stopped immediately.</p>
+      </div>
+      <button class="button primary" id="grant-button" type="button">Allow microphone</button>
+      <p class="permission-status" id="permission-status" role="status"></p>
+    </main>
+    <script type="module" src="/src/request-mic.ts"></script>
+  </body>
+</html>

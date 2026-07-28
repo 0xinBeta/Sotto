@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Sotto",
+  "version": "0.1.0",
+  "description": "Private, on-device voice commands for Chrome.",
+  "minimum_chrome_version": "138",
+  "permissions": [
+    "activeTab",
+    "clipboardWrite",
+    "offscreen",
+    "sessions",
+    "sidePanel",
+    "storage",
+    "tabs",
+    "tts"
+  ],
+  "host_permissions": [
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*",
+    "https://*.hf.co/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open Sotto",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "commands": {
+    "toggle-sotto": {
+      "suggested_key": {
+        "default": "Alt+S",
+        "mac": "Option+S"
+      },
+      "description": "Start or stop listening"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self';"
+  }
+}
