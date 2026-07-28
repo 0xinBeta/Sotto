@@ -64,6 +64,31 @@ describe("SystemTtsEngine", () => {
     expect(firstAudio).toHaveBeenCalledOnce();
   });
 
+  it("passes speech rate and volume to Chrome TTS", async () => {
+    const speak = vi.fn(
+      (_text: string, options: chrome.tts.TtsOptions) => {
+        options.onEvent?.({ type: "end" } as chrome.tts.TtsEvent);
+      },
+    );
+    installTts(
+      [{ voiceName: "Local", lang: "en-US", remote: false }],
+      speak,
+    );
+
+    await new SystemTtsEngine().speak("Configured.", {
+      rate: 1.7,
+      volume: 0.35,
+    });
+
+    expect(speak).toHaveBeenCalledWith(
+      "Configured.",
+      expect.objectContaining({
+        rate: 1.7,
+        volume: 0.35,
+      }),
+    );
+  });
+
   it("rejects instead of silently accepting a missing local voice", async () => {
     installTts(
       [{ voiceName: "Remote", lang: "en-US", remote: true }],
@@ -256,6 +281,37 @@ describe("SystemTtsEngine", () => {
     ttsOptions?.onEvent?.({ type: "end" } as chrome.tts.TtsEvent);
 
     await expect(playback).resolves.toBeUndefined();
+  });
+
+  it("scales the watchdog duration with speech rate", async () => {
+    vi.useFakeTimers();
+    const speak = vi.fn();
+    installTts(
+      [{ voiceName: "Local", lang: "en-US", remote: false }],
+      speak,
+    );
+    const playback = new SystemTtsEngine().speak(
+      "x".repeat(1_000),
+      { rate: 2 },
+    );
+    let settled = false;
+    void playback.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    const rejected = expect(playback).rejects.toThrow(
+      "System TTS playback timed out",
+    );
+
+    await vi.advanceTimersByTimeAsync(74_999);
+    expect(speak).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
   });
 
   it("stop invalidates a read immediately even when Chrome emits no event", async () => {

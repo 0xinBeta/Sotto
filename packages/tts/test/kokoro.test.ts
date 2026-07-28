@@ -50,6 +50,7 @@ class FakeAudioContext {
   currentTime = 0;
   state: AudioContextState;
   readonly destination = {} as AudioDestinationNode;
+  readonly gains: GainNode[] = [];
   readonly sources: FakeSource[] = [];
   readonly #resumeSucceeds: boolean;
   readonly close = vi.fn(async () => {
@@ -86,12 +87,14 @@ class FakeAudioContext {
   }
 
   createGain(): GainNode {
-    return {
+    const gain = {
       gain: { value: 1 },
       connect: vi.fn(function (this: GainNode) {
         return this;
       }),
     } as unknown as GainNode;
+    this.gains.push(gain);
+    return gain;
   }
 }
 
@@ -338,6 +341,37 @@ describe("KokoroTtsEngine", () => {
       voice: "bf_emma",
       speed: 1,
     });
+  });
+
+  it("uses Kokoro synthesis speed and a playback gain node", async () => {
+    const harness = runtimeHarness();
+    const context = new FakeAudioContext();
+    const engine = new KokoroTtsEngine({
+      runtime: harness.runtime,
+      audioContextFactory: () => context as unknown as AudioContext,
+      runtimeUrl: (path) => path,
+      backend: "wasm",
+    });
+    await engine.init();
+    harness.generate.mockClear();
+
+    const speaking = engine.speak("Configured.", {
+      rate: 1.6,
+      volume: 0.3,
+    });
+    await vi.waitFor(() => expect(context.sources).toHaveLength(1));
+    context.sources[0]?.finish();
+    await speaking;
+
+    expect(harness.generate).toHaveBeenCalledWith("Configured.", {
+      voice: KOKORO_VOICE,
+      speed: 1.6,
+    });
+    expect(context.gains).toHaveLength(1);
+    expect(context.gains[0]?.gain.value).toBe(0.3);
+    expect(context.sources[0]?.connect).toHaveBeenCalledWith(
+      context.gains[0],
+    );
   });
 
   it("serializes synthesis, limits lookahead to three, and drops played sources", async () => {

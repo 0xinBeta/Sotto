@@ -61,6 +61,10 @@ import {
   isExchangeTimings,
   type ExchangeTimings,
 } from "./timings.js";
+import {
+  clampSpeechRate,
+  clampSpeechVolume,
+} from "./speech-settings.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -716,13 +720,12 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
     await premiumTts.speak(message.text, {
       voice,
       ...(typeof message.rate === "number" &&
-          Number.isFinite(message.rate) &&
-          message.rate > 0
-        ? { rate: message.rate }
+          Number.isFinite(message.rate)
+        ? { rate: clampSpeechRate(message.rate) }
         : {}),
       ...(typeof message.volume === "number" &&
           Number.isFinite(message.volume)
-        ? { volume: Math.max(0, Math.min(1, message.volume)) }
+        ? { volume: clampSpeechVolume(message.volume) }
         : {}),
       onFirstAudio() {
         void askWorker({

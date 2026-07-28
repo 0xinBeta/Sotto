@@ -331,7 +331,11 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     }
   }
 
-  async preview(text: string, voice: KokoroVoiceId): Promise<void> {
+  async preview(
+    text: string,
+    voice: KokoroVoiceId,
+    options: TtsSpeakOptions = {},
+  ): Promise<void> {
     const utterance = text.trim();
     if (!utterance) return;
     const generation = this.#begin();
@@ -339,7 +343,7 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     try {
       await this.#speakSentence(
         utterance,
-        {},
+        options,
         generation,
         voice,
         true,

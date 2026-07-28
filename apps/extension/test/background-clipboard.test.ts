@@ -40,6 +40,7 @@ interface ChromeHarness {
   readonly queryTabs: ReturnType<typeof vi.fn>;
   readonly sendMessage: ReturnType<typeof vi.fn>;
   readonly storageSet: ReturnType<typeof vi.fn>;
+  readonly storageValues: Record<string, unknown>;
   readonly tabSendMessage: ReturnType<typeof vi.fn>;
   readonly updateTab: ReturnType<typeof vi.fn>;
   readonly workerMessage: (
@@ -75,6 +76,7 @@ const result = {
 
 async function installBackground(
   activeTab: { readonly id: number; readonly url: string },
+  initialStorage: Record<string, unknown> = {},
 ): Promise<ChromeHarness> {
   let onMessage:
     | ((
@@ -89,7 +91,10 @@ async function installBackground(
   const updateTab = vi.fn();
   const tabSendMessage = vi.fn();
   const alarmCreate = vi.fn();
-  const storageSet = vi.fn();
+  const storageValues = { ...initialStorage };
+  const storageSet = vi.fn(async (updates: Record<string, unknown>) => {
+    Object.assign(storageValues, updates);
+  });
   const sendMessage = vi
     .fn()
     .mockImplementation(async (message: { readonly target?: string }) =>
@@ -138,7 +143,18 @@ async function installBackground(
     },
     storage: {
       local: {
-        get: vi.fn().mockResolvedValue({}),
+        get: vi.fn(async (keys?: string | readonly string[]) => {
+          const selected = Array.isArray(keys)
+            ? keys
+            : typeof keys === "string"
+              ? [keys]
+              : Object.keys(storageValues);
+          return Object.fromEntries(
+            selected
+              .filter((key) => key in storageValues)
+              .map((key) => [key, storageValues[key]]),
+          );
+        }),
         set: storageSet,
         setAccessLevel: vi.fn(),
       },
@@ -165,6 +181,7 @@ async function installBackground(
     queryTabs,
     sendMessage,
     storageSet,
+    storageValues,
     tabSendMessage,
     updateTab,
     workerMessage: (message) =>
@@ -242,6 +259,47 @@ describe("background screenshot clipboard injection", () => {
       type: "set-premium-stt-enabled",
       enabled: false,
     });
+  });
+
+  it("persists bounded speech settings for the next system utterance", async () => {
+    const harness = await installBackground({
+      id: 6,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "set-speech-settings",
+        rate: 8,
+        volume: -2,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { rate: 2, volume: 0 },
+    });
+    expect(harness.storageValues).toMatchObject({
+      speechRate: 2,
+      speechVolume: 0,
+    });
+    await expect(
+      harness.workerMessage({ type: "get-speech-settings" }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { rate: 2, volume: 0 },
+    });
+
+    await harness.workerMessage({
+      type: "speak",
+      text: "Configured.",
+    });
+    expect(worker.speak).toHaveBeenCalledWith(
+      "Configured.",
+      {
+        lang: "en-US",
+        rate: 2,
+        volume: 0,
+      },
+    );
   });
 
   it("retries an STT setup request after offscreen recreation closes the port", async () => {
@@ -331,6 +389,8 @@ describe("background screenshot clipboard injection", () => {
       hostilePageOutput,
       {
         lang: "en-US",
+        rate: 1,
+        volume: 1,
         onFirstAudio: expect.any(Function),
       },
     );

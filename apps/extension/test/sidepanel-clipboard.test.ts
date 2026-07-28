@@ -185,6 +185,10 @@ const elementIds = [
   "premium-stt-progress",
   "premium-stt-progress-value",
   "premium-stt-progress-label",
+  "speech-rate",
+  "speech-rate-value",
+  "speech-volume",
+  "speech-volume-value",
   "page-text-card",
   "page-text-title",
   "page-text-output",
@@ -227,6 +231,10 @@ const completion = {
 async function installSidepanel(options: {
   readonly capturePermissionGranted?: boolean;
   readonly retryWorkflow?: typeof workflow;
+  readonly speechSettings?: {
+    readonly rate: number;
+    readonly volume: number;
+  };
 } = {}) {
   const elements = Object.fromEntries(
     elementIds.map((id) => [id, new FakeElement()]),
@@ -243,6 +251,12 @@ async function installSidepanel(options: {
   const requestPermission = vi.fn().mockResolvedValue(true);
   const sendMessage = vi.fn().mockImplementation(
     async (message: { readonly type?: string }) => {
+      if (message.type === "get-speech-settings") {
+        return {
+          ok: true,
+          value: options.speechSettings,
+        };
+      }
       if (message.type === "retry-screenshot") {
         return {
           ok: true,
@@ -334,6 +348,46 @@ afterEach(() => {
 });
 
 describe("side-panel screenshot clipboard fallback", () => {
+  it("shows and persists bounded speech slider values", async () => {
+    const { elements, sendMessage } = await installSidepanel({
+      speechSettings: { rate: 1.3, volume: 0.55 },
+    });
+    await vi.waitFor(() =>
+      expect(elements["speech-rate-value"].textContent).toBe("1.3×")
+    );
+    expect(elements["speech-volume-value"].textContent).toBe("55%");
+    expect(elements["speech-rate"].getAttribute("aria-valuetext")).toBe(
+      "1.3 times",
+    );
+    expect(elements["speech-volume"].getAttribute("aria-valuetext")).toBe(
+      "55 percent",
+    );
+
+    elements["speech-rate"].value = "8";
+    await elements["speech-rate"].emit("input");
+    await vi.waitFor(() =>
+      expect(sendMessage).toHaveBeenCalledWith({
+        target: "worker",
+        type: "set-speech-settings",
+        rate: 2,
+        volume: 0.55,
+      })
+    );
+    expect(elements["speech-rate-value"].textContent).toBe("2.0×");
+
+    elements["speech-volume"].value = "-2";
+    await elements["speech-volume"].emit("input");
+    await vi.waitFor(() =>
+      expect(sendMessage).toHaveBeenCalledWith({
+        target: "worker",
+        type: "set-speech-settings",
+        rate: 2,
+        volume: 0,
+      })
+    );
+    expect(elements["speech-volume-value"].textContent).toBe("0%");
+  });
+
   it("shows OS fallback while absent and enables the default-on premium toggle when ready", async () => {
     const { elements, onMessage, sendMessage } = await installSidepanel();
 

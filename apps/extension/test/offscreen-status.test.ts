@@ -338,6 +338,29 @@ describe("offscreen fail-soft status", () => {
     );
   });
 
+  it("clamps premium speech settings at the playback boundary", async () => {
+    const harness = await installPremiumOffscreen();
+    await harness.message({ type: "prepare-premium-tts" });
+
+    await expect(
+      harness.message({
+        type: "premium-speak",
+        utteranceId: "bounded-settings",
+        text: "Bounded settings.",
+        rate: 20,
+        volume: -3,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(premium.speak).toHaveBeenCalledWith(
+      "Bounded settings.",
+      expect.objectContaining({
+        rate: 2,
+        volume: 0,
+      }),
+    );
+  });
+
   it("restores a stored voice when the premium engine reloads", async () => {
     const harness = await installPremiumOffscreen({
       initialStorage: {

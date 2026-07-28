@@ -577,6 +577,8 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
           this.#queueInference(() =>
             this.#tts!.generate(chunk, {
               voice: options.voice ?? this.#voice,
+              // kokoro-js 1.2.1 supports synthesis-time speed, so playbackRate
+              // pitch shifting is not required.
               speed: options.rate ?? 1,
             })
           ),

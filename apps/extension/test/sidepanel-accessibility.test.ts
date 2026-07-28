@@ -50,6 +50,16 @@ describe("side-panel accessibility structure", () => {
     expect(panelMarkup).toMatch(
       /<label class="voice-switch" for="premium-stt-enabled">/,
     );
+    expect(panelMarkup).toContain('<label for="speech-rate">Rate</label>');
+    expect(panelMarkup).toContain(
+      '<label for="speech-volume">Volume</label>',
+    );
+    expect(openingTag("speech-rate")).toContain('type="range"');
+    expect(openingTag("speech-rate")).toContain('min="0.5"');
+    expect(openingTag("speech-rate")).toContain('max="2"');
+    expect(openingTag("speech-volume")).toContain('type="range"');
+    expect(openingTag("speech-volume")).toContain('min="0"');
+    expect(openingTag("speech-volume")).toContain('max="1"');
 
     const headingLevels = Array.from(
       panelMarkup.matchAll(/<h([1-6])(?:\s|>)/g),

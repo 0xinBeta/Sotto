@@ -279,6 +279,8 @@ describe("background reminder recovery", () => {
     );
     expect(worker.speak).toHaveBeenCalledWith("Reminder: Reminder denied", {
       lang: "en-US",
+      rate: 1,
+      volume: 1,
     });
   });
 

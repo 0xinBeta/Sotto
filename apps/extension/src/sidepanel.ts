@@ -20,6 +20,12 @@ import {
   isCommandReference,
   renderCommandReference,
 } from "./command-reference.js";
+import {
+  clampSpeechRate,
+  clampSpeechVolume,
+  DEFAULT_SPEECH_SETTINGS,
+  type SpeechSettings,
+} from "./speech-settings.js";
 import "./styles.css";
 
 type NanoAvailability = "unavailable" | "downloadable" | "downloading" | "available";
@@ -418,6 +424,14 @@ const premiumSttProgressValue =
   requiredElement<HTMLOutputElement>("#premium-stt-progress-value");
 const premiumSttProgressLabel =
   requiredElement<HTMLElement>("#premium-stt-progress-label");
+const speechRate =
+  requiredElement<HTMLInputElement>("#speech-rate");
+const speechRateValue =
+  requiredElement<HTMLOutputElement>("#speech-rate-value");
+const speechVolume =
+  requiredElement<HTMLInputElement>("#speech-volume");
+const speechVolumeValue =
+  requiredElement<HTMLOutputElement>("#speech-volume-value");
 const pageTextCard = requiredElement<HTMLElement>("#page-text-card");
 const pageTextTitle = requiredElement<HTMLElement>("#page-text-title");
 const pageTextOutput = requiredElement<HTMLElement>("#page-text-output");
@@ -452,6 +466,73 @@ let lastMeterAccessibleUpdate = Number.NEGATIVE_INFINITY;
 const progressHideTimers:
   Partial<Record<"nano" | "stt" | "premium-tts" | "premium-stt", number>> = {};
 const METER_ACCESSIBLE_INTERVAL_MS = 500;
+
+function isSpeechSettings(value: unknown): value is SpeechSettings {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.rate === "number" &&
+    Number.isFinite(value.rate) &&
+    typeof value.volume === "number" &&
+    Number.isFinite(value.volume)
+  );
+}
+
+function currentSpeechSettings(): SpeechSettings {
+  const rate = Number(speechRate.value);
+  const volume = Number(speechVolume.value);
+  return {
+    rate: clampSpeechRate(
+      Number.isFinite(rate) ? rate : DEFAULT_SPEECH_SETTINGS.rate,
+    ),
+    volume: clampSpeechVolume(
+      Number.isFinite(volume) ? volume : DEFAULT_SPEECH_SETTINGS.volume,
+    ),
+  };
+}
+
+function showSpeechSettings(settings: SpeechSettings): void {
+  const rate = clampSpeechRate(settings.rate);
+  const volume = clampSpeechVolume(settings.volume);
+  const rateText = rate.toFixed(1);
+  const volumePercent = Math.round(volume * 100);
+  speechRate.value = String(rate);
+  speechRateValue.value = `${rateText}×`;
+  speechRateValue.textContent = speechRateValue.value;
+  speechRate.setAttribute("aria-valuetext", `${rateText} times`);
+  speechVolume.value = String(volume);
+  speechVolumeValue.value = `${volumePercent}%`;
+  speechVolumeValue.textContent = speechVolumeValue.value;
+  speechVolume.setAttribute(
+    "aria-valuetext",
+    `${volumePercent} percent`,
+  );
+}
+
+async function saveSpeechSettings(): Promise<void> {
+  const settings = currentSpeechSettings();
+  showSpeechSettings(settings);
+  try {
+    const saved = await requestWorker<unknown>({
+      type: "set-speech-settings",
+      ...settings,
+    });
+    if (isSpeechSettings(saved)) showSpeechSettings(saved);
+  } catch {
+    appendLog("speech settings", "Speech settings could not be saved.");
+  }
+}
+
+async function loadSpeechSettings(): Promise<void> {
+  showSpeechSettings(DEFAULT_SPEECH_SETTINGS);
+  try {
+    const settings = await requestWorker<unknown>({
+      type: "get-speech-settings",
+    });
+    if (isSpeechSettings(settings)) showSpeechSettings(settings);
+  } catch {
+    appendLog("speech settings", "Speech settings are unavailable.");
+  }
+}
 
 function selectPremiumVoiceInput(voice: KokoroVoiceId): void {
   for (const [voiceId, input] of premiumVoiceInputs) {
@@ -1280,6 +1361,12 @@ premiumVoiceEnabled.addEventListener("change", async () => {
   premiumVoiceEnabled.disabled = false;
 });
 
+for (const slider of [speechRate, speechVolume]) {
+  slider.addEventListener("input", () => {
+    void saveSpeechSettings();
+  });
+}
+
 downloadPremiumStt.addEventListener("click", async () => {
   downloadPremiumStt.disabled = true;
   if (highAccuracyResumable) {
@@ -1612,3 +1699,4 @@ void loadCapturePermissionState();
 void showAssignedShortcut();
 void showReminderFromLocation();
 void loadCommandReference().catch(() => undefined);
+void loadSpeechSettings();

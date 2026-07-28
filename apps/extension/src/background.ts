@@ -40,6 +40,10 @@ import {
   type ExchangeTimings,
 } from "./timings.js";
 import { createCommandReference } from "./command-reference.js";
+import {
+  SpeechSettingsStore,
+  SpeechSettingsTtsEngine,
+} from "./speech-settings.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -55,6 +59,8 @@ interface WorkerMessage {
   readonly voice?: unknown;
   readonly backend?: unknown;
   readonly error?: unknown;
+  readonly rate?: unknown;
+  readonly volume?: unknown;
   readonly heard?: unknown;
   readonly did?: unknown;
   readonly timings?: unknown;
@@ -64,10 +70,15 @@ const actionRegistry = new ActionRegistry(actions);
 const destinationRegistry = new DestinationRegistry(destinations);
 const commandRouter = new CommandRouter(actionRegistry);
 const systemTts = new SystemTtsEngine();
-const tts = new PremiumTtsRouter({
+const ttsRouter = new PremiumTtsRouter({
   system: systemTts,
   request: (request) => sendOffscreen({ ...request }),
 });
+const speechSettings = new SpeechSettingsStore({
+  get: async (keys) => await chrome.storage.local.get([...keys]),
+  set: async (values) => await chrome.storage.local.set(values),
+});
+const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
 
 let creatingOffscreen: Promise<void> | undefined;
 let commandGeneration = 0;
@@ -1051,6 +1062,33 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
   switch (message.type) {
     case "get-status":
       return sendOffscreen({ type: "get-status" });
+    case "get-speech-settings":
+      return speechSettings.get();
+    case "set-speech-settings": {
+      const update: { rate?: number; volume?: number } = {};
+      if (message.rate !== undefined) {
+        if (
+          typeof message.rate !== "number" ||
+          !Number.isFinite(message.rate)
+        ) {
+          throw new TypeError("A valid speech rate is required");
+        }
+        update.rate = message.rate;
+      }
+      if (message.volume !== undefined) {
+        if (
+          typeof message.volume !== "number" ||
+          !Number.isFinite(message.volume)
+        ) {
+          throw new TypeError("A valid speech volume is required");
+        }
+        update.volume = message.volume;
+      }
+      if (update.rate === undefined && update.volume === undefined) {
+        throw new TypeError("A speech setting is required");
+      }
+      return speechSettings.update(update);
+    }
     case "get-notes":
       return (await publishNotes()).map(panelNote);
     case "get-command-reference":
@@ -1166,7 +1204,7 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         throw new TypeError("A valid premium voice is required");
       }
       const voice: KokoroVoiceId = message.voice;
-      const previousVoice = tts.voice;
+      const previousVoice = ttsRouter.voice;
       await previewPremiumVoiceSelection({
         voice,
         previousVoice,
@@ -1176,8 +1214,12 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
             voice: nextVoice,
           });
         },
-        speak: (text, previewVoice) =>
-          tts.preview(text, previewVoice),
+        speak: async (text, previewVoice) =>
+          await ttsRouter.preview(
+            text,
+            previewVoice,
+            await speechSettings.get(),
+          ),
       });
       return undefined;
     }
@@ -1200,7 +1242,7 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       ) {
         throw new TypeError("A valid premium utterance id is required");
       }
-      tts.notifyFirstAudio(message.utteranceId);
+      ttsRouter.notifyFirstAudio(message.utteranceId);
       return undefined;
     case "premium-state-update": {
       if (
@@ -1225,7 +1267,7 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       const voice = isKokoroVoiceId(message.voice)
         ? message.voice
         : undefined;
-      tts.updateStatus({
+      ttsRouter.updateStatus({
         state: message.state as PremiumTtsState,
         enabled: message.enabled,
         ...(voice === undefined ? {} : { voice }),

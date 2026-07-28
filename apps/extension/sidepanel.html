@@ -169,6 +169,48 @@
         </div>
       </section>
 
+      <section class="settings-card" aria-labelledby="speech-settings-heading">
+        <div class="settings-heading">
+          <div>
+            <p class="section-index">LOCAL OUTPUT / SETTINGS</p>
+            <h2 id="speech-settings-heading">Speech settings</h2>
+          </div>
+        </div>
+        <p class="settings-copy" id="speech-settings-copy">
+          Changes apply to the next spoken response.
+        </p>
+        <div class="speech-setting">
+          <div class="speech-setting-label">
+            <label for="speech-rate">Rate</label>
+            <output id="speech-rate-value" for="speech-rate" aria-live="polite">1.0×</output>
+          </div>
+          <input
+            id="speech-rate"
+            type="range"
+            min="0.5"
+            max="2"
+            step="0.1"
+            value="1"
+            aria-describedby="speech-settings-copy"
+          />
+        </div>
+        <div class="speech-setting">
+          <div class="speech-setting-label">
+            <label for="speech-volume">Volume</label>
+            <output id="speech-volume-value" for="speech-volume" aria-live="polite">100%</output>
+          </div>
+          <input
+            id="speech-volume"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value="1"
+            aria-describedby="speech-settings-copy"
+          />
+        </div>
+      </section>
+
       <section class="transcript-panel" aria-labelledby="transcript-heading">
         <div class="section-heading">
           <h2 class="section-index" id="transcript-heading">01 / HEARD</h2>

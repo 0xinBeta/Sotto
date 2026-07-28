@@ -44,6 +44,39 @@ describe("PremiumTtsRouter", () => {
     ).toBe(false);
   });
 
+  it("passes rate and volume to premium and system speech", async () => {
+    const system = systemHarness();
+    let router!: PremiumTtsRouter;
+    const request = vi.fn(async (message: PremiumTtsRequest) => {
+      if (message.type !== "premium-speak") return;
+      await new Promise<void>((resolve) => {
+        queueMicrotask(() => {
+          router.notifyFirstAudio(message.utteranceId ?? "");
+          resolve();
+        });
+      });
+    });
+    router = new PremiumTtsRouter({ system, request });
+    router.updateStatus({ state: "ready", enabled: true });
+
+    await router.speak("Premium.", { rate: 1.5, volume: 0.4 });
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "premium-speak",
+        text: "Premium.",
+        rate: 1.5,
+        volume: 0.4,
+      }),
+    );
+
+    router.updateStatus({ state: "ready", enabled: false });
+    await router.speak("System.", { rate: 0.7, volume: 0.2 });
+    expect(system.speak).toHaveBeenCalledWith(
+      "System.",
+      { rate: 0.7, volume: 0.2 },
+    );
+  });
+
   it("uses system TTS for every sentence when the ready engine is toggled off", async () => {
     const system = systemHarness();
     const request = vi.fn().mockResolvedValue(undefined);
@@ -328,7 +361,11 @@ describe("PremiumTtsRouter", () => {
       voice: "af_heart",
     });
 
-    await router.preview(PREMIUM_TTS_PREVIEW_TEXT, "bf_emma");
+    await router.preview(
+      PREMIUM_TTS_PREVIEW_TEXT,
+      "bf_emma",
+      { rate: 1.2, volume: 0.6 },
+    );
 
     expect(request).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -336,6 +373,8 @@ describe("PremiumTtsRouter", () => {
         text: PREMIUM_TTS_PREVIEW_TEXT,
         voice: "bf_emma",
         preview: true,
+        rate: 1.2,
+        volume: 0.6,
       }),
     );
     expect(system.speak).not.toHaveBeenCalled();
