@@ -4,6 +4,12 @@ import type {
   ScreenshotPermissionWorkflow,
 } from "@sotto/core";
 import { performClipboardWorkflow } from "@sotto/destinations";
+import {
+  isKokoroVoiceId,
+  KOKORO_VOICE,
+  KOKORO_VOICES,
+  type KokoroVoiceId,
+} from "@sotto/tts/kokoro";
 import { nextLogEntry, type LogEntry } from "./log.js";
 import {
   formatExchangeTimings,
@@ -152,6 +158,7 @@ type PanelMessage =
       type: "premium-tts-state";
       state: PremiumTtsState;
       enabled: boolean;
+      voice: KokoroVoiceId;
       backend?: "webgpu" | "wasm";
       error?: string;
     }
@@ -280,6 +287,7 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           message.state === "ready" ||
           message.state === "error") &&
         typeof message.enabled === "boolean" &&
+        isKokoroVoiceId(message.voice) &&
         (message.backend === undefined ||
           message.backend === "webgpu" ||
           message.backend === "wasm") &&
@@ -380,6 +388,10 @@ const downloadPremiumVoice =
   requiredElement<HTMLButtonElement>("#download-premium-voice");
 const premiumVoiceEnabled =
   requiredElement<HTMLInputElement>("#premium-voice-enabled");
+const premiumVoicePicker =
+  requiredElement<HTMLFieldSetElement>("#premium-voice-picker");
+const premiumVoiceOptions =
+  requiredElement<HTMLElement>("#premium-voice-options");
 const premiumProgressCard =
   requiredElement<HTMLElement>("#premium-progress-card");
 const premiumProgress =
@@ -428,6 +440,9 @@ let earconContext: AudioContext | undefined;
 let capturePermissionGranted: boolean | undefined;
 let nanoAvailability: NanoAvailability | undefined;
 let premiumState: PremiumTtsState = "absent";
+let selectedPremiumVoice: KokoroVoiceId = KOKORO_VOICE;
+let premiumVoicePreviewPending = false;
+const premiumVoiceInputs = new Map<KokoroVoiceId, HTMLInputElement>();
 let highAccuracyState: PremiumSttState = "not-downloaded";
 let highAccuracyTier: PremiumSttTier = "moonshine-base";
 let highAccuracyResumable = false;
@@ -437,6 +452,72 @@ let lastMeterAccessibleUpdate = Number.NEGATIVE_INFINITY;
 const progressHideTimers:
   Partial<Record<"nano" | "stt" | "premium-tts" | "premium-stt", number>> = {};
 const METER_ACCESSIBLE_INTERVAL_MS = 500;
+
+function selectPremiumVoiceInput(voice: KokoroVoiceId): void {
+  for (const [voiceId, input] of premiumVoiceInputs) {
+    input.checked = voiceId === voice;
+  }
+}
+
+async function previewPremiumVoice(voice: KokoroVoiceId): Promise<void> {
+  if (premiumState !== "ready" || premiumVoicePreviewPending) return;
+  const previousVoice = selectedPremiumVoice;
+  selectPremiumVoiceInput(voice);
+  premiumVoicePreviewPending = true;
+  premiumVoicePicker.disabled = true;
+  try {
+    await requestWorker({
+      type: "preview-premium-tts-voice",
+      voice,
+    });
+    selectedPremiumVoice = voice;
+  } catch {
+    selectedPremiumVoice = previousVoice;
+    selectPremiumVoiceInput(previousVoice);
+    appendLog("voice preview", "Voice preview failed.");
+  } finally {
+    premiumVoicePreviewPending = false;
+    premiumVoicePicker.disabled = premiumState !== "ready";
+  }
+}
+
+function renderPremiumVoiceOptions(): void {
+  const rows = KOKORO_VOICES.map((voice) => {
+    const row = document.createElement("div");
+    const input = document.createElement("input");
+    const label = document.createElement("label");
+    const accent = document.createElement("span");
+    const preview = document.createElement("button");
+    const inputId = `premium-voice-${voice.id}`;
+
+    row.className = "premium-voice-option";
+    input.type = "radio";
+    input.name = "premium-voice";
+    input.id = inputId;
+    input.value = voice.id;
+    input.checked = voice.id === selectedPremiumVoice;
+    input.addEventListener("change", () => {
+      if (input.checked) void previewPremiumVoice(voice.id);
+    });
+    label.htmlFor = inputId;
+    label.textContent = voice.label;
+    accent.className = "premium-voice-accent";
+    accent.textContent = `${voice.accent} English`;
+    preview.className = "premium-voice-preview";
+    preview.type = "button";
+    preview.textContent = "Preview";
+    preview.setAttribute("aria-label", `Preview ${voice.label}`);
+    preview.addEventListener("click", () => {
+      void previewPremiumVoice(voice.id);
+    });
+    row.append(input, label, accent, preview);
+    premiumVoiceInputs.set(voice.id, input);
+    return row;
+  });
+  premiumVoiceOptions.replaceChildren(...rows);
+}
+
+renderPremiumVoiceOptions();
 
 function setStatus(
   state: "booting" | "ready" | "listening" | "error",
@@ -700,14 +781,20 @@ function formatMegabytes(bytes: number): string {
 function showPremiumVoiceState(
   state: PremiumTtsState,
   enabled: boolean,
+  voice: KokoroVoiceId,
   backend?: "webgpu" | "wasm",
   error?: string,
 ): void {
   premiumState = state;
+  selectedPremiumVoice = voice;
   premiumVoiceCard.dataset.state = state;
   premiumVoiceState.textContent = state.toUpperCase();
   premiumVoiceEnabled.checked = enabled;
   premiumVoiceEnabled.disabled = state !== "ready";
+  premiumVoicePicker.hidden = state !== "ready";
+  premiumVoicePicker.disabled =
+    state !== "ready" || premiumVoicePreviewPending;
+  selectPremiumVoiceInput(voice);
   downloadPremiumVoice.hidden = state === "ready";
   downloadPremiumVoice.disabled = state === "downloading";
 
@@ -725,8 +812,13 @@ function showPremiumVoiceState(
         "Sotto stays responsive while the model downloads. Spoken feedback continues through your operating system voice.";
       break;
     case "ready":
-      premiumVoiceCopy.textContent =
-        `Kokoro af_heart is ready at 24 kHz${backend ? ` via ${backend.toUpperCase()}` : ""}. Your operating system voice remains the instant fallback.`;
+      {
+        const selected = KOKORO_VOICES.find(
+          (catalogVoice) => catalogVoice.id === voice,
+        );
+        premiumVoiceCopy.textContent =
+          `${selected?.label ?? "Premium voice"} is ready at 24 kHz${backend ? ` with ${backend.toUpperCase()}` : ""}. The system voice stays available.`;
+      }
       break;
     case "error":
       downloadPremiumVoice.textContent = "Retry voice download";
@@ -1156,12 +1248,17 @@ prepareNano.addEventListener("click", () => void prepareNanoModel());
 setupPrepareNano.addEventListener("click", () => void prepareNanoModel());
 
 downloadPremiumVoice.addEventListener("click", async () => {
-  showPremiumVoiceState("downloading", true);
+  showPremiumVoiceState(
+    "downloading",
+    true,
+    selectedPremiumVoice,
+  );
   updateProgress("premium-tts", 0, false);
   if (!(await send({ type: "prepare-premium-tts" }))) {
     showPremiumVoiceState(
       "error",
       false,
+      selectedPremiumVoice,
       undefined,
       "Premium voice setup could not start. Sotto is still using your operating system voice.",
     );
@@ -1327,6 +1424,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       showPremiumVoiceState(
         message.state,
         message.enabled,
+        message.voice,
         message.backend,
         message.error,
       );

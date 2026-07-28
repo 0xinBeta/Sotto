@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InferenceMutex } from "../src/inference-mutex.js";
 import {
   PREMIUM_FIRST_AUDIO_TIMEOUT_MS,
+  PREMIUM_TTS_PREVIEW_TEXT,
   PremiumTtsRouter,
   premiumEnabledByDefault,
+  previewPremiumVoiceSelection,
   splitPremiumSentences,
   type PremiumTtsRequest,
 } from "../src/premium-tts.js";
@@ -306,6 +308,38 @@ describe("PremiumTtsRouter", () => {
 
     expect(firstAudio).toHaveBeenCalledOnce();
   });
+
+  it("routes a voice preview through the premium speak path", async () => {
+    const system = systemHarness();
+    let router!: PremiumTtsRouter;
+    const request = vi.fn(async (message: PremiumTtsRequest) => {
+      if (message.type !== "premium-speak") return;
+      await new Promise<void>((resolve) => {
+        queueMicrotask(() => {
+          router.notifyFirstAudio(message.utteranceId ?? "");
+          resolve();
+        });
+      });
+    });
+    router = new PremiumTtsRouter({ system, request });
+    router.updateStatus({
+      state: "ready",
+      enabled: false,
+      voice: "af_heart",
+    });
+
+    await router.preview(PREMIUM_TTS_PREVIEW_TEXT, "bf_emma");
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "premium-speak",
+        text: PREMIUM_TTS_PREVIEW_TEXT,
+        voice: "bf_emma",
+        preview: true,
+      }),
+    );
+    expect(system.speak).not.toHaveBeenCalled();
+  });
 });
 
 describe("premium voice settings", () => {
@@ -314,6 +348,31 @@ describe("premium voice settings", () => {
     expect(premiumEnabledByDefault(undefined, true)).toBe(true);
     expect(premiumEnabledByDefault(false, true)).toBe(false);
     expect(premiumEnabledByDefault(true, false)).toBe(true);
+  });
+
+  it("restores the prior voice when its preview fails", async () => {
+    const persist = vi.fn().mockResolvedValue(undefined);
+    const speak = vi.fn().mockRejectedValue(
+      new Error("Voice download failed"),
+    );
+
+    await expect(
+      previewPremiumVoiceSelection({
+        voice: "bf_emma",
+        previousVoice: "af_heart",
+        persist,
+        speak,
+      }),
+    ).rejects.toThrow("Voice download failed");
+
+    expect(persist.mock.calls.map(([voice]) => voice)).toEqual([
+      "bf_emma",
+      "af_heart",
+    ]);
+    expect(speak).toHaveBeenCalledWith(
+      PREMIUM_TTS_PREVIEW_TEXT,
+      "bf_emma",
+    );
   });
 });
 

@@ -6,10 +6,12 @@ import {
   KOKORO_MODEL_REVISION,
   KOKORO_SAMPLE_RATE,
   KOKORO_VOICE,
+  KOKORO_VOICES,
   KokoroTtsEngine,
   MAX_KOKORO_CHUNK_CHARACTERS,
   selectKokoroBackend,
   splitTextForKokoro,
+  isKokoroVoiceId,
   type KokoroRuntime,
 } from "../src/kokoro.js";
 
@@ -153,6 +155,27 @@ afterEach(() => {
 });
 
 describe("KokoroTtsEngine", () => {
+  it("exposes the pinned English voice catalog", () => {
+    expect(KOKORO_VOICES).toHaveLength(28);
+    expect(
+      KOKORO_VOICES.filter((voice) => voice.accent === "US"),
+    ).toHaveLength(20);
+    expect(
+      KOKORO_VOICES.filter((voice) => voice.accent === "GB"),
+    ).toHaveLength(8);
+    expect(new Set(KOKORO_VOICES.map((voice) => voice.id)).size).toBe(28);
+    expect(
+      KOKORO_VOICES.every(
+        (voice) =>
+          Object.keys(voice).join(",") === "id,label,accent" &&
+          voice.label.length > 0 &&
+          isKokoroVoiceId(voice.id),
+      ),
+    ).toBe(true);
+    expect(KOKORO_VOICE).toBe("af_heart");
+    expect(isKokoroVoiceId("ff_siwis")).toBe(false);
+  });
+
   it("rejects any model revision other than the reviewed pin", () => {
     expect(() =>
       KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
@@ -286,6 +309,35 @@ describe("KokoroTtsEngine", () => {
     expect(harness.setWasmPaths).toHaveBeenCalledWith(
       "chrome-extension://sotto/assets/ort-kokoro/",
     );
+  });
+
+  it("uses the selected voice for warm-up and speech", async () => {
+    const harness = runtimeHarness();
+    const context = new FakeAudioContext();
+    const engine = new KokoroTtsEngine({
+      runtime: harness.runtime,
+      audioContextFactory: () => context as unknown as AudioContext,
+      runtimeUrl: (path) => path,
+      backend: "wasm",
+      voice: "bf_emma",
+    });
+
+    await engine.init();
+    expect(harness.generate).toHaveBeenCalledWith("Ready.", {
+      voice: "bf_emma",
+      speed: 1,
+    });
+    harness.generate.mockClear();
+
+    const speaking = engine.speak("Hello.");
+    await vi.waitFor(() => expect(context.sources).toHaveLength(1));
+    context.sources[0]?.finish();
+    await speaking;
+
+    expect(harness.generate).toHaveBeenCalledWith("Hello.", {
+      voice: "bf_emma",
+      speed: 1,
+    });
   });
 
   it("serializes synthesis, limits lookahead to three, and drops played sources", async () => {

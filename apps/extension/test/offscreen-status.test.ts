@@ -10,9 +10,11 @@ const nano = vi.hoisted(() => ({
   summarizeWithPrompt: vi.fn(),
 }));
 const premium = vi.hoisted(() => ({
+  engineOptions: [] as unknown[],
   init: vi.fn(),
   speak: vi.fn(),
   stop: vi.fn(),
+  setVoice: vi.fn(),
   prewarm: vi.fn(),
   probe: vi.fn(),
   dispose: vi.fn(),
@@ -69,13 +71,20 @@ vi.mock("@sotto/stt", () => ({
 vi.mock("@sotto/tts/kokoro", () => ({
   KokoroTtsEngine: class KokoroTtsEngine {
     backend = "webgpu" as const;
+    constructor(options?: unknown) {
+      premium.engineOptions.push(options);
+    }
     init = premium.init;
     speak = premium.speak;
     stop = premium.stop;
+    setVoice = premium.setVoice;
     prewarm = premium.prewarm;
     probe = premium.probe;
     dispose = premium.dispose;
   },
+  KOKORO_VOICE: "af_heart",
+  isKokoroVoiceId: (value: unknown) =>
+    value === "af_heart" || value === "bf_emma",
 }));
 
 type OffscreenListener = (
@@ -186,8 +195,10 @@ afterEach(() => {
   nano.rewriteWithPrompt.mockReset();
   nano.summarizeWithPrompt.mockReset();
   premium.init.mockReset();
+  premium.engineOptions.splice(0);
   premium.speak.mockReset();
   premium.stop.mockReset();
+  premium.setVoice.mockReset();
   premium.prewarm.mockReset();
   premium.probe.mockReset();
   premium.dispose.mockReset();
@@ -298,6 +309,48 @@ describe("offscreen fail-soft status", () => {
         enabled: true,
         backend: "webgpu",
       }),
+    );
+  });
+
+  it("persists a voice selection and sends it to the resident engine", async () => {
+    const harness = await installPremiumOffscreen();
+    await harness.message({ type: "prepare-premium-tts" });
+
+    await expect(
+      harness.message({
+        type: "set-premium-tts-voice",
+        voice: "bf_emma",
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(harness.values.premiumTtsVoice).toBe("bf_emma");
+    expect(premium.setVoice).toHaveBeenCalledWith("bf_emma");
+
+    await expect(
+      harness.message({
+        type: "premium-speak",
+        utteranceId: "selected-voice",
+        text: "Selected voice.",
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(premium.speak).toHaveBeenCalledWith(
+      "Selected voice.",
+      expect.objectContaining({ voice: "bf_emma" }),
+    );
+  });
+
+  it("restores a stored voice when the premium engine reloads", async () => {
+    const harness = await installPremiumOffscreen({
+      initialStorage: {
+        premiumTtsDownloaded: true,
+        premiumTtsEnabled: true,
+        premiumTtsVoice: "bf_emma",
+      },
+    });
+
+    await harness.message({ type: "prepare-premium-tts" });
+
+    expect(premium.engineOptions).toContainEqual(
+      expect.objectContaining({ voice: "bf_emma" }),
     );
   });
 
@@ -701,6 +754,7 @@ describe("offscreen fail-soft status", () => {
       type: "premium-tts-state",
       state: "absent",
       enabled: false,
+      voice: "af_heart",
     });
   });
 

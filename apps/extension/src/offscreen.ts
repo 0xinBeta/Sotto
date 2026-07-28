@@ -24,8 +24,11 @@ import {
   type SttProgress,
 } from "@sotto/stt";
 import {
+  isKokoroVoiceId,
+  KOKORO_VOICE,
   KokoroTtsEngine,
   type KokoroInitProgress,
+  type KokoroVoiceId,
 } from "@sotto/tts/kokoro";
 import { InferenceMutex } from "./inference-mutex.js";
 import { computeRms, smoothMicLevel } from "./mic-level.js";
@@ -33,6 +36,7 @@ import { ModelResidencyLru } from "./model-lru.js";
 import {
   PREMIUM_TTS_DOWNLOADED_KEY,
   PREMIUM_TTS_ENABLED_KEY,
+  PREMIUM_TTS_VOICE_KEY,
   premiumEnabledByDefault,
   type PremiumTtsState,
 } from "./premium-tts.js";
@@ -74,6 +78,8 @@ interface OffscreenMessage {
   readonly enabled?: unknown;
   readonly rate?: unknown;
   readonly volume?: unknown;
+  readonly voice?: unknown;
+  readonly preview?: unknown;
   readonly timings?: unknown;
 }
 
@@ -119,6 +125,7 @@ let premiumTts: KokoroTtsEngine | undefined;
 let premiumTtsState: PremiumTtsState = "absent";
 let premiumTtsEnabled = false;
 let premiumTtsDownloaded = false;
+let premiumTtsVoice: KokoroVoiceId = KOKORO_VOICE;
 let premiumTtsBackend: "webgpu" | "wasm" | undefined;
 let premiumTtsError: string | undefined;
 let premiumTtsInit: Promise<void> | undefined;
@@ -326,6 +333,7 @@ async function ensurePremiumSettings(): Promise<void> {
       const stored = await chrome.storage?.local?.get?.([
         PREMIUM_TTS_ENABLED_KEY,
         PREMIUM_TTS_DOWNLOADED_KEY,
+        PREMIUM_TTS_VOICE_KEY,
       ]) ?? {};
       premiumTtsDownloaded =
         stored[PREMIUM_TTS_DOWNLOADED_KEY] === true;
@@ -333,6 +341,9 @@ async function ensurePremiumSettings(): Promise<void> {
         stored[PREMIUM_TTS_ENABLED_KEY],
         premiumTtsDownloaded,
       );
+      premiumTtsVoice = isKokoroVoiceId(stored[PREMIUM_TTS_VOICE_KEY])
+        ? stored[PREMIUM_TTS_VOICE_KEY]
+        : KOKORO_VOICE;
       premiumTtsState = premiumTtsDownloaded ? "downloading" : "absent";
     } catch (error) {
       premiumTtsDownloaded = false;
@@ -352,6 +363,7 @@ async function publishPremiumStatus(): Promise<void> {
     type: "premium-tts-state",
     state: premiumTtsState,
     enabled: premiumTtsEnabled,
+    voice: premiumTtsVoice,
     ...(premiumTtsBackend === undefined
       ? {}
       : { backend: premiumTtsBackend }),
@@ -362,6 +374,7 @@ async function publishPremiumStatus(): Promise<void> {
     type: "premium-state-update",
     state: premiumTtsState,
     enabled: premiumTtsEnabled,
+    voice: premiumTtsVoice,
     ...(premiumTtsBackend === undefined
       ? {}
       : { backend: premiumTtsBackend }),
@@ -570,6 +583,7 @@ function createPremiumEngine(
 ): KokoroTtsEngine {
   return new KokoroTtsEngine({
     backend,
+    voice: premiumTtsVoice,
     runtimeUrl: (path) => chrome.runtime.getURL(path),
     runInference: (task) => inferenceMutex.run(task),
     runWarmupInference: (task, signal) =>
@@ -674,8 +688,13 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
     throw new TypeError("A bounded premium speech request is required");
   }
   await ensurePremiumSettings();
+  if (message.voice !== undefined && !isKokoroVoiceId(message.voice)) {
+    throw new TypeError("A valid premium voice is required");
+  }
+  const preview = message.preview === true;
+  const voice = message.voice ?? premiumTtsVoice;
   if (
-    premiumTtsEnabled &&
+    (premiumTtsEnabled || preview) &&
     premiumTtsDownloaded &&
     !premiumTts &&
     !premiumTtsInit
@@ -683,7 +702,7 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
     await ensurePremiumTts();
   }
   if (
-    !premiumTtsEnabled ||
+    (!premiumTtsEnabled && !preview) ||
     premiumTtsState !== "ready" ||
     !premiumTts
   ) {
@@ -695,6 +714,7 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
   premiumTtsUtteranceId = utteranceId;
   try {
     await premiumTts.speak(message.text, {
+      voice,
       ...(typeof message.rate === "number" &&
           Number.isFinite(message.rate) &&
           message.rate > 0
@@ -1606,6 +1626,18 @@ async function handleOffscreenMessage(
           console.warn("Premium voice could not be enabled", error);
         });
       }
+      await publishPremiumStatus();
+      return;
+    case "set-premium-tts-voice":
+      if (!isKokoroVoiceId(message.voice)) {
+        throw new TypeError("A valid premium voice is required");
+      }
+      await ensurePremiumSettings();
+      premiumTtsVoice = message.voice;
+      premiumTts?.setVoice(premiumTtsVoice);
+      await chrome.storage.local.set({
+        [PREMIUM_TTS_VOICE_KEY]: premiumTtsVoice,
+      });
       await publishPremiumStatus();
       return;
     case "prepare-premium-stt":

@@ -12,7 +12,39 @@ export const KOKORO_MODEL_ID =
   "onnx-community/Kokoro-82M-v1.0-ONNX";
 export const KOKORO_MODEL_REVISION =
   "1939ad2a8e416c0acfeecc08a694d14ef25f2231";
-export const KOKORO_VOICE = "af_heart";
+export const KOKORO_VOICES = [
+  { id: "af_heart", label: "Heart", accent: "US" },
+  { id: "af_alloy", label: "Alloy", accent: "US" },
+  { id: "af_aoede", label: "Aoede", accent: "US" },
+  { id: "af_bella", label: "Bella", accent: "US" },
+  { id: "af_jessica", label: "Jessica", accent: "US" },
+  { id: "af_kore", label: "Kore", accent: "US" },
+  { id: "af_nicole", label: "Nicole", accent: "US" },
+  { id: "af_nova", label: "Nova", accent: "US" },
+  { id: "af_river", label: "River", accent: "US" },
+  { id: "af_sarah", label: "Sarah", accent: "US" },
+  { id: "af_sky", label: "Sky", accent: "US" },
+  { id: "am_adam", label: "Adam", accent: "US" },
+  { id: "am_echo", label: "Echo", accent: "US" },
+  { id: "am_eric", label: "Eric", accent: "US" },
+  { id: "am_fenrir", label: "Fenrir", accent: "US" },
+  { id: "am_liam", label: "Liam", accent: "US" },
+  { id: "am_michael", label: "Michael", accent: "US" },
+  { id: "am_onyx", label: "Onyx", accent: "US" },
+  { id: "am_puck", label: "Puck", accent: "US" },
+  { id: "am_santa", label: "Santa", accent: "US" },
+  { id: "bf_emma", label: "Emma", accent: "GB" },
+  { id: "bf_isabella", label: "Isabella", accent: "GB" },
+  { id: "bm_george", label: "George", accent: "GB" },
+  { id: "bm_lewis", label: "Lewis", accent: "GB" },
+  { id: "bf_alice", label: "Alice", accent: "GB" },
+  { id: "bf_lily", label: "Lily", accent: "GB" },
+  { id: "bm_daniel", label: "Daniel", accent: "GB" },
+  { id: "bm_fable", label: "Fable", accent: "GB" },
+] as const;
+export type KokoroVoice = (typeof KOKORO_VOICES)[number];
+export type KokoroVoiceId = KokoroVoice["id"];
+export const KOKORO_VOICE: KokoroVoiceId = "af_heart";
 export const KOKORO_SAMPLE_RATE = 24_000;
 export const MAX_KOKORO_CHUNK_CHARACTERS = 200;
 export const KOKORO_WASM_ASSET_PATH = "assets/ort-kokoro/";
@@ -33,9 +65,13 @@ export interface KokoroInitProgress {
 
 export type KokoroProgressCallback = (progress: KokoroInitProgress) => void;
 
-export interface KokoroSpeakOptions extends TtsSpeakOptions {}
+export interface KokoroSpeakOptions extends TtsSpeakOptions {
+  readonly voice?: KokoroVoiceId;
+}
 
-export interface KokoroLongSpeakOptions extends TtsLongSpeakOptions {}
+export interface KokoroLongSpeakOptions extends TtsLongSpeakOptions {
+  readonly voice?: KokoroVoiceId;
+}
 
 export interface KokoroPrewarmOptions {
   readonly signal?: AbortSignal;
@@ -91,6 +127,7 @@ export interface KokoroTtsEngineOptions {
     signal?: AbortSignal,
   ) => Promise<T>;
   readonly webGpuAvailable?: () => Promise<boolean>;
+  readonly voice?: KokoroVoiceId;
 }
 
 interface ScheduledAudio {
@@ -134,6 +171,13 @@ function safeUtf16End(text: string, end: number): number {
       next <= 0xdfff
     ? end - 1
     : end;
+}
+
+export function isKokoroVoiceId(value: unknown): value is KokoroVoiceId {
+  return (
+    typeof value === "string" &&
+    KOKORO_VOICES.some((voice) => voice.id === value)
+  );
 }
 
 function splitHardCapped(text: string): string[] {
@@ -258,6 +302,7 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
   #inferenceTail: Promise<unknown> = Promise.resolve();
   #backend: KokoroBackend | undefined;
   #dtype: KokoroDtype | undefined;
+  #voice: KokoroVoiceId;
 
   constructor(options: KokoroTtsEngineOptions = {}) {
     this.#runtime = options.runtime ?? defaultRuntime;
@@ -273,6 +318,7 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     this.#runWarmupInference =
       options.runWarmupInference ?? this.#runInference;
     this.#webGpuAvailable = options.webGpuAvailable;
+    this.#voice = options.voice ?? KOKORO_VOICE;
   }
 
   get backend(): KokoroBackend | undefined {
@@ -281,6 +327,14 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
 
   get dtype(): KokoroDtype | undefined {
     return this.#dtype;
+  }
+
+  get voice(): KokoroVoiceId {
+    return this.#voice;
+  }
+
+  setVoice(voice: KokoroVoiceId): void {
+    this.#voice = voice;
   }
 
   async init(onProgress?: KokoroProgressCallback): Promise<void> {
@@ -317,7 +371,7 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
       this.#queueInference(
         () =>
           this.#tts!.generate(PREWARM_TEXT, {
-            voice: KOKORO_VOICE,
+            voice: this.#voice,
             speed: 1,
           }),
         this.#runWarmupInference,
@@ -439,7 +493,7 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
       try {
         await this.#queueInference(() =>
           loaded.generate(PREWARM_TEXT, {
-            voice: KOKORO_VOICE,
+            voice: this.#voice,
             speed: 1,
           })
         );
@@ -522,7 +576,7 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
         const audio = await abortable(
           this.#queueInference(() =>
             this.#tts!.generate(chunk, {
-              voice: KOKORO_VOICE,
+              voice: options.voice ?? this.#voice,
               speed: options.rate ?? 1,
             })
           ),

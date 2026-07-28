@@ -27,7 +27,12 @@ import destinations, {
 } from "@sotto/destinations";
 import { SystemTtsEngine } from "@sotto/tts";
 import {
+  isKokoroVoiceId,
+  type KokoroVoiceId,
+} from "@sotto/tts/kokoro";
+import {
   PremiumTtsRouter,
+  previewPremiumVoiceSelection,
   type PremiumTtsState,
 } from "./premium-tts.js";
 import {
@@ -47,6 +52,7 @@ interface WorkerMessage {
   readonly utteranceId?: unknown;
   readonly state?: unknown;
   readonly enabled?: unknown;
+  readonly voice?: unknown;
   readonly backend?: unknown;
   readonly error?: unknown;
   readonly heard?: unknown;
@@ -1155,6 +1161,26 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         type: "set-premium-tts-enabled",
         enabled: message.enabled,
       });
+    case "preview-premium-tts-voice": {
+      if (!isKokoroVoiceId(message.voice)) {
+        throw new TypeError("A valid premium voice is required");
+      }
+      const voice: KokoroVoiceId = message.voice;
+      const previousVoice = tts.voice;
+      await previewPremiumVoiceSelection({
+        voice,
+        previousVoice,
+        persist: async (nextVoice) => {
+          await sendOffscreen({
+            type: "set-premium-tts-voice",
+            voice: nextVoice,
+          });
+        },
+        speak: (text, previewVoice) =>
+          tts.preview(text, previewVoice),
+      });
+      return undefined;
+    }
     case "prepare-premium-stt":
       return sendOffscreen({ type: "prepare-premium-stt" });
     case "set-premium-stt-enabled":
@@ -1196,9 +1222,13 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         typeof message.error === "string"
           ? message.error.slice(0, 1_000)
           : undefined;
+      const voice = isKokoroVoiceId(message.voice)
+        ? message.voice
+        : undefined;
       tts.updateStatus({
         state: message.state as PremiumTtsState,
         enabled: message.enabled,
+        ...(voice === undefined ? {} : { voice }),
         ...(backend === undefined ? {} : { backend }),
         ...(error === undefined ? {} : { error }),
       });

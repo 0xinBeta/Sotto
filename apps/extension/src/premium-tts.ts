@@ -3,10 +3,16 @@ import type {
   TtsLongSpeakOptions,
   TtsSpeakOptions,
 } from "@sotto/tts";
+import {
+  KOKORO_VOICE,
+  type KokoroVoiceId,
+} from "@sotto/tts/kokoro";
 
 export const PREMIUM_TTS_ENABLED_KEY = "premiumTtsEnabled";
 export const PREMIUM_TTS_DOWNLOADED_KEY = "premiumTtsDownloaded";
+export const PREMIUM_TTS_VOICE_KEY = "premiumTtsVoice";
 export const PREMIUM_FIRST_AUDIO_TIMEOUT_MS = 750;
+export const PREMIUM_TTS_PREVIEW_TEXT = "This is my Sotto voice.";
 
 const IDLE_RETRY_DELAY_MS = 5_000;
 const MAX_SENTENCE_CHARACTERS = 200;
@@ -43,6 +49,7 @@ export type PremiumTtsState =
 export interface PremiumTtsStatus {
   readonly state: PremiumTtsState;
   readonly enabled: boolean;
+  readonly voice?: KokoroVoiceId;
   readonly backend?: "webgpu" | "wasm";
   readonly error?: string;
 }
@@ -54,6 +61,8 @@ export interface PremiumTtsRequest {
   readonly lang?: string;
   readonly rate?: number;
   readonly volume?: number;
+  readonly voice?: KokoroVoiceId;
+  readonly preview?: boolean;
 }
 
 export interface PremiumTtsRouterOptions {
@@ -72,6 +81,28 @@ interface FirstAudioWaiter {
   readonly promise: Promise<void>;
   cancel(): void;
   notify(): void;
+}
+
+export interface PremiumVoiceSelectionOptions {
+  readonly voice: KokoroVoiceId;
+  readonly previousVoice: KokoroVoiceId;
+  readonly persist: (voice: KokoroVoiceId) => Promise<void>;
+  readonly speak: (
+    text: string,
+    voice: KokoroVoiceId,
+  ) => Promise<void>;
+}
+
+export async function previewPremiumVoiceSelection(
+  options: PremiumVoiceSelectionOptions,
+): Promise<void> {
+  await options.persist(options.voice);
+  try {
+    await options.speak(PREMIUM_TTS_PREVIEW_TEXT, options.voice);
+  } catch (error) {
+    await options.persist(options.previousVoice);
+    throw error;
+  }
 }
 
 function safeUtf16End(text: string, end: number): number {
@@ -188,6 +219,7 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
   #active = false;
   #waiters = new Map<string, FirstAudioWaiter>();
   #retryTimer: ReturnType<typeof setTimeout> | undefined;
+  #voice: KokoroVoiceId = KOKORO_VOICE;
 
   constructor(options: PremiumTtsRouterOptions) {
     this.#system = options.system;
@@ -214,11 +246,16 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     return this.#circuitOpen;
   }
 
+  get voice(): KokoroVoiceId {
+    return this.#voice;
+  }
+
   updateStatus(status: PremiumTtsStatus): void {
     const wasReady = this.#state === "ready";
     const wasEnabled = this.#enabled;
     this.#state = status.state;
     this.#enabled = status.enabled;
+    if (status.voice !== undefined) this.#voice = status.voice;
     if (!status.enabled || status.state !== "ready") {
       this.#clearRetry();
     } else if (!wasReady) {
@@ -294,6 +331,24 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     }
   }
 
+  async preview(text: string, voice: KokoroVoiceId): Promise<void> {
+    const utterance = text.trim();
+    if (!utterance) return;
+    const generation = this.#begin();
+    this.#active = true;
+    try {
+      await this.#speakSentence(
+        utterance,
+        {},
+        generation,
+        voice,
+        true,
+      );
+    } finally {
+      if (generation === this.#generation) this.#active = false;
+    }
+  }
+
   stop(): void {
     this.#generation += 1;
     this.#active = false;
@@ -316,14 +371,21 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     text: string,
     options: TtsSpeakOptions,
     generation: number,
+    voice = this.#voice,
+    premiumOnly = false,
   ): Promise<void> {
     const language = options.lang?.toLowerCase();
     if (
-      !this.#shouldUsePremium() ||
+      (premiumOnly
+        ? this.#state !== "ready"
+        : !this.#shouldUsePremium()) ||
       (language !== undefined &&
         language !== "en" &&
         !language.startsWith("en-"))
     ) {
+      if (premiumOnly) {
+        throw new Error("Premium voice is not ready");
+      }
       await this.#system.speak(text, options);
       return;
     }
@@ -365,6 +427,8 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
       ...(options.lang === undefined ? {} : { lang: options.lang }),
       ...(options.rate === undefined ? {} : { rate: options.rate }),
       ...(options.volume === undefined ? {} : { volume: options.volume }),
+      voice,
+      ...(premiumOnly ? { preview: true } : {}),
     });
 
     let firstHeard = false;
@@ -388,11 +452,16 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
       await this.#request({ type: "premium-stop", utteranceId })
         .catch(() => undefined);
       if (generation !== this.#generation) return;
+      if (premiumOnly) {
+        void premium.catch(() => undefined);
+        throw new Error("Voice preview failed");
+      }
       this.#premiumFailed();
       void premium.catch(() => undefined);
       await this.#system.speak(text, options);
-    } catch {
+    } catch (error) {
       if (generation !== this.#generation) return;
+      if (premiumOnly) throw error;
       this.#premiumFailed();
       if (!firstHeard) {
         await this.#system.speak(text, options);

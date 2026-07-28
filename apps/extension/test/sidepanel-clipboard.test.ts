@@ -170,6 +170,8 @@ const elementIds = [
   "premium-voice-copy",
   "download-premium-voice",
   "premium-voice-enabled",
+  "premium-voice-picker",
+  "premium-voice-options",
   "premium-progress-card",
   "premium-progress",
   "premium-progress-value",
@@ -340,6 +342,7 @@ describe("side-panel screenshot clipboard fallback", () => {
       type: "premium-tts-state",
       state: "absent",
       enabled: false,
+      voice: "af_heart",
     });
     expect(elements["premium-voice-copy"].textContent).toContain(
       "operating system voice instantly",
@@ -352,6 +355,7 @@ describe("side-panel screenshot clipboard fallback", () => {
       type: "premium-tts-state",
       state: "error",
       enabled: false,
+      voice: "af_heart",
     });
     expect(elements["download-premium-voice"].textContent).toBe(
       "Retry voice download",
@@ -368,12 +372,80 @@ describe("side-panel screenshot clipboard fallback", () => {
       type: "premium-tts-state",
       state: "ready",
       enabled: true,
+      voice: "af_heart",
       backend: "webgpu",
     });
     expect(elements["download-premium-voice"].hidden).toBe(true);
     expect(elements["premium-voice-enabled"].checked).toBe(true);
     expect(elements["premium-voice-enabled"].disabled).toBe(false);
     expect(elements["premium-voice-copy"].textContent).toContain("WEBGPU");
+  });
+
+  it("shows every voice preview and logs one short preview failure", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "premium-tts-state",
+      state: "ready",
+      enabled: true,
+      voice: "af_heart",
+      backend: "wasm",
+    });
+
+    const options = elements["premium-voice-options"].children
+      .filter((child): child is FakeElement => child instanceof FakeElement);
+    expect(elements["premium-voice-picker"].hidden).toBe(false);
+    expect(options).toHaveLength(28);
+    expect(
+      options.every((row) =>
+        row.children.some(
+          (child) =>
+            child instanceof FakeElement &&
+            child.className === "premium-voice-preview",
+        )
+      ),
+    ).toBe(true);
+
+    sendMessage.mockImplementation(
+      async (message: { readonly type?: string }) =>
+        message.type === "preview-premium-tts-voice"
+          ? {
+              ok: false,
+              error: { message: "Voice download failed" },
+            }
+          : { ok: true },
+    );
+    const emmaRow = options.find((row) =>
+      row.textContent.includes("Emma")
+    );
+    const preview = emmaRow?.children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement &&
+        child.className === "premium-voice-preview",
+    );
+    if (!preview) throw new Error("Emma preview was not rendered");
+
+    await preview.emit("click");
+    await vi.waitFor(() =>
+      expect(elements["action-log"].textContent).toContain(
+        "Voice preview failed.",
+      ),
+    );
+
+    expect(elements["action-log"].children).toHaveLength(1);
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "preview-premium-tts-voice",
+      voice: "bf_emma",
+    });
+    const selected = options
+      .flatMap((row) => row.children)
+      .find(
+        (child): child is FakeElement =>
+          child instanceof FakeElement &&
+          child.value === "af_heart",
+      );
+    expect(selected?.checked).toBe(true);
   });
 
   it("renders the hardware-selected speech tier, progress, diagnostics, and persisted toggle request", async () => {
