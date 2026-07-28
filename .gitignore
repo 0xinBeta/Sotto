@@ -1,0 +1,16 @@
+# deps / build
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+
+# os / editor
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# docs and markdown stay local — README is the single source of truth
+*.md
+!README.md
+docs/
