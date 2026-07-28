@@ -123,6 +123,12 @@ export class MoonshineEngine implements SttEngine {
       throw new TypeError("Moonshine expects mono 16 kHz audio as a Float32Array");
     }
 
+    for (const sample of audio) {
+      if (!Number.isFinite(sample)) {
+        throw new TypeError("Moonshine audio contains a non-finite sample");
+      }
+    }
+
     if (audio.length === 0) {
       return "";
     }

@@ -5,6 +5,14 @@ export const STT_MIN_VOICED_MS = 300;
 export const STT_TRANSCRIBE_TIMEOUT_MS = 8_000;
 
 const ANALYSIS_FRAME_SAMPLES = 320;
+const VOICED_RMS_THRESHOLD = Math.fround(STT_VOICED_FRAME_RMS);
+const MAX_ABSOLUTE_SAMPLE = 1.05;
+const CLIPPED_SAMPLE_LEVEL = 0.99;
+const MAX_CLIPPED_SAMPLE_FRACTION = 0.2;
+const MIN_DIVERSITY_TOKENS = 8;
+const MIN_UNIQUE_TOKEN_RATIO = 0.4;
+const RETRY_NORMALIZATION_PEAK = 0.25;
+const RETRY_MAX_GAIN = 2;
 const VAD_FRAME_SAMPLES = 512;
 const NORMAL_PRE_ROLL_FRAMES = 8;
 const RETRY_PRE_ROLL_FRAMES = 16;
@@ -64,6 +72,7 @@ export function assessSttAudio(
   if (!(audio instanceof Float32Array) || audio.length === 0) {
     return { accepted: false, strongEvidence: false, rms: 0, voicedMs: 0 };
   }
+  let clippedSamples = 0;
   for (const sample of audio) {
     if (!Number.isFinite(sample)) {
       return {
@@ -73,23 +82,35 @@ export function assessSttAudio(
         voicedMs: 0,
       };
     }
+    const magnitude = Math.abs(sample);
+    if (magnitude > MAX_ABSOLUTE_SAMPLE) {
+      return { accepted: false, strongEvidence: false, rms: 0, voicedMs: 0 };
+    }
+    if (magnitude >= CLIPPED_SAMPLE_LEVEL) clippedSamples += 1;
+  }
+  if (clippedSamples / audio.length >= MAX_CLIPPED_SAMPLE_FRACTION) {
+    return { accepted: false, strongEvidence: false, rms: 0, voicedMs: 0 };
   }
 
   const rms = rmsOf(audio);
-  let voicedFrames = 0;
+  let voicedSamples = 0;
   for (
     let start = 0;
     start < audio.length;
     start += ANALYSIS_FRAME_SAMPLES
   ) {
     const end = Math.min(audio.length, start + ANALYSIS_FRAME_SAMPLES);
-    if (rmsOf(audio, start, end) >= STT_VOICED_FRAME_RMS) {
-      voicedFrames += 1;
+    if (
+      rmsOf(audio, start, end) + Number.EPSILON >= VOICED_RMS_THRESHOLD
+    ) {
+      voicedSamples += end - start;
     }
   }
   const voicedMs =
-    voicedFrames * ANALYSIS_FRAME_SAMPLES / STT_SAMPLE_RATE * 1_000;
-  const accepted = rms >= STT_MIN_RMS && voicedMs >= STT_MIN_VOICED_MS;
+    voicedSamples / STT_SAMPLE_RATE * 1_000;
+  const accepted =
+    rms + Number.EPSILON >= STT_MIN_RMS &&
+    voicedMs >= STT_MIN_VOICED_MS;
   return {
     accepted,
     strongEvidence: accepted &&
@@ -131,6 +152,11 @@ export function hasRepeatedNgram(text: string): boolean {
   return false;
 }
 
+function hasLowTokenDiversity(tokens: readonly string[]): boolean {
+  return tokens.length >= MIN_DIVERSITY_TOKENS &&
+    new Set(tokens).size / tokens.length < MIN_UNIQUE_TOKEN_RATIO;
+}
+
 export function isPlausibleSttText(
   text: string,
   audioSamples: number,
@@ -142,6 +168,7 @@ export function isPlausibleSttText(
   return (
     tokens.length > 0 &&
     tokens.length <= sttTokenLimit(durationSeconds) &&
+    !hasLowTokenDiversity(tokens) &&
     !hasRepeatedNgram(normalized)
   );
 }
@@ -180,6 +207,14 @@ async function transcribeOnce(
   );
 }
 
+function normalizeRetryAudio(audio: Float32Array): Float32Array {
+  let peak = 0;
+  for (const sample of audio) peak = Math.max(peak, Math.abs(sample));
+  if (peak === 0 || peak >= RETRY_NORMALIZATION_PEAK) return audio;
+  const gain = Math.min(RETRY_MAX_GAIN, RETRY_NORMALIZATION_PEAK / peak);
+  return Float32Array.from(audio, (sample) => sample * gain);
+}
+
 export async function transcribeWithSttGuards(
   options: GuardedTranscriptionOptions,
 ): Promise<GuardedTranscription> {
@@ -188,6 +223,7 @@ export async function transcribeWithSttGuards(
     return { ok: false, diagnostic: "vad-rejected", retried: false };
   }
 
+  let retried = false;
   try {
     const first = await transcribeOnce(options.audio, options);
     if (isPlausibleSttText(first, options.audio.length)) {
@@ -198,12 +234,14 @@ export async function transcribeWithSttGuards(
       if (expanded.length > options.audio.length) {
         const expandedAssessment = assessSttAudio(expanded);
         if (expandedAssessment.accepted) {
-          const retry = await transcribeOnce(expanded, options);
+          retried = true;
+          const retryAudio = normalizeRetryAudio(expanded);
+          const retry = await transcribeOnce(retryAudio, options);
           if (isPlausibleSttText(retry, expanded.length)) {
             return { ok: true, text: retry.trim(), retried: true };
           }
         }
-        return { ok: false, diagnostic: "blank-result", retried: true };
+        return { ok: false, diagnostic: "blank-result", retried };
       }
     }
     return { ok: false, diagnostic: "blank-result", retried: false };
@@ -212,10 +250,10 @@ export async function transcribeWithSttGuards(
       error instanceof DOMException &&
       error.name === "TimeoutError"
     ) {
-      return { ok: false, diagnostic: "timeout", retried: false };
+      return { ok: false, diagnostic: "timeout", retried };
     }
     if (isWebGpuSttFailure(error)) {
-      return { ok: false, diagnostic: "webgpu-failed", retried: false };
+      return { ok: false, diagnostic: "webgpu-failed", retried };
     }
     throw error;
   }

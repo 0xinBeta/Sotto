@@ -349,6 +349,47 @@ describe("KokoroTtsEngine", () => {
     expect(context.close).toHaveBeenCalledOnce();
   });
 
+  it("waits for queued synthesis before taking the shared mutex to dispose", async () => {
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let generation = 0;
+    const harness = runtimeHarness({
+      onGenerate: async () => {
+        generation += 1;
+        if (generation === 2) await firstGate;
+      },
+    });
+    let tail: Promise<unknown> = Promise.resolve();
+    const runInference = <T>(task: () => Promise<T>): Promise<T> => {
+      const pending = tail.catch(() => undefined).then(task);
+      tail = pending.catch(() => undefined);
+      return pending;
+    };
+    const engine = new KokoroTtsEngine({
+      runtime: harness.runtime,
+      audioContextFactory: () =>
+        new FakeAudioContext() as unknown as AudioContext,
+      runtimeUrl: (path) => path,
+      backend: "wasm",
+      runInference,
+    });
+    await engine.init();
+    const first = engine.probe();
+    await vi.waitFor(() => expect(generation).toBe(2));
+    const second = engine.probe();
+    const disposing = engine.dispose();
+
+    await Promise.resolve();
+    expect(harness.dispose).not.toHaveBeenCalled();
+    releaseFirst();
+    await Promise.all([first, second, disposing]);
+
+    expect(harness.generate).toHaveBeenCalledTimes(3);
+    expect(harness.dispose).toHaveBeenCalledOnce();
+  });
+
   it("returns immediately on barge-in while ONNX stays serialized", async () => {
     let releaseInference!: () => void;
     const inferenceGate = new Promise<void>((resolve) => {

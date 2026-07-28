@@ -58,4 +58,46 @@ describe("ModelResidencyLru", () => {
     expect(sttRelease).not.toHaveBeenCalled();
     lru.dispose();
   });
+
+  it("never releases a leased model while inference or playback is active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const release = vi.fn().mockResolvedValue(undefined);
+    const lru = new ModelResidencyLru({ idleMs: 100 });
+    lru.register("premium-stt", release);
+    lru.markResident("premium-stt");
+    const relinquish = lru.acquire("premium-stt");
+    lru.noteMemoryPressure();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(lru.evictLeastRecentlyUsed()).resolves.toBeUndefined();
+    expect(release).not.toHaveBeenCalled();
+
+    relinquish();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(release).toHaveBeenCalledTimes(1);
+    lru.dispose();
+  });
+
+  it("reschedules an idle release that fails once", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const release = vi.fn()
+      .mockRejectedValueOnce(new Error("release failed"))
+      .mockResolvedValueOnce(undefined);
+    const lru = new ModelResidencyLru({
+      idleMs: 100,
+      onError: vi.fn(),
+    });
+    lru.register("premium-stt", release);
+    lru.markResident("premium-stt");
+    lru.noteMemoryPressure();
+
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(lru.isResident("premium-stt")).toBe(false);
+    lru.dispose();
+  });
 });

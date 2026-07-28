@@ -38,6 +38,7 @@ import {
 import {
   detectPremiumSttTier,
   PREMIUM_STT_DOWNLOADED_KEY,
+  PREMIUM_STT_DOWNLOADED_TIERS_KEY,
   PREMIUM_STT_ENABLED_KEY,
   PREMIUM_STT_TIER_KEY,
   PremiumSttManager,
@@ -122,7 +123,7 @@ modelLru.register("premium-tts", async () => {
   if (!engine) return;
   premiumTts = undefined;
   premiumTtsIdleReleased = true;
-  await inferenceMutex.run(() => engine.dispose());
+  await engine.dispose();
   premiumTtsBackend = undefined;
   await publishPremiumStatus();
 });
@@ -386,6 +387,21 @@ async function publishSttDiagnostic(
   });
 }
 
+let sttTimeoutRecoveryScheduled = false;
+
+function scheduleSttTimeoutRecovery(): void {
+  if (
+    sttTimeoutRecoveryScheduled ||
+    typeof window.location?.reload !== "function"
+  ) {
+    return;
+  }
+  sttTimeoutRecoveryScheduled = true;
+  setTimeout(() => {
+    window.location.reload();
+  }, 0);
+}
+
 function createPremiumSttEngine(tier: PremiumSttTier) {
   return tier === "parakeet"
     ? new ParakeetSttEngine({
@@ -405,6 +421,7 @@ async function ensurePremiumSttSettings(): Promise<void> {
       if (local) {
         stored = await local.get([
           PREMIUM_STT_DOWNLOADED_KEY,
+          PREMIUM_STT_DOWNLOADED_TIERS_KEY,
           PREMIUM_STT_ENABLED_KEY,
           PREMIUM_STT_TIER_KEY,
         ]);
@@ -415,9 +432,15 @@ async function ensurePremiumSttSettings(): Promise<void> {
         error,
       );
     }
-    const downloaded =
-      stored[PREMIUM_STT_DOWNLOADED_KEY] === true &&
-      stored[PREMIUM_STT_TIER_KEY] === tier;
+    const storedTiers = stored[PREMIUM_STT_DOWNLOADED_TIERS_KEY];
+    const downloadedByTier =
+      typeof storedTiers === "object" &&
+      storedTiers !== null &&
+      !Array.isArray(storedTiers) &&
+      (storedTiers as Record<string, unknown>)[tier] === true;
+    const downloaded = downloadedByTier ||
+      (stored[PREMIUM_STT_DOWNLOADED_KEY] === true &&
+        stored[PREMIUM_STT_TIER_KEY] === tier);
     premiumStt = new PremiumSttManager({
       tiny: tinyStt,
       tier,
@@ -454,6 +477,7 @@ async function ensurePremiumSttSettings(): Promise<void> {
       },
       onDiagnostic(diagnostic) {
         void publishSttDiagnostic(diagnostic);
+        if (diagnostic === "timeout") scheduleSttTimeoutRecovery();
       },
       async onMemoryPressure() {
         modelLru.noteMemoryPressure();
@@ -472,8 +496,20 @@ async function ensurePremiumSttSettings(): Promise<void> {
 async function persistPremiumSttStatus(): Promise<void> {
   const status = premiumStt?.status;
   if (!status) return;
+  const existing = await chrome.storage.local.get(
+    PREMIUM_STT_DOWNLOADED_TIERS_KEY,
+  );
+  const storedTiers = existing[PREMIUM_STT_DOWNLOADED_TIERS_KEY];
+  const downloadedTiers: Record<string, boolean> =
+    typeof storedTiers === "object" &&
+      storedTiers !== null &&
+      !Array.isArray(storedTiers)
+      ? { ...(storedTiers as Record<string, boolean>) }
+      : {};
+  downloadedTiers[status.tier] = status.downloaded;
   await chrome.storage.local.set({
     [PREMIUM_STT_DOWNLOADED_KEY]: status.downloaded,
+    [PREMIUM_STT_DOWNLOADED_TIERS_KEY]: downloadedTiers,
     [PREMIUM_STT_ENABLED_KEY]: status.enabled,
     [PREMIUM_STT_TIER_KEY]: status.tier,
   });
@@ -565,10 +601,8 @@ function scheduleWasmRecovery(error: unknown): void {
   premiumTtsRecovery = (async () => {
     modelLru.noteMemoryPressure();
     await modelLru.evictLeastRecentlyUsed("premium-tts");
-    await inferenceMutex.run(async () => {
-      if (premiumTts === engine) premiumTts = undefined;
-      await engine?.dispose().catch(() => undefined);
-    });
+    if (premiumTts === engine) premiumTts = undefined;
+    await engine?.dispose().catch(() => undefined);
     premiumTtsBackend = undefined;
     premiumTtsError = undefined;
     try {
@@ -609,7 +643,7 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
   }
 
   const utteranceId = message.utteranceId;
-  modelLru.touch("premium-tts");
+  const releaseModel = modelLru.acquire("premium-tts");
   premiumTtsUtteranceId = utteranceId;
   try {
     await premiumTts.speak(message.text, {
@@ -635,6 +669,7 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
     }
     throw error;
   } finally {
+    releaseModel();
     if (premiumTtsUtteranceId === utteranceId) {
       premiumTtsUtteranceId = undefined;
     }
@@ -642,14 +677,19 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
 }
 
 function progressRatio(progress: SttProgress): number | undefined {
-  if (typeof progress.progress === "number") {
+  if (
+    typeof progress.progress === "number" &&
+    Number.isFinite(progress.progress)
+  ) {
     return progress.progress > 1
       ? progress.progress / 100
       : progress.progress;
   }
   if (
     typeof progress.loaded === "number" &&
+    Number.isFinite(progress.loaded) &&
     typeof progress.total === "number" &&
+    Number.isFinite(progress.total) &&
     progress.total > 0
   ) {
     return progress.loaded / progress.total;
@@ -1050,11 +1090,15 @@ async function processSpeech(input: SpeechRetryAudio): Promise<void> {
     const result = await transcribeWithSttGuards({
       audio: input.audio,
       expandedAudio: input.expanded,
-      transcribe: (audio) => {
-        if (premiumStt!.status.resident) {
-          modelLru.touch("premium-stt");
+      transcribe: async (audio) => {
+        const releaseModel = premiumStt!.status.resident
+          ? modelLru.acquire("premium-stt")
+          : () => undefined;
+        try {
+          return await premiumStt!.transcribe(audio);
+        } finally {
+          releaseModel();
         }
-        return premiumStt!.transcribe(audio);
       },
     });
     if (!result.ok) {
@@ -1063,6 +1107,7 @@ async function processSpeech(input: SpeechRetryAudio): Promise<void> {
         await speak("I heard speech but couldn't make out the words.");
       } else if (result.diagnostic === "timeout") {
         await speak("Speech recognition timed out. Try again.");
+        scheduleSttTimeoutRecovery();
       } else if (result.diagnostic === "webgpu-failed") {
         await speak("The speech engine failed. Sotto kept the fallback ready.");
       }
@@ -1139,7 +1184,7 @@ async function startListening(): Promise<void> {
     vad = await MicVAD.new({
       model: "v5",
       baseAssetPath: chrome.runtime.getURL("assets/vad/"),
-      onnxWASMBasePath: chrome.runtime.getURL("assets/ort-vad/"),
+      onnxWASMBasePath: chrome.runtime.getURL("assets/ort-kokoro/"),
       startOnLoad: false,
       submitUserSpeechOnPause: true,
       positiveSpeechThreshold: 0.3,
@@ -1370,7 +1415,14 @@ async function handleOffscreenMessage(
       ) {
         throw new Error("Premium voice is not ready");
       }
-      await premiumTts.probe();
+      {
+        const releaseModel = modelLru.acquire("premium-tts");
+        try {
+          await premiumTts.probe();
+        } finally {
+          releaseModel();
+        }
+      }
       return;
     case "start-listening":
       cancelActiveModelTask();

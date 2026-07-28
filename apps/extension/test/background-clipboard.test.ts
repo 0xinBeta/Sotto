@@ -214,6 +214,28 @@ describe("background screenshot clipboard injection", () => {
     });
   });
 
+  it("retries an STT setup request after offscreen recreation closes the port", async () => {
+    const harness = await installBackground({
+      id: 8,
+      url: "https://example.com/current",
+    });
+    harness.sendMessage.mockReset()
+      .mockRejectedValueOnce(
+        new Error("The message port closed before a response was received."),
+      )
+      .mockResolvedValueOnce({ ok: true });
+
+    await expect(
+      harness.workerMessage({ type: "prepare-premium-stt" }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(harness.sendMessage).toHaveBeenCalledTimes(2);
+    expect(harness.sendMessage).toHaveBeenNthCalledWith(2, {
+      target: "offscreen",
+      type: "prepare-premium-stt",
+    });
+  });
+
   it("rejects an unknown clipboard completion instead of replaying navigation", async () => {
     const harness = await installBackground({
       id: 9,

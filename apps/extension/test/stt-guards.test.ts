@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assessSttAudio,
   hasRepeatedNgram,
+  isPlausibleSttText,
   SpeechContextRing,
   sttTokenLimit,
   transcribeWithSttGuards,
@@ -28,8 +29,20 @@ describe("STT acoustic and hallucination guards", () => {
       audio[10] = Number.NaN;
       return audio;
     })()],
+    ["positive infinity", (() => {
+      const audio = voicedAudio();
+      audio[10] = Number.POSITIVE_INFINITY;
+      return audio;
+    })()],
+    ["negative infinity", (() => {
+      const audio = voicedAudio();
+      audio[10] = Number.NEGATIVE_INFINITY;
+      return audio;
+    })()],
     ["under 300 ms voiced", voicedAudio(280)],
     ["very low RMS", voicedAudio(500, 0.0001)],
+    ["extreme clipping", new Float32Array(8_000).fill(100)],
+    ["sustained clipping", new Float32Array(8_000).fill(1)],
   ])("emits vad-rejected for %s input", async (_name, audio) => {
     const transcribe = vi.fn().mockResolvedValue("should not run");
 
@@ -43,12 +56,43 @@ describe("STT acoustic and hallucination guards", () => {
     expect(transcribe).not.toHaveBeenCalled();
   });
 
+  it("accepts exact acoustic thresholds without crediting a partial frame", () => {
+    const oneSampleShort = new Float32Array(4_799).fill(0.005);
+    const exactDuration = new Float32Array(4_800).fill(0.005);
+    const exactRmsLength = 13_334;
+    const exactRms = new Float32Array(exactRmsLength);
+    exactRms.fill(
+      0.003 * Math.sqrt(exactRmsLength / 4_800),
+      0,
+      4_800,
+    );
+
+    expect(assessSttAudio(oneSampleShort).accepted).toBe(false);
+    expect(assessSttAudio(exactDuration)).toMatchObject({
+      accepted: true,
+      voicedMs: 300,
+    });
+    expect(assessSttAudio(exactRms).rms).toBeCloseTo(0.003, 7);
+    expect(assessSttAudio(exactRms).accepted).toBe(true);
+  });
+
   it("bounds transcript tokens by duration and rejects repeated n-grams", async () => {
     expect(sttTokenLimit(1)).toBe(15);
     expect(sttTokenLimit(100)).toBe(96);
     expect(
       hasRepeatedNgram("go there go there go there go there"),
     ).toBe(true);
+    expect(hasRepeatedNgram("go now go now stop")).toBe(false);
+    expect(
+      isPlausibleSttText(
+        "a a a b b b c c c d d d e e e",
+        16_000,
+      ),
+    ).toBe(false);
+    const atLimit = Array.from({ length: 15 }, (_value, index) => `w${index}`)
+      .join(" ");
+    expect(isPlausibleSttText(atLimit, 16_000)).toBe(true);
+    expect(isPlausibleSttText(`${atLimit} overflow`, 16_000)).toBe(false);
 
     const audio = voicedAudio(400);
     const result = await transcribeWithSttGuards({
@@ -85,7 +129,10 @@ describe("STT acoustic and hallucination guards", () => {
       retried: true,
     });
     expect(transcribe).toHaveBeenNthCalledWith(1, audio);
-    expect(transcribe).toHaveBeenNthCalledWith(2, expanded);
+    expect(transcribe).toHaveBeenCalledTimes(2);
+    const retryAudio = transcribe.mock.calls[1]?.[0] as Float32Array;
+    expect(retryAudio).not.toBe(expanded);
+    expect(Math.max(...retryAudio)).toBeCloseTo(0.1, 5);
     expect(expandedAudio).toHaveBeenCalledTimes(1);
   });
 
@@ -136,6 +183,31 @@ describe("STT acoustic and hallucination guards", () => {
       diagnostic: "webgpu-failed",
       retried: false,
     });
+  });
+
+  it("marks a timeout on the one expanded inference as retried", async () => {
+    vi.useFakeTimers();
+    const audio = voicedAudio();
+    const expanded = new Float32Array(audio.length + 1_024);
+    expanded.set(audio, 512);
+    const transcribe = vi.fn()
+      .mockResolvedValueOnce("")
+      .mockImplementationOnce(() => new Promise<string>(() => undefined));
+    const pending = transcribeWithSttGuards({
+      audio,
+      expandedAudio: vi.fn().mockResolvedValue(expanded),
+      timeoutMs: 25,
+      transcribe,
+    });
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      diagnostic: "timeout",
+      retried: true,
+    });
+    expect(transcribe).toHaveBeenCalledTimes(2);
   });
 
   it("preserves a 256/192 ms primary VAD envelope and expands retry context", async () => {

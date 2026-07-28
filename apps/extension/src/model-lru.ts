@@ -15,6 +15,7 @@ interface ModelEntry {
   readonly release: () => Promise<void>;
   lastUsed: number;
   resident: boolean;
+  inUse: number;
   releasing: Promise<boolean> | undefined;
   timer: ReturnType<typeof setTimeout> | undefined;
 }
@@ -44,6 +45,7 @@ export class ModelResidencyLru {
       release,
       lastUsed: this.#now(),
       resident: false,
+      inUse: 0,
       releasing: undefined,
       timer: undefined,
     });
@@ -61,6 +63,25 @@ export class ModelResidencyLru {
     if (!entry.resident) return;
     entry.lastUsed = this.#now();
     this.#schedule(key, entry);
+  }
+
+  acquire(key: string): () => void {
+    const entry = this.#require(key);
+    if (!entry.resident) return () => undefined;
+    entry.inUse += 1;
+    entry.lastUsed = this.#now();
+    if (entry.timer !== undefined) {
+      this.#clearTimer(entry.timer);
+      entry.timer = undefined;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      entry.inUse = Math.max(0, entry.inUse - 1);
+      entry.lastUsed = this.#now();
+      this.#schedule(key, entry);
+    };
   }
 
   markReleased(key: string): void {
@@ -83,7 +104,10 @@ export class ModelResidencyLru {
     this.noteMemoryPressure();
     const candidates = [...this.#entries.entries()]
       .filter(([key, entry]) =>
-        key !== exclude && entry.resident && !entry.releasing
+        key !== exclude &&
+        entry.resident &&
+        entry.inUse === 0 &&
+        !entry.releasing
       )
       .sort((left, right) => left[1].lastUsed - right[1].lastUsed);
     const candidate = candidates[0];
@@ -108,7 +132,12 @@ export class ModelResidencyLru {
       this.#clearTimer(entry.timer);
       entry.timer = undefined;
     }
-    if (!this.#underMemoryPressure || !entry.resident || entry.releasing) {
+    if (
+      !this.#underMemoryPressure ||
+      !entry.resident ||
+      entry.inUse > 0 ||
+      entry.releasing
+    ) {
       return;
     }
     const remaining = Math.max(0, this.#idleMs - (this.#now() - entry.lastUsed));
@@ -123,26 +152,29 @@ export class ModelResidencyLru {
   }
 
   async #release(key: string, entry: ModelEntry): Promise<boolean> {
-    if (!entry.resident) return false;
+    if (!entry.resident || entry.inUse > 0) return false;
     if (entry.releasing) return entry.releasing;
     if (entry.timer !== undefined) {
       this.#clearTimer(entry.timer);
       entry.timer = undefined;
     }
-    entry.releasing = entry.release()
+    let failed = false;
+    const releasing = entry.release()
       .then(() => {
         entry.resident = false;
         return true;
       })
       .catch((error: unknown) => {
+        failed = true;
         this.#onError(key, error);
-        this.#schedule(key, entry);
         return false;
       })
       .finally(() => {
         entry.releasing = undefined;
+        if (failed) this.#schedule(key, entry);
       });
-    return entry.releasing;
+    entry.releasing = releasing;
+    return releasing;
   }
 
   #require(key: string): ModelEntry {

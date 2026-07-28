@@ -9,9 +9,6 @@ const extensionRoot = import.meta.dirname;
 const vadDist = realpathSync(
   resolve(extensionRoot, "node_modules/@ricky0123/vad-web/dist"),
 );
-const ortVadDist = realpathSync(
-  resolve(extensionRoot, "node_modules/onnxruntime-web/dist"),
-);
 const ortTransformersDist = realpathSync(
   resolve(extensionRoot, "node_modules/onnxruntime-web-transformers/dist"),
 );
@@ -30,6 +27,21 @@ const kokoroTransformers = realpathSync(
 const ortKokoroDist = realpathSync(
   resolve(kokoroTransformers, "../../onnxruntime-web/dist"),
 );
+
+function shareVadOrtRuntime(): Plugin {
+  return {
+    name: "sotto-share-vad-ort-runtime",
+    enforce: "pre",
+    resolveId(source, importer) {
+      if (
+        source === "onnxruntime-web/wasm" &&
+        importer?.startsWith(vadDist)
+      ) {
+        return resolve(ortKokoroDist, "ort.min.mjs");
+      }
+    },
+  };
+}
 
 function crc32(data: Uint8Array): number {
   let crc = 0xffffffff;
@@ -144,6 +156,15 @@ function localOrtRuntimeUrls(): Plugin {
               : 'cd"+String.fromCharCode(110)+"',
           ),
       );
+      for (const asset of Object.values(bundle)) {
+        if (
+          asset.type === "chunk" &&
+          /https:\/\/(?:cdn\.jsdelivr\.net|unpkg\.com)\/.*(?:onnxruntime|transformers)/i
+            .test(asset.code)
+        ) {
+          throw new Error("The extension bundle contains a remote ORT runtime URL");
+        }
+      }
     },
   };
 }
@@ -203,7 +224,11 @@ function inlineExtractPageRuntime(): Plugin {
 }
 
 export default defineConfig({
+  resolve: {
+    conditions: ["onnxruntime-web-use-extern-wasm"],
+  },
   plugins: [
+    shareVadOrtRuntime(),
     localOrtRuntimeUrls(),
     viteStaticCopy({
       targets: [
@@ -222,13 +247,12 @@ export default defineConfig({
           dest: "assets/vad",
           rename: { stripBase: true },
         },
+        // ORT JS and WASM must stay version-matched. VAD shares Kokoro's
+        // compatible 1.22-dev JSEP runtime; Parakeet needs 1.24.1 JSEP and
+        // Transformers.js 4.2/Moonshine needs 1.26-dev asyncify.
         {
-          src: `${ortVadDist}/ort-wasm-simd-threaded*.{wasm,mjs}`,
-          dest: "assets/ort-vad",
-          rename: { stripBase: true },
-        },
-        {
-          src: `${ortTransformersDist}/ort-wasm-simd-threaded*.{wasm,mjs}`,
+          src:
+            `${ortTransformersDist}/ort-wasm-simd-threaded.asyncify.{wasm,mjs}`,
           dest: "assets/ort-transformers",
           rename: { stripBase: true },
         },
@@ -239,7 +263,7 @@ export default defineConfig({
           rename: { stripBase: true },
         },
         {
-          src: `${ortKokoroDist}/ort-wasm-simd-threaded*.{wasm,mjs}`,
+          src: `${ortKokoroDist}/ort-wasm-simd-threaded.jsep.{wasm,mjs}`,
           dest: "assets/ort-kokoro",
           rename: { stripBase: true },
         },

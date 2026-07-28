@@ -43,6 +43,10 @@ class FakeCacheStorage {
   async delete(name: string): Promise<boolean> {
     return this.caches.delete(name);
   }
+
+  async keys(): Promise<string[]> {
+    return [...this.caches.keys()];
+  }
 }
 
 const TEST_SIZES = {
@@ -54,6 +58,7 @@ const TEST_SIZES = {
 function harness(options: {
   readonly sizes?: typeof TEST_SIZES;
   readonly failFile?: string;
+  readonly interruptFile?: string;
 } = {}) {
   const cacheStorage = new FakeCacheStorage();
   const model = {
@@ -68,7 +73,15 @@ function harness(options: {
     const name = String(input).split("/").at(-1) as keyof typeof TEST_SIZES;
     const expected = (options.sizes ?? TEST_SIZES)[name];
     const declared = name === options.failFile ? expected + 1 : expected;
-    return new Response(new Uint8Array(expected), {
+    const body = name === options.interruptFile
+      ? new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(Math.max(1, expected - 1)));
+            controller.error(new Error("connection interrupted"));
+          },
+        })
+      : new Uint8Array(expected);
+    return new Response(body, {
       status: 200,
       headers: {
         "content-length": String(declared),
@@ -104,8 +117,10 @@ describe("ParakeetSttEngine", () => {
 
     expect(fetch).toHaveBeenCalledTimes(3);
     for (const [index, file] of Object.keys(TEST_SIZES).entries()) {
-      expect(String(fetch.mock.calls[index]?.[0])).toContain(
-        `/${PARAKEET_MODEL_REVISION}/${file}`,
+      expect(String(fetch.mock.calls[index]?.[0])).toBe(
+        `https://huggingface.co/efederici/` +
+          `parakeet-tdt-0.6b-v3-onnx-int4/resolve/` +
+          `${PARAKEET_MODEL_REVISION}/${file}`,
       );
     }
     expect(progress).toEqual(
@@ -166,6 +181,35 @@ describe("ParakeetSttEngine", () => {
     ).toBe(false);
   });
 
+  it.each(Object.keys(TEST_SIZES))(
+    "never commits a manifest when %s is interrupted",
+    async (interruptFile) => {
+      const { cacheStorage, engine, factory } = harness({ interruptFile });
+
+      await expect(engine.init()).rejects.toThrow("connection interrupted");
+      expect(factory).not.toHaveBeenCalled();
+      for (const [name, cache] of cacheStorage.caches) {
+        expect(name).not.toContain("-staging-");
+        expect(
+          [...cache.entries.keys()].some((key) =>
+            key.includes("sotto-cache-manifest")
+          ),
+        ).toBe(false);
+      }
+    },
+  );
+
+  it("removes an orphaned staging cache before a recreated download", async () => {
+    const setup = harness();
+    const staleName =
+      `sotto-parakeet-${PARAKEET_MODEL_REVISION}-staging-orphan`;
+    setup.cacheStorage.caches.set(staleName, new FakeCache());
+
+    await setup.engine.init();
+
+    expect(setup.cacheStorage.caches.has(staleName)).toBe(false);
+  });
+
   it("reloads cheaply from validated CacheStorage without fetching again", async () => {
     const first = harness();
     await first.engine.init();
@@ -190,5 +234,36 @@ describe("ParakeetSttEngine", () => {
 
     expect(first.fetch).not.toHaveBeenCalled();
     expect(secondFactory).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a corrupt manifest instead of activating cached files", async () => {
+    const first = harness();
+    await first.engine.init();
+    await first.engine.dispose();
+    const committed = [...first.cacheStorage.caches.entries()].find(([name]) =>
+      !name.includes("-staging-")
+    )?.[1];
+    const manifestUrl = [...(committed?.entries.keys() ?? [])].find((key) =>
+      key.includes("sotto-cache-manifest")
+    );
+    expect(manifestUrl).toBeDefined();
+    await committed!.put(
+      manifestUrl!,
+      new Response(JSON.stringify({ revision: "main" })),
+    );
+    first.fetch.mockClear();
+    const replacement = new ParakeetSttEngine({
+      cacheStorage: first.cacheStorage as unknown as CacheStorage,
+      fetch: first.fetch as typeof globalThis.fetch,
+      factory: vi.fn().mockResolvedValue(first.model),
+      runtimeUrl: (path) => `chrome-extension://sotto/${path}`,
+      createObjectUrl: (blob) => `blob:revalidated-${blob.size}`,
+      revokeObjectUrl: vi.fn(),
+      modelSizes: TEST_SIZES,
+    });
+
+    await replacement.init();
+
+    expect(first.fetch).toHaveBeenCalledTimes(3);
   });
 });

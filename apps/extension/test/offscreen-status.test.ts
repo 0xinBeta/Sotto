@@ -311,6 +311,7 @@ describe("offscreen fail-soft status", () => {
     expect(speech.parakeetOptions).toHaveLength(1);
     expect(harness.values).toMatchObject({
       premiumSttDownloaded: true,
+      premiumSttDownloadedTiers: { parakeet: true },
       premiumSttEnabled: true,
       premiumSttTier: "parakeet",
     });
@@ -348,6 +349,7 @@ describe("offscreen fail-soft status", () => {
     });
     expect(harness.values).toMatchObject({
       premiumSttDownloaded: true,
+      premiumSttDownloadedTiers: { "moonshine-base": true },
       premiumSttEnabled: true,
       premiumSttTier: "moonshine-base",
     });
@@ -358,6 +360,66 @@ describe("offscreen fail-soft status", () => {
         state: "active",
         tier: "moonshine-base",
         backend: "wasm",
+      }),
+    );
+  });
+
+  it("does not activate a persisted Parakeet tier after WebGPU is lost", async () => {
+    const harness = await installPremiumOffscreen({
+      initialStorage: {
+        premiumSttDownloaded: true,
+        premiumSttDownloadedTiers: { parakeet: true },
+        premiumSttEnabled: true,
+        premiumSttTier: "parakeet",
+      },
+    });
+
+    await expect(
+      harness.message({ type: "start-listening" }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(speech.parakeetInit).not.toHaveBeenCalled();
+    expect(speech.moonshineOptions).not.toContainEqual({
+      model: "base",
+      backend: "wasm",
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "premium-stt-state",
+        tier: "moonshine-base",
+        downloaded: false,
+      }),
+    );
+  });
+
+  it("remembers cached Parakeet independently when WebGPU returns", async () => {
+    const harness = await installPremiumOffscreen({
+      webGpu: true,
+      initialStorage: {
+        premiumSttDownloaded: true,
+        premiumSttDownloadedTiers: {
+          parakeet: true,
+          "moonshine-base": true,
+        },
+        premiumSttEnabled: true,
+        premiumSttTier: "moonshine-base",
+      },
+    });
+
+    await expect(
+      harness.message({ type: "start-listening" }),
+    ).resolves.toEqual({ ok: true });
+    await vi.waitFor(() =>
+      expect(speech.parakeetInit).toHaveBeenCalledTimes(1)
+    );
+
+    expect(speech.parakeetOptions).toHaveLength(1);
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "premium-stt-state",
+        tier: "parakeet",
       }),
     );
   });

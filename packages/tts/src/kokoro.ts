@@ -341,7 +341,9 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     this.#tts = undefined;
     this.#backend = undefined;
     this.#dtype = undefined;
-    await tts?.model.dispose();
+    if (tts) {
+      await this.#runInference(() => Promise.resolve(tts.model.dispose()));
+    }
 
     const context = this.#audioContext;
     this.#audioContext = undefined;

@@ -107,13 +107,14 @@ async function sendOffscreen(message: Record<string, unknown>): Promise<unknown>
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       if (
-        !detail.includes("Receiving end does not exist") ||
+        !/Receiving end does not exist|message port closed|Could not establish connection/i
+          .test(detail) ||
         attempt === 2
       ) {
         throw error;
       }
-      // createDocument() can resolve just before a module listener finishes
-      // registering. Give that existing context a bounded readiness window.
+      // Creation can beat listener registration, and Chrome can close a response
+      // port while recreating an interrupted offscreen document.
       await new Promise<void>((resolve) => {
         setTimeout(resolve, 25 * (attempt + 1));
       });

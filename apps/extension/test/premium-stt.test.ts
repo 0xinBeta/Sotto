@@ -33,7 +33,21 @@ function fixture(): Promise<Float32Array> {
   return Promise.resolve(new Float32Array(6_400).fill(0.05));
 }
 
+function deferred(): {
+  readonly promise: Promise<void>;
+  resolve(): void;
+} {
+  let resolve!: () => void;
+  return {
+    promise: new Promise<void>((done) => {
+      resolve = done;
+    }),
+    resolve: () => resolve(),
+  };
+}
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -105,6 +119,92 @@ describe("PremiumSttManager", () => {
     );
   });
 
+  it("routes utterances to tiny during download, validation, and warmup", async () => {
+    const tiny = engineHarness(vi.fn().mockResolvedValue("tiny result"));
+    const download = deferred();
+    const validation = deferred();
+    const warmup = deferred();
+    const premium = engineHarness(
+      vi.fn().mockImplementation(async () => {
+        await warmup.promise;
+        return "ready";
+      }),
+    );
+    premium.init.mockImplementation(async (onProgress) => {
+      onProgress?.({ status: "downloading", progress: 0.25 });
+      await download.promise;
+      onProgress?.({ status: "validating", progress: 1 });
+      await validation.promise;
+      onProgress?.({ status: "loading", progress: 1 });
+    });
+    const manager = new PremiumSttManager({
+      tiny,
+      tier: "parakeet",
+      createPremium: () => premium,
+      runInference: (task) => task(),
+      selfTestAudio: fixture,
+    });
+    await manager.initializeDefault();
+    const preparing = manager.prepare();
+
+    await vi.waitFor(() => expect(manager.status.state).toBe("downloading"));
+    await expect(manager.transcribe(new Float32Array([0.1]))).resolves.toBe(
+      "tiny result",
+    );
+    download.resolve();
+    await vi.waitFor(() => expect(manager.status.state).toBe("validating"));
+    await expect(manager.transcribe(new Float32Array([0.1]))).resolves.toBe(
+      "tiny result",
+    );
+    validation.resolve();
+    await vi.waitFor(() => expect(manager.status.state).toBe("warming"));
+    await expect(manager.transcribe(new Float32Array([0.1]))).resolves.toBe(
+      "tiny result",
+    );
+
+    warmup.resolve();
+    await preparing;
+    expect(tiny.transcribe).toHaveBeenCalledTimes(3);
+    expect(manager.status.state).toBe("active");
+  });
+
+  it("keeps a later disable authoritative when an enable is still warming", async () => {
+    const tiny = engineHarness(vi.fn().mockResolvedValue("tiny"));
+    const warmup = deferred();
+    const premium = engineHarness(
+      vi.fn().mockImplementation(async () => {
+        await warmup.promise;
+        return "ready";
+      }),
+    );
+    const manager = new PremiumSttManager({
+      tiny,
+      tier: "parakeet",
+      downloaded: true,
+      storedEnabled: false,
+      createPremium: () => premium,
+      runInference: (task) => task(),
+      selfTestAudio: fixture,
+    });
+    await manager.initializeDefault();
+
+    const enabling = manager.setEnabled(true);
+    await vi.waitFor(() => expect(manager.status.state).toBe("warming"));
+    const disabling = manager.setEnabled(false);
+    warmup.resolve();
+    await Promise.all([enabling, disabling]);
+
+    expect(manager.status).toMatchObject({
+      state: "ready",
+      enabled: false,
+      resident: true,
+    });
+    expect(tiny.dispose).not.toHaveBeenCalled();
+    await expect(manager.transcribe(new Float32Array([0.1]))).resolves.toBe(
+      "tiny",
+    );
+  });
+
   it("rejects activation above the warm latency threshold and keeps tiny", async () => {
     const tiny = engineHarness();
     const premium = engineHarness();
@@ -127,6 +227,35 @@ describe("PremiumSttManager", () => {
     await expect(manager.prepare()).rejects.toThrow("latency threshold");
     expect(manager.status.state).toBe("error");
     expect(tiny.dispose).not.toHaveBeenCalled();
+    expect(diagnostics).toEqual(["timeout"]);
+  });
+
+  it("publishes timeout fallback without waiting on a wedged self-test mutex", async () => {
+    vi.useFakeTimers();
+    const mutex = new InferenceMutex();
+    const tiny = engineHarness();
+    const premium = engineHarness(
+      vi.fn().mockImplementation(() => new Promise<string>(() => undefined)),
+    );
+    const diagnostics: string[] = [];
+    const manager = new PremiumSttManager({
+      tiny,
+      tier: "parakeet",
+      createPremium: () => premium,
+      runInference: (task) => mutex.run(task),
+      selfTestAudio: fixture,
+      warmupMaxMs: 25,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+    await manager.initializeDefault();
+    const preparing = manager.prepare();
+
+    await vi.waitFor(() => expect(manager.status.state).toBe("warming"));
+    const rejected = expect(preparing).rejects.toThrow("latency threshold");
+    await vi.advanceTimersByTimeAsync(25);
+
+    await rejected;
+    expect(manager.status.state).toBe("error");
     expect(diagnostics).toEqual(["timeout"]);
   });
 
@@ -208,6 +337,73 @@ describe("PremiumSttManager", () => {
     expect(diagnostics).toContain("webgpu-failed");
   });
 
+  it("falls through a failed device-loss disposal to tiny", async () => {
+    const tiny = engineHarness(vi.fn().mockResolvedValue("tiny result"));
+    const premium = engineHarness(
+      vi.fn()
+        .mockResolvedValueOnce("ready")
+        .mockRejectedValueOnce(new Error("WebGPU device lost")),
+    );
+    premium.dispose.mockRejectedValueOnce(new Error("release failed"));
+    const replacement = engineHarness();
+    replacement.init.mockRejectedValueOnce(new Error("reload failed"));
+    const manager = new PremiumSttManager({
+      tiny,
+      tier: "parakeet",
+      createPremium: vi.fn()
+        .mockReturnValueOnce(premium)
+        .mockReturnValueOnce(replacement),
+      runInference: (task) => task(),
+      selfTestAudio: fixture,
+      onMemoryPressure: vi.fn().mockResolvedValue(undefined),
+    });
+    await manager.initializeDefault();
+    await manager.prepare();
+
+    await expect(manager.transcribe(new Float32Array([0.1]))).resolves.toBe(
+      "tiny result",
+    );
+    expect(replacement.init).toHaveBeenCalledTimes(1);
+    expect(tiny.transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries device loss once, then uses tiny without recursive reload", async () => {
+    const tiny = engineHarness(vi.fn().mockResolvedValue("tiny result"));
+    const first = engineHarness(
+      vi.fn()
+        .mockResolvedValueOnce("ready")
+        .mockRejectedValueOnce(new Error("WebGPU device lost")),
+    );
+    const replacement = engineHarness(
+      vi.fn()
+        .mockResolvedValueOnce("ready")
+        .mockRejectedValueOnce(new Error("GPU process device lost again")),
+    );
+    const createPremium = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(replacement);
+    const onMemoryPressure = vi.fn().mockResolvedValue(undefined);
+    const manager = new PremiumSttManager({
+      tiny,
+      tier: "parakeet",
+      createPremium,
+      runInference: (task) => task(),
+      selfTestAudio: fixture,
+      onMemoryPressure,
+    });
+    await manager.initializeDefault();
+    await manager.prepare();
+
+    await expect(manager.transcribe(new Float32Array([0.1]))).resolves.toBe(
+      "tiny result",
+    );
+
+    expect(createPremium).toHaveBeenCalledTimes(2);
+    expect(onMemoryPressure).toHaveBeenCalledTimes(1);
+    expect(replacement.transcribe).toHaveBeenCalledTimes(2);
+    expect(tiny.transcribe).toHaveBeenCalledTimes(1);
+  });
+
   it("evicts the LRU peer and retries one Parakeet allocation failure while loading", async () => {
     const tiny = engineHarness();
     const first = engineHarness();
@@ -254,7 +450,7 @@ describe("PremiumSttManager", () => {
 
     await manager.initializeDefault();
 
-    expect(manager.status.state).toBe("error");
+    await vi.waitFor(() => expect(manager.status.state).toBe("error"));
     await expect(manager.transcribe(new Float32Array([0.1]))).resolves.toBe(
       "tiny result",
     );

@@ -11,6 +11,7 @@ import {
 
 export const PREMIUM_STT_ENABLED_KEY = "premiumSttEnabled";
 export const PREMIUM_STT_DOWNLOADED_KEY = "premiumSttDownloaded";
+export const PREMIUM_STT_DOWNLOADED_TIERS_KEY = "premiumSttDownloadedTiers";
 export const PREMIUM_STT_TIER_KEY = "premiumSttTier";
 export const PREMIUM_STT_WARMUP_MAX_MS = 1_200;
 
@@ -136,7 +137,9 @@ export class PremiumSttManager {
   #error: string | undefined;
   #premium: SttEngine | undefined;
   #tinyReady = false;
+  #tinyTransition: Promise<void> | undefined;
   #pending: Promise<void> | undefined;
+  #settingGeneration = 0;
 
   constructor(options: PremiumSttManagerOptions) {
     this.#tiny = options.tiny;
@@ -176,17 +179,19 @@ export class PremiumSttManager {
   }
 
   async initializeDefault(): Promise<void> {
-    if (this.#downloaded && this.#enabled) {
-      await this.#loadPremium(false).catch(() => undefined);
-      return;
-    }
     await this.#ensureTiny();
     this.#emitStatus();
+    if (this.#downloaded && this.#enabled) {
+      void this.prepare().catch(() => undefined);
+    }
   }
 
   async prepare(): Promise<void> {
     if (this.#pending) return this.#pending;
-    const pending = this.#prepareWithAllocationRetry(!this.#downloaded);
+    const pending = (async () => {
+      await this.#ensureTiny();
+      await this.#prepareWithAllocationRetry(!this.#downloaded);
+    })();
     this.#pending = pending;
     try {
       await pending;
@@ -196,6 +201,7 @@ export class PremiumSttManager {
   }
 
   async setEnabled(enabled: boolean): Promise<void> {
+    const settingGeneration = ++this.#settingGeneration;
     this.#enabled = enabled;
     this.#hasStoredEnabled = true;
     this.#error = undefined;
@@ -206,45 +212,64 @@ export class PremiumSttManager {
     }
     if (enabled) {
       if (!this.#premium) await this.prepare();
-      if (this.#premium) {
+      if (
+        settingGeneration === this.#settingGeneration &&
+        this.#enabled &&
+        this.#premium
+      ) {
         this.#state = "active";
-        await this.#disposeTiny();
+        await this.#disposeTinyIfActive(settingGeneration);
       }
     } else {
       await this.#ensureTiny();
-      this.#state = "ready";
+      if (
+        settingGeneration === this.#settingGeneration &&
+        !this.#enabled
+      ) {
+        this.#state = "ready";
+      }
     }
     this.#emitStatus();
   }
 
   async transcribe(audio: Float32Array): Promise<string> {
-    if (
-      this.#downloaded &&
-      this.#enabled &&
-      !this.#premium &&
-      this.#state !== "error"
-    ) {
-      await this.prepare().catch(() => undefined);
-    }
-    if (!this.#premium || !this.#enabled || this.#state !== "active") {
+    const premium = this.#premium;
+    if (!premium || !this.#enabled || this.#state !== "active") {
       await this.#ensureTiny();
-      return this.#runInference(() => this.#tiny.transcribe(audio));
+      const result = await this.#runInference(() => this.#tiny.transcribe(audio));
+      if (
+        this.#downloaded &&
+        this.#enabled &&
+        !this.#premium &&
+        this.#state !== "error"
+      ) {
+        void this.prepare().catch(() => undefined);
+      }
+      return result;
     }
 
     try {
-      return await this.#runInference(() => this.#premium!.transcribe(audio));
+      return await this.#runInference(() => premium.transcribe(audio));
     } catch (error) {
       if (this.#tier !== "parakeet" || !isWebGpuSttFailure(error)) {
         throw error;
       }
       this.#onDiagnostic("webgpu-failed");
       await this.#onMemoryPressure();
-      await this.releasePremium();
+      await this.releasePremium().catch(() => undefined);
       try {
         await this.#loadPremium(false);
-        return await this.#runInference(() => this.#premium!.transcribe(audio));
+        const replacement = this.#premium;
+        if (!replacement) {
+          throw new Error("Premium STT reload did not produce a resident model");
+        }
+        return await this.#runInference(() => replacement.transcribe(audio));
       } catch (retryError) {
-        await this.#fallbackToTiny(retryError);
+        if (this.status.state !== "error") {
+          await this.#fallbackToTiny(retryError);
+        } else {
+          await this.#ensureTiny();
+        }
         return this.#runInference(() => this.#tiny.transcribe(audio));
       }
     }
@@ -264,8 +289,11 @@ export class PremiumSttManager {
     this.#pending = undefined;
     await pending?.catch(() => undefined);
     await this.releasePremium();
-    await this.#runInference(() => this.#tiny.dispose());
-    this.#tinyReady = false;
+    await this.#tinyTransition?.catch(() => undefined);
+    if (this.#tinyReady) {
+      await this.#runInference(() => this.#tiny.dispose());
+      this.#tinyReady = false;
+    }
   }
 
   async #prepareWithAllocationRetry(
@@ -333,13 +361,19 @@ export class PremiumSttManager {
       if (!this.#hasStoredEnabled) this.#enabled = true;
       if (this.#enabled) {
         this.#setState("active");
-        await this.#disposeTiny();
+        await this.#disposeTinyIfActive(this.#settingGeneration);
       }
       if (previous && previous !== candidate) {
         await this.#runInference(() => previous.dispose());
       }
     } catch (error) {
-      await this.#runInference(() => candidate.dispose()).catch(() => undefined);
+      const timedOut = error instanceof DOMException &&
+        error.name === "TimeoutError";
+      if (timedOut) {
+        void this.#runInference(() => candidate.dispose()).catch(() => undefined);
+      } else {
+        await this.#runInference(() => candidate.dispose()).catch(() => undefined);
+      }
       await this.#fallbackToTiny(error);
       throw error;
     }
@@ -362,15 +396,43 @@ export class PremiumSttManager {
   }
 
   async #ensureTiny(): Promise<void> {
+    if (this.#tinyTransition) {
+      await this.#tinyTransition.catch(() => undefined);
+      return this.#ensureTiny();
+    }
     if (this.#tinyReady) return;
-    await this.#runInference(() => this.#tiny.init(this.#onTinyProgress));
-    this.#tinyReady = true;
+    const pending = this.#runInference(() =>
+      this.#tiny.init(this.#onTinyProgress)
+    ).then(() => {
+      this.#tinyReady = true;
+    });
+    this.#tinyTransition = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.#tinyTransition === pending) this.#tinyTransition = undefined;
+    }
   }
 
-  async #disposeTiny(): Promise<void> {
+  async #disposeTinyIfActive(settingGeneration: number): Promise<void> {
+    if (this.#tinyTransition) {
+      await this.#tinyTransition.catch(() => undefined);
+      return this.#disposeTinyIfActive(settingGeneration);
+    }
+    if (!this.#enabled || settingGeneration !== this.#settingGeneration) return;
     if (!this.#tinyReady) return;
-    await this.#runInference(() => this.#tiny.dispose());
-    this.#tinyReady = false;
+    const pending = this.#runInference(() => this.#tiny.dispose()).then(() => {
+      this.#tinyReady = false;
+    });
+    this.#tinyTransition = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.#tinyTransition === pending) this.#tinyTransition = undefined;
+    }
+    if (!this.#enabled || settingGeneration !== this.#settingGeneration) {
+      await this.#ensureTiny();
+    }
   }
 
   #setState(state: PremiumSttState): void {

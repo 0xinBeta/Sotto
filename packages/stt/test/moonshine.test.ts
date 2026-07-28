@@ -141,4 +141,21 @@ describe("MoonshineEngine fail-soft initialization", () => {
       max_new_tokens: 15,
     });
   });
+
+  it.each([
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+  ])("rejects non-finite audio before ONNX inference (%s)", async (sample) => {
+    vi.stubGlobal("navigator", {});
+    const transcriber = vi.fn().mockResolvedValue({ text: "unsafe" });
+    transformers.pipeline.mockResolvedValue(transcriber);
+    const engine = new MoonshineEngine();
+    await engine.init();
+
+    await expect(
+      engine.transcribe(new Float32Array([0.1, sample])),
+    ).rejects.toThrow("non-finite");
+    expect(transcriber).not.toHaveBeenCalled();
+  });
 });

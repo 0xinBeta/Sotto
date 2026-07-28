@@ -215,6 +215,7 @@ export class ParakeetSttEngine implements SttEngine {
   }
 
   async #ensureCachedFiles(): Promise<Cache> {
+    await this.#clearStagingCaches();
     const cache = await this.#cacheStorage.open(CACHE_NAME);
     if (await this.#hasValidCommit(cache)) {
       this.#emit({
@@ -355,7 +356,32 @@ export class ParakeetSttEngine implements SttEngine {
   async #hasValidCommit(cache: Cache): Promise<boolean> {
     const manifest = await cache.match(MANIFEST_URL);
     if (!manifest) return false;
+    let commit: unknown;
+    try {
+      commit = await manifest.json();
+    } catch {
+      return false;
+    }
+    if (
+      typeof commit !== "object" ||
+      commit === null ||
+      Array.isArray(commit)
+    ) {
+      return false;
+    }
+    const record = commit as Record<string, unknown>;
+    if (
+      record.revision !== PARAKEET_MODEL_REVISION ||
+      record.total !== this.#totalBytes ||
+      typeof record.files !== "object" ||
+      record.files === null ||
+      Array.isArray(record.files)
+    ) {
+      return false;
+    }
+    const committedFiles = record.files as Record<string, unknown>;
     for (const file of this.#files) {
+      if (committedFiles[file.name] !== file.size) return false;
       const response = await cache.match(remoteUrl(file.name));
       if (
         !response ||
@@ -365,6 +391,16 @@ export class ParakeetSttEngine implements SttEngine {
       }
     }
     return true;
+  }
+
+  async #clearStagingCaches(): Promise<void> {
+    if (typeof this.#cacheStorage.keys !== "function") return;
+    const names = await this.#cacheStorage.keys();
+    await Promise.all(
+      names
+        .filter((name) => name.startsWith(`${CACHE_NAME}-staging-`))
+        .map((name) => this.#cacheStorage.delete(name)),
+    );
   }
 
   async #createLocalUrls(
