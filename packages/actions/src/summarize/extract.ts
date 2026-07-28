@@ -16,6 +16,22 @@ export interface ExtractPageOptions {
   readonly maxCharacters?: number;
 }
 
+function truncateUtf16(value: string, maximum: number): string {
+  if (value.length <= maximum) return value;
+  let end = maximum;
+  const previous = value.charCodeAt(end - 1);
+  const next = value.charCodeAt(end);
+  if (
+    previous >= 0xd800 &&
+    previous <= 0xdbff &&
+    next >= 0xdc00 &&
+    next <= 0xdfff
+  ) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 export function normalizeExtractedText(value: string): string {
   return value
     .replace(/\r\n?/g, "\n")
@@ -32,12 +48,17 @@ export function boundExtractedText(
   if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 1) {
     throw new RangeError("Extraction character bound must be a positive integer");
   }
+  if (maxCharacters > MAX_EXTRACTED_TEXT_LENGTH) {
+    throw new RangeError(
+      `Extraction character bound must not exceed ${MAX_EXTRACTED_TEXT_LENGTH}`,
+    );
+  }
   const normalized = normalizeExtractedText(value);
   if (normalized.length <= maxCharacters) {
     return { text: normalized, truncated: false };
   }
   return {
-    text: normalized.slice(0, maxCharacters).trimEnd(),
+    text: truncateUtf16(normalized, maxCharacters).trimEnd(),
     truncated: true,
   };
 }
@@ -56,13 +77,13 @@ function deepestActiveElement(document: Document): Element | null {
 function selectedText(document: Document): string {
   const active = deepestActiveElement(document);
   if (
-    (active instanceof HTMLInputElement ||
-      active instanceof HTMLTextAreaElement) &&
-    typeof active.selectionStart === "number" &&
-    typeof active.selectionEnd === "number" &&
-    active.selectionEnd > active.selectionStart
+    active instanceof HTMLInputElement ||
+    active instanceof HTMLTextAreaElement
   ) {
-    return active.value.slice(active.selectionStart, active.selectionEnd);
+    return typeof active.selectionStart === "number" &&
+      typeof active.selectionEnd === "number"
+      ? active.value.slice(active.selectionStart, active.selectionEnd)
+      : "";
   }
   return document.defaultView?.getSelection()?.toString() ?? "";
 }
@@ -71,14 +92,15 @@ function pageMetadata(
   document: Document,
   article?: ReadabilityResult | null,
 ): Pick<ExtractedPageText, "title" | "url" | "language"> {
-  const title = normalizeExtractedText(article?.title ?? document.title).slice(
-    0,
+  const title = truncateUtf16(
+    normalizeExtractedText(article?.title ?? document.title),
     500,
   );
-  const url = document.URL.slice(0, 4_000);
-  const language = normalizeExtractedText(
-    article?.lang ?? document.documentElement.lang,
-  ).slice(0, 35);
+  const url = truncateUtf16(document.URL, 4_000);
+  const language = truncateUtf16(
+    normalizeExtractedText(article?.lang ?? document.documentElement.lang),
+    35,
+  );
   return {
     title,
     url,

@@ -56,6 +56,12 @@ export interface TypeBridgeInstallOptions {
 
 const INSTALL_KEY = Symbol.for("sotto.type-content-script-bridge.v0.2");
 
+function isInstalledSession(value: unknown): value is EditorSnapshotSession {
+  return isRecord(value) &&
+    typeof value.capture === "function" &&
+    typeof value.commit === "function";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -124,7 +130,7 @@ export function installTypeContentScriptBridge(
   const scope = globalThis as typeof globalThis &
     Record<PropertyKey, unknown>;
   const installed = scope[INSTALL_KEY];
-  if (installed instanceof EditorSnapshotSession) return installed;
+  if (isInstalledSession(installed)) return installed;
 
   const bridgeDocument =
     options.document ??

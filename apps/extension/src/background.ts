@@ -96,11 +96,13 @@ async function sendOffscreen(message: Record<string, unknown>): Promise<unknown>
   return response?.value;
 }
 
-async function sendPanel(message: Record<string, unknown>): Promise<void> {
+async function sendPanel(message: Record<string, unknown>): Promise<boolean> {
   try {
     await chrome.runtime.sendMessage({ target: "sidepanel", ...message });
+    return true;
   } catch {
     // The panel is intentionally optional; hotkey voice commands still work.
+    return false;
   }
 }
 
@@ -159,6 +161,7 @@ async function publishNotes(): Promise<readonly NoteRecord[]> {
 async function deliverReminder(reminder: ReminderRecord): Promise<void> {
   const notificationId = `reminder:${reminder.id}`;
   const permission = await chrome.notifications.getPermissionLevel();
+  let notificationDelivered = false;
   if (permission === "granted") {
     await chrome.notifications.create(notificationId, {
       type: "basic",
@@ -167,8 +170,9 @@ async function deliverReminder(reminder: ReminderRecord): Promise<void> {
       message: reminder.text,
       eventTime: Date.parse(reminder.dueAt),
     });
+    notificationDelivered = true;
   }
-  await sendPanel({
+  const panelDelivered = await sendPanel({
     type: "reminder-fired",
     reminder: {
       id: reminder.id,
@@ -177,11 +181,18 @@ async function deliverReminder(reminder: ReminderRecord): Promise<void> {
       notificationPermission: permission,
     },
   });
-  void tts
-    .speak(`Reminder: ${reminder.text}`, { lang: "en-US" })
-    .catch((error: unknown) =>
-      reportBackgroundFailure("Sotto could not speak the reminder", error),
+  let speechDelivered = false;
+  try {
+    await tts.speak(`Reminder: ${reminder.text}`, { lang: "en-US" });
+    speechDelivered = true;
+  } catch (error) {
+    console.warn("Sotto could not speak the reminder", error);
+  }
+  if (!notificationDelivered && !panelDelivered && !speechDelivered) {
+    throw new Error(
+      "Reminder delivery failed because notifications are denied and no fallback is available",
     );
+  }
 }
 
 async function reconcileReminders(): Promise<void> {
@@ -977,9 +988,11 @@ chrome.notifications?.onClicked?.addListener((notificationId) => {
       await panelOpening;
       const reminder = await loadReminder(notificationId);
       if (reminder?.sourceWindowId !== undefined) {
-        await chrome.windows.update(reminder.sourceWindowId, {
-          focused: true,
-        });
+        await chrome.windows
+          .update(reminder.sourceWindowId, {
+            focused: true,
+          })
+          .catch(() => undefined);
       }
       if (reminder?.sourceTabId !== undefined) {
         await chrome.tabs

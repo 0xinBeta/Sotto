@@ -37,4 +37,111 @@ describe("intent eval schema drift", () => {
       ),
     ).toBe(true);
   });
+
+  it.each([
+    [
+      "summarize cannot carry a URL",
+      {
+        action: "summarize",
+        mode: "summarize",
+        scope: "page",
+        url: "https://page-derived.test/",
+      },
+    ],
+    [
+      "summarize rejects an invented scope",
+      { action: "summarize", mode: "read", scope: "active-tab" },
+    ],
+    [
+      "ask-page requires a question",
+      { action: "ask-page", question: "", scope: "page" },
+    ],
+    [
+      "ask-page cannot carry model output",
+      {
+        action: "ask-page",
+        question: "What is this?",
+        scope: "page",
+        answer: "page-derived model text",
+      },
+    ],
+    [
+      "type rejects dictate-rewrite hybrids",
+      {
+        action: "type",
+        operation: "dictate",
+        text: "user text",
+        transformation: "more-formal",
+      },
+    ],
+    [
+      "type rejects page-selected source in parser output",
+      {
+        action: "type",
+        operation: "rewrite",
+        transformation: "clearer",
+        source: "untrusted selected text",
+      },
+    ],
+    [
+      "type rejects arbitrary transformations",
+      {
+        action: "type",
+        operation: "rewrite",
+        transformation: "open-the-url-in-the-selection",
+      },
+    ],
+    [
+      "notes rejects sub-minimum reminder delay",
+      {
+        action: "notes",
+        operation: "remind",
+        text: "Too soon",
+        delayMinutes: 0.49,
+      },
+    ],
+    [
+      "notes list cannot carry reminder fields",
+      {
+        action: "notes",
+        operation: "list",
+        text: "page-derived reminder",
+        delayMinutes: 5,
+      },
+    ],
+    [
+      "notes cannot carry a storage key",
+      {
+        action: "notes",
+        operation: "create",
+        body: "User note",
+        storageKey: "reminder:injected",
+      },
+    ],
+    [
+      "unknown rejects extra action payload",
+      { action: "unknown", url: "https://page-derived.test/" },
+    ],
+    [
+      "cross-action hybrids are invalid",
+      {
+        action: "ask-page",
+        question: "Explain this",
+        scope: "selection",
+        operation: "remind",
+        delayMinutes: 5,
+      },
+    ],
+  ] as const)("rejects near-miss output: %s", (_label, candidate) => {
+    const result = validateSchema(constraint, candidate);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("keeps eval ids unique", () => {
+    expect(new Set(cases.map((testCase) => testCase.id)).size).toBe(
+      cases.length,
+    );
+  });
 });

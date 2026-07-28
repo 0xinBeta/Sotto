@@ -407,7 +407,6 @@ export class NotesReminderStore {
       const reminders = readReminders(await this.#storage.get(null));
       const delivered: ReminderRecord[] = [];
       const recreatedAlarmNames: string[] = [];
-      const updates: Record<string, unknown> = {};
 
       for (const reminder of reminders) {
         if (reminder.status !== "scheduled") continue;
@@ -418,8 +417,10 @@ export class NotesReminderStore {
             ...reminder,
             status: "delivered",
           };
-          updates[`${REMINDER_KEY_PREFIX}${reminder.id}`] =
-            deliveredReminder;
+          await this.#storage.set({
+            [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
+            [`${REMINDER_KEY_PREFIX}${reminder.id}`]: deliveredReminder,
+          });
           delivered.push(deliveredReminder);
           await this.#alarms.clear(reminder.alarmName);
           continue;
@@ -434,12 +435,6 @@ export class NotesReminderStore {
         }
       }
 
-      if (delivered.length > 0) {
-        await this.#storage.set({
-          [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
-          ...updates,
-        });
-      }
       return { delivered, recreatedAlarmNames };
     });
   }

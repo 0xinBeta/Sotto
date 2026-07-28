@@ -21,6 +21,24 @@ describe("type content-script bridge", () => {
     expect(addListener).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses a structurally valid session from an earlier bundle evaluation", () => {
+    const addListener = vi.fn();
+    const previousBundleSession = {
+      capture: vi.fn(),
+      commit: vi.fn(),
+    };
+    (globalThis as Record<PropertyKey, unknown>)[installKey] =
+      previousBundleSession;
+
+    const installed = installTypeContentScriptBridge({
+      runtime: { onMessage: { addListener } },
+      document: {} as Document,
+    });
+
+    expect(installed).toBe(previousBundleSession);
+    expect(addListener).not.toHaveBeenCalled();
+  });
+
   it("ignores unrelated messages without responding", () => {
     let listener:
       | ((

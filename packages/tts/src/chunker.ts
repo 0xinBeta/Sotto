@@ -61,7 +61,19 @@ function chooseBoundary(text: string, start: number, end: number): number {
     closestBoundary(text, start, end, SENTENCE_BOUNDARY) ??
     closestBoundary(text, start, end, LINE_BOUNDARY) ??
     closestBoundary(text, start, end, WHITESPACE_BOUNDARY) ??
-    end;
+    safeUtf16Boundary(text, end);
+}
+
+function safeUtf16Boundary(text: string, end: number): number {
+  if (end <= 0 || end >= text.length) return end;
+  const previous = text.charCodeAt(end - 1);
+  const next = text.charCodeAt(end);
+  return previous >= 0xd800 &&
+    previous <= 0xdbff &&
+    next >= 0xdc00 &&
+    next <= 0xdfff
+    ? end - 1
+    : end;
 }
 
 /**

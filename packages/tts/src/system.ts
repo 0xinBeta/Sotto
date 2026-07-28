@@ -172,7 +172,8 @@ export class SystemTtsEngine implements LongFormTtsEngine {
           if (
             generation === this.generation &&
             isProgressEvent(event.type) &&
-            typeof event.charIndex === "number"
+            typeof event.charIndex === "number" &&
+            Number.isFinite(event.charIndex)
           ) {
             reportProgress(event.charIndex, event.type);
           }

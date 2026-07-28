@@ -233,6 +233,8 @@ function isSimpleContentEditable(target: HTMLElement): boolean {
 
 function assertCurrentTarget(snapshot: Snapshot): void {
   if (
+    (typeof snapshot.document.hasFocus === "function" &&
+      !snapshot.document.hasFocus()) ||
     !isConnectedToDocument(snapshot.target, snapshot.document) ||
     deepActiveElement(snapshot.document) !== snapshot.target ||
     editableKind(snapshot.target) !== snapshot.kind
@@ -427,6 +429,7 @@ export class EditorSnapshotSession {
         "The editor declined Sotto's text change",
       );
     }
+    assertCurrentTarget(snapshot);
     if (
       target.value !== originalValue ||
       target.selectionStart !== expectedSelectionStart ||
@@ -482,6 +485,13 @@ export class EditorSnapshotSession {
     }
     if (snapshot.selectedText === text) return { kind: "contenteditable" };
 
+    if (!isSimpleContentEditable(snapshot.target)) {
+      throw new EditorGuardError(
+        "complex-editor",
+        "Sotto cannot safely edit this complex editor",
+      );
+    }
+
     const beforeText = snapshot.target.textContent ?? "";
     const start = textOffset(snapshot.target, current);
     if (start === null) {
@@ -495,26 +505,6 @@ export class EditorSnapshotSession {
       text +
       beforeText.slice(start + snapshot.selectedText.length);
 
-    snapshot.document.execCommand?.("insertText", false, text);
-    if ((snapshot.target.textContent ?? "") === expected) {
-      this.#lastDictated = undefined;
-      return { kind: "contenteditable" };
-    }
-
-    // A failed native edit may still have changed a private editor model.
-    if ((snapshot.target.textContent ?? "") !== beforeText) {
-      throw new EditorGuardError(
-        "commit-failed",
-        "The editor made an unexpected text change",
-      );
-    }
-    if (!isSimpleContentEditable(snapshot.target)) {
-      throw new EditorGuardError(
-        "complex-editor",
-        "Sotto cannot safely edit this complex editor",
-      );
-    }
-
     const before = inputEvent(snapshot.document, "beforeinput", text, inputType);
     if (!snapshot.target.dispatchEvent(before)) {
       throw new EditorGuardError(
@@ -523,14 +513,28 @@ export class EditorSnapshotSession {
       );
     }
 
-    current.deleteContents();
+    assertCurrentTarget(snapshot);
+    const commitRange = selectedRange(snapshot.document, snapshot.target);
+    if (
+      !commitRange ||
+      !rangesMatch(commitRange, snapshot.range) ||
+      commitRange.toString() !== snapshot.selectedText ||
+      (snapshot.target.textContent ?? "") !== beforeText
+    ) {
+      throw new EditorGuardError(
+        "stale-snapshot",
+        "The selection changed before Sotto could type",
+      );
+    }
+
+    commitRange.deleteContents();
     const inserted = snapshot.document.createTextNode(text);
-    current.insertNode(inserted);
-    current.setStartAfter(inserted);
-    current.collapse(true);
+    commitRange.insertNode(inserted);
+    commitRange.setStartAfter(inserted);
+    commitRange.collapse(true);
     const selection = snapshot.document.getSelection();
     selection?.removeAllRanges();
-    selection?.addRange(current);
+    selection?.addRange(commitRange);
     snapshot.target.dispatchEvent(
       inputEvent(snapshot.document, "input", text, inputType),
     );

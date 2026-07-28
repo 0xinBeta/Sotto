@@ -170,6 +170,32 @@ describe("reminder scheduling", () => {
       when: NOW.getTime() + 30_000,
     });
   });
+
+  it("retries duplicate reminder ids without overwriting the first record", async () => {
+    const { store, storage } = makeStore(
+      undefined,
+      undefined,
+      ["same-id", "same-id", "second-id"],
+    );
+
+    const first = await store.scheduleReminder({
+      text: "First reminder",
+      delayMinutes: 1,
+    });
+    const second = await store.scheduleReminder({
+      text: "Second reminder",
+      delayMinutes: 2,
+    });
+
+    expect(first.id).toBe("same-id");
+    expect(second.id).toBe("second-id");
+    expect(storage.values["reminder:same-id"]).toMatchObject({
+      text: "First reminder",
+    });
+    expect(storage.values["reminder:second-id"]).toMatchObject({
+      text: "Second reminder",
+    });
+  });
 });
 
 describe("alarm reconciliation", () => {
@@ -248,6 +274,37 @@ describe("alarm reconciliation", () => {
     expect(storage.values["reminder:retry"]).toEqual(due);
   });
 
+  it("commits each overdue delivery before attempting the next one", async () => {
+    const first = reminder("first", "2026-07-28T11:58:00.000Z");
+    const second = reminder("second", "2026-07-28T11:59:00.000Z");
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      "reminder:first": first,
+      "reminder:second": second,
+    });
+    const alarms = new MemoryAlarmStore();
+    const { store } = makeStore(storage, alarms);
+    const delivered: string[] = [];
+
+    await expect(
+      store.reconcileReminders({
+        now: NOW,
+        onDue: async (record) => {
+          delivered.push(record.id);
+          if (record.id === "second") throw new Error("second failed");
+        },
+      }),
+    ).rejects.toThrow("second failed");
+
+    expect(delivered).toEqual(["first", "second"]);
+    expect(storage.values["reminder:first"]).toEqual({
+      ...first,
+      status: "delivered",
+    });
+    expect(storage.values["reminder:second"]).toEqual(second);
+    expect(alarms.clear).toHaveBeenCalledWith("reminder:first");
+  });
+
   it("handles a stable alarm idempotently and reschedules an early alarm", async () => {
     const due = reminder("alarm", "2026-07-28T12:01:00.000Z");
     const storage = new MemoryStorageArea({
@@ -283,5 +340,23 @@ describe("alarm reconciliation", () => {
     ).resolves.toBeUndefined();
     expect(onDue).toHaveBeenCalledOnce();
   });
-});
 
+  it("ignores a reminder alarm whose storage record is missing", async () => {
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+    });
+    const alarms = new MemoryAlarmStore();
+    const { store } = makeStore(storage, alarms);
+    const onDue = vi.fn();
+
+    await expect(
+      store.handleReminderAlarm("reminder:missing", {
+        now: NOW,
+        onDue,
+      }),
+    ).resolves.toBeUndefined();
+    expect(onDue).not.toHaveBeenCalled();
+    expect(storage.set).not.toHaveBeenCalled();
+    expect(alarms.create).not.toHaveBeenCalled();
+  });
+});
