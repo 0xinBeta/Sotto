@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const nano = vi.hoisted(() => ({
   askPageWithPrompt: vi.fn(),
   getNanoAvailability: vi.fn(),
+  parseCommand: vi.fn(),
   respondOneSentence: vi.fn(),
   rewriteWithPrompt: vi.fn(),
   summarizeWithPrompt: vi.fn(),
@@ -40,7 +41,7 @@ vi.mock("@sotto/nano", () => ({
   createParserSession: vi.fn(),
   createResponderSession: vi.fn(),
   getNanoAvailability: nano.getNanoAvailability,
-  parseCommand: vi.fn(),
+  parseCommand: nano.parseCommand,
   respondOneSentence: nano.respondOneSentence,
   rewriteWithPrompt: nano.rewriteWithPrompt,
   summarizeWithPrompt: nano.summarizeWithPrompt,
@@ -173,6 +174,7 @@ async function installPremiumOffscreen(options: {
 afterEach(() => {
   vi.useRealTimers();
   nano.askPageWithPrompt.mockReset();
+  nano.parseCommand.mockReset();
   vi.resetModules();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -852,5 +854,148 @@ describe("offscreen fail-soft status", () => {
       error: { name: "Error", message: "Aborted" },
     });
     expect(taskSignal?.aborted).toBe(true);
+  });
+});
+
+describe("local inference host characterization", () => {
+  it("keeps the current premium voice setup race behavior", async () => {
+    const finishSetup: Array<() => void> = [];
+    premium.init.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSetup.push(resolve);
+        }),
+    );
+    const harness = await installPremiumOffscreen();
+
+    const first = harness.message({ type: "prepare-premium-tts" });
+    const second = harness.message({ type: "prepare-premium-tts" });
+    await vi.waitFor(() => expect(premium.init).toHaveBeenCalledTimes(2));
+
+    for (const finish of finishSetup) finish();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { ok: true },
+      { ok: true },
+    ]);
+    expect(premium.init).toHaveBeenCalledTimes(2);
+    expect(harness.values).toMatchObject({
+      premiumTtsDownloaded: true,
+      premiumTtsEnabled: true,
+    });
+  });
+
+  it("starts premium voice recovery after a WebGPU speech failure", async () => {
+    premium.speak.mockRejectedValueOnce(new Error("WebGPU device lost"));
+    const harness = await installPremiumOffscreen();
+    await harness.message({ type: "prepare-premium-tts" });
+
+    await expect(
+      harness.message({
+        type: "premium-speak",
+        utteranceId: "recovery-test",
+        text: "Recover the voice.",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: { name: "Error", message: "WebGPU device lost" },
+    });
+
+    await vi.waitFor(() => expect(premium.init).toHaveBeenCalledTimes(2));
+    expect(premium.stop).toHaveBeenCalledOnce();
+    expect(premium.dispose).toHaveBeenCalledOnce();
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "premium-tts-state",
+        state: "downloading",
+        error: "WebGPU device lost",
+      }),
+    );
+  });
+
+  it("uses the Prompt API fallback after the native summarizer fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const harness = await installPremiumOffscreen();
+    const destroy = vi.fn();
+    vi.stubGlobal("Summarizer", {
+      availability: vi.fn().mockResolvedValue("available"),
+      create: vi.fn().mockResolvedValue({
+        summarize: vi.fn().mockRejectedValue(new Error("native failed")),
+        destroy,
+      }),
+    });
+    nano.summarizeWithPrompt.mockResolvedValue("Prompt API summary.");
+
+    await expect(
+      harness.message({
+        type: "page-task",
+        task: {
+          role: "summarize",
+          pageText: "Page data",
+        },
+      }),
+    ).resolves.toEqual({ ok: true, value: "Prompt API summary." });
+
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(nano.summarizeWithPrompt).toHaveBeenCalledWith(
+      "Page data",
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("finishes page-task cancellation before parsing a barge-in transcript", async () => {
+    const events: string[] = [];
+    nano.askPageWithPrompt.mockImplementation(
+      async (
+        _question: string,
+        _pageText: string,
+        options: { readonly signal?: AbortSignal },
+      ) =>
+        new Promise<string>((_resolve, reject) => {
+          options.signal?.addEventListener(
+            "abort",
+            () => {
+              events.push("page-aborted");
+              reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        }),
+    );
+    nano.parseCommand.mockImplementation(async () => {
+      events.push("transcript-parsed");
+      return { action: "unknown", reason: "No command matched." };
+    });
+    const harness = await installPremiumOffscreen();
+
+    const page = harness.message({
+      type: "page-task",
+      task: {
+        role: "ask-page",
+        pageText: "Page data",
+        question: "What happened?",
+      },
+    });
+    await vi.waitFor(() =>
+      expect(nano.askPageWithPrompt).toHaveBeenCalledOnce()
+    );
+    const transcript = harness.message({
+      type: "parse-transcript",
+      transcript: "new command",
+    });
+
+    await expect(transcript).resolves.toEqual({ ok: true });
+    await expect(page).resolves.toEqual({
+      ok: false,
+      error: { name: "Error", message: "Aborted" },
+    });
+    expect(events).toEqual(["page-aborted", "transcript-parsed"]);
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "worker",
+        type: "execute-command",
+        transcript: "new command",
+      }),
+    );
   });
 });
