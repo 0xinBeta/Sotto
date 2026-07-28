@@ -5,6 +5,7 @@ dist/
 .vite/
 
 # os / editor
+.claude/
 .DS_Store
 *.log
 .idea/
