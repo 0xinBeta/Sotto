@@ -51,6 +51,10 @@ function requiredElement<T extends Element>(selector: string): T {
 
 const statusChip = requiredElement<HTMLElement>("#status-chip");
 const statusLabel = requiredElement<HTMLElement>("#status-label");
+const captureSetup = requiredElement<HTMLElement>("#capture-setup");
+const enableCapture = requiredElement<HTMLButtonElement>("#enable-capture");
+const setupGrantMic = requiredElement<HTMLButtonElement>("#setup-grant-mic");
+const setupPrepareNano = requiredElement<HTMLButtonElement>("#setup-prepare-nano");
 const onboarding = requiredElement<HTMLElement>("#onboarding");
 const onboardingTitle = requiredElement<HTMLElement>("#onboarding-title");
 const onboardingCopy = requiredElement<HTMLElement>("#onboarding-copy");
@@ -81,6 +85,8 @@ let pendingScreenshotPermission: ScreenshotPermissionWorkflow | undefined;
 let newestLogEntry: LogEntry | undefined;
 let pointerIsDown = false;
 let earconContext: AudioContext | undefined;
+let capturePermissionGranted: boolean | undefined;
+let nanoAvailability: NanoAvailability | undefined;
 const progressHideTimers: Partial<Record<"nano" | "stt", number>> = {};
 
 function setStatus(
@@ -106,6 +112,17 @@ function showTranscript(text: string): void {
 }
 
 function showNanoState(availability: NanoAvailability): void {
+  nanoAvailability = availability;
+  setupPrepareNano.hidden =
+    availability !== "downloadable" && availability !== "downloading";
+  setupPrepareNano.textContent =
+    availability === "downloading" ? "Continue model setup" : "Prepare Gemini Nano";
+
+  if (capturePermissionGranted === false) {
+    onboarding.hidden = true;
+    return;
+  }
+
   if (availability === "unavailable") {
     onboarding.hidden = false;
     onboardingTitle.textContent = "Nano is unavailable here.";
@@ -136,10 +153,13 @@ function showNanoState(availability: NanoAvailability): void {
 function showMicrophoneState(state: PermissionState | "unknown"): void {
   const granted = state === "granted";
   listenButton.disabled = !granted;
-  grantMic.textContent =
+  const label =
     state === "denied"
       ? "Review microphone settings"
       : "Grant microphone access";
+  grantMic.textContent = label;
+  setupGrantMic.textContent = granted ? "Microphone enabled" : label;
+  setupGrantMic.disabled = granted;
   if (granted) return;
 
   listenLabel.textContent = "Use text command";
@@ -147,6 +167,34 @@ function showMicrophoneState(state: PermissionState | "unknown"): void {
     state === "denied" ? "error" : "booting",
     state === "denied" ? "Microphone blocked" : "Microphone setup",
   );
+}
+
+function showCapturePermissionState(granted: boolean): void {
+  capturePermissionGranted = granted;
+  captureSetup.hidden = granted;
+  if (nanoAvailability) showNanoState(nanoAvailability);
+}
+
+async function requestCapturePermission(): Promise<boolean> {
+  const granted = await chrome.permissions
+    .request({ origins: ["<all_urls>"] })
+    .catch((error: unknown) => {
+      console.warn("Sotto screenshot permission request failed", error);
+      return false;
+    });
+  showCapturePermissionState(granted);
+  return granted;
+}
+
+async function loadCapturePermissionState(): Promise<void> {
+  try {
+    showCapturePermissionState(
+      await chrome.permissions.contains({ origins: ["<all_urls>"] }),
+    );
+  } catch (error) {
+    console.warn("Sotto could not check screenshot permission", error);
+    showCapturePermissionState(false);
+  }
 }
 
 async function playEarcon(kind: "listen" | "complete"): Promise<void> {
@@ -325,9 +373,11 @@ listenButton.addEventListener("keyup", (event) => {
   }
 });
 
-grantMic.addEventListener("click", () => {
-  void send({ type: "open-microphone-page" });
-});
+for (const button of [grantMic, setupGrantMic]) {
+  button.addEventListener("click", () => {
+    void send({ type: "open-microphone-page" });
+  });
+}
 
 commandForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -347,8 +397,9 @@ clearLog.addEventListener("click", () => {
   actionLog.append(empty);
 });
 
-prepareNano.addEventListener("click", async () => {
+async function prepareNanoModel(): Promise<void> {
   prepareNano.disabled = true;
+  setupPrepareNano.disabled = true;
   nanoProgressCard.hidden = false;
   setStatus("booting", "Preparing Nano");
 
@@ -379,6 +430,21 @@ prepareNano.addEventListener("click", async () => {
     setStatus("error", "Nano setup failed");
     appendLog("model setup", message);
     prepareNano.disabled = false;
+    setupPrepareNano.disabled = false;
+  }
+}
+
+prepareNano.addEventListener("click", () => void prepareNanoModel());
+setupPrepareNano.addEventListener("click", () => void prepareNanoModel());
+
+enableCapture.addEventListener("click", async () => {
+  enableCapture.disabled = true;
+  try {
+    if (!(await requestCapturePermission())) {
+      appendLog("screen capture", "Permission was not granted");
+    }
+  } finally {
+    enableCapture.disabled = false;
   }
 });
 
@@ -410,16 +476,9 @@ copyScreenshot.addEventListener("click", async () => {
 
   try {
     if (permissionWorkflow) {
-      const granted = await chrome.permissions
-        .request({
-          origins: [permissionWorkflow.originPattern],
-        })
-        .catch((error: unknown) => {
-          console.warn("Sotto screenshot permission request failed", error);
-          return false;
-        });
+      const granted = await requestCapturePermission();
       if (!granted) {
-        const spoken = "Screenshot needs permission for this site.";
+        const spoken = "Screenshot needs screen capture permission.";
         appendLog("screenshot", spoken);
         await send({ type: "speak", text: spoken });
         return;
@@ -493,8 +552,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
     case "screenshot-permission-needed":
       pendingScreenshot = undefined;
       pendingScreenshotPermission = message.workflow;
-      copyScreenshot.textContent =
-        `Allow capturing ${message.workflow.host} and copy`;
+      copyScreenshot.textContent = "Enable screen capture (one-time)";
       clipboardCopy.textContent =
         `Sotto needs one-time access to capture ${message.workflow.host}.`;
       clipboardCard.hidden = false;
@@ -525,4 +583,5 @@ async function showAssignedShortcut(): Promise<void> {
 
 showTranscript("");
 void send({ type: "get-status" });
+void loadCapturePermissionState();
 void showAssignedShortcut();

@@ -170,6 +170,16 @@ h2 {
   line-height: 1.55;
 }
 
+.setup-actions {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+}
+
+.setup-actions .mic-help {
+  margin: 0;
+}
+
 .hardware-list {
   display: grid;
   gap: 8px;

@@ -96,7 +96,7 @@ describe("screenshot action", () => {
     expect(dispatchDestination).not.toHaveBeenCalled();
   });
 
-  it("returns a permission workflow without capturing when the site is not granted", async () => {
+  it("returns an all-sites permission workflow without capturing when screen capture is not granted", async () => {
     chromeStub.tabs.query.mockResolvedValue([
       chromeTab({
         id: 7,
@@ -116,7 +116,7 @@ describe("screenshot action", () => {
       spoken: "Screenshot access is needed for github.com.",
       workflow: {
         kind: "screenshot-permission",
-        originPattern: "https://github.com/*",
+        originPattern: "<all_urls>",
         host: "github.com",
         pendingCommand: {
           action: "screenshot",
@@ -126,7 +126,7 @@ describe("screenshot action", () => {
     });
 
     expect(chromeStub.permissions.contains).toHaveBeenCalledWith({
-      origins: ["https://github.com/*"],
+      origins: ["<all_urls>"],
     });
     expect(chromeStub.tabs.captureVisibleTab).not.toHaveBeenCalled();
     expect(dispatchDestination).not.toHaveBeenCalled();

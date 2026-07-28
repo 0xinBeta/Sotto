@@ -52,7 +52,7 @@ The model only ever **chooses** from a whitelist of actions and fills in their p
 - **Voice-only command channel.** The intent parser only ever sees your transcript. Page content never enters it, so a webpage cannot inject commands.
 - **Schema-constrained output.** Nano physically cannot emit an action outside the registry, and the router validates again anyway.
 - **No audio retention.** Mic buffers are transient; nothing is written to disk. Transcripts are session-local.
-- **Least privilege.** `activeTab` + on-demand scripting where possible; `tabs` is requested only because tab search needs titles.
+- **Least privilege, honestly stated.** Install-time permissions are minimal; `tabs` is requested only because tab search needs titles. Screen capture is the exception: Chrome's `captureVisibleTab` accepts nothing narrower than the all-sites grant, so onboarding asks for it **once**, it's used only by the screenshot action, and the image never leaves your machine.
 
 ## Requirements
 
@@ -76,7 +76,7 @@ pnpm build
 
 1. Open `chrome://extensions`, enable **Developer mode**
 2. **Load unpacked** → select `apps/extension/dist`
-3. Open the Sotto side panel and follow onboarding (mic permission + model downloads)
+3. Open the Sotto side panel and follow onboarding — one visit grants everything: screen capture (one-time), mic access, and model downloads
 4. Press <kbd>Alt</kbd>+<kbd>S</kbd> (<kbd>Option</kbd>+<kbd>S</kbd> on macOS), speak, and pause — voice activity detection ends the capture, or press the hotkey again
 
 ## Repository layout

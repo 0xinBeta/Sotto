@@ -85,7 +85,7 @@ export interface ClipboardWorkflow {
 
 export interface ScreenshotPermissionWorkflow {
   readonly kind: "screenshot-permission";
-  readonly originPattern: string;
+  readonly originPattern: "<all_urls>";
   readonly host: string;
   readonly pendingCommand: ActionCommand;
 }

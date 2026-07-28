@@ -20,7 +20,7 @@ const schema = {
 
 function captureOrigin(
   url: string | undefined,
-): { originPattern: string; host: string } | undefined {
+): { host: string } | undefined {
   if (!url) return undefined;
   try {
     const parsed = new URL(url);
@@ -28,7 +28,6 @@ function captureOrigin(
       return undefined;
     }
     return {
-      originPattern: `${parsed.origin}/*`,
       host: parsed.host,
     };
   } catch {
@@ -73,14 +72,14 @@ const screenshot = defineAction<ScreenshotCommand>({
     }
 
     const hasPermission = await chrome.permissions.contains({
-      origins: [captureSite.originPattern],
+      origins: ["<all_urls>"],
     });
     if (!hasPermission) {
       return {
         spoken: `Screenshot access is needed for ${captureSite.host}.`,
         workflow: {
           kind: "screenshot-permission",
-          originPattern: captureSite.originPattern,
+          originPattern: "<all_urls>",
           host: captureSite.host,
           pendingCommand: command,
         },
