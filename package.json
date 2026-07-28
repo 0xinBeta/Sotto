@@ -7,11 +7,13 @@
   "scripts": {
     "build": "pnpm -r --filter './packages/**' build && pnpm --filter @sotto/extension build",
     "typecheck": "pnpm -r --if-present typecheck",
+    "test": "vitest run",
     "evals": "pnpm --filter @sotto/evals eval"
   },
   "devDependencies": {
     "@types/chrome": "0.2.2",
     "@types/node": "24.3.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "3.2.4"
   }
 }

@@ -1,0 +1,153 @@
+import { beforeEach, describe, expect, it } from "vitest";
+
+import tabsAction from "../src/tabs/index.js";
+import { chromeTab, installChromeStub } from "./chrome-stub.js";
+
+describe("tabs action", () => {
+  let chromeStub: ReturnType<typeof installChromeStub>;
+
+  beforeEach(() => {
+    chromeStub = installChromeStub();
+  });
+
+  it("creates an active tab", async () => {
+    await expect(
+      tabsAction.execute({ action: "tabs", operation: "new" }, {}),
+    ).resolves.toEqual({ spoken: "Opened a new tab." });
+    expect(chromeStub.tabs.create).toHaveBeenCalledWith({ active: true });
+  });
+
+  it("closes the active tab", async () => {
+    chromeStub.tabs.query.mockResolvedValue([
+      chromeTab({ id: 9, windowId: 2 }),
+    ]);
+
+    await expect(
+      tabsAction.execute({ action: "tabs", operation: "close" }, {}),
+    ).resolves.toEqual({ spoken: "Closed the tab." });
+
+    expect(chromeStub.tabs.query).toHaveBeenCalledWith({
+      active: true,
+      currentWindow: true,
+    });
+    expect(chromeStub.tabs.remove).toHaveBeenCalledWith(9);
+  });
+
+  it("reports when an operation requiring the active tab has none", async () => {
+    chromeStub.tabs.query.mockResolvedValue([]);
+
+    await expect(
+      tabsAction.execute({ action: "tabs", operation: "close" }, {}),
+    ).rejects.toThrow("No active tab is available");
+    expect(chromeStub.tabs.remove).not.toHaveBeenCalled();
+  });
+
+  it("switches tabs and focuses the containing window", async () => {
+    chromeStub.tabs.get.mockResolvedValue(
+      chromeTab({ id: 42, windowId: 5, title: "GitHub" }),
+    );
+
+    await expect(
+      tabsAction.execute(
+        { action: "tabs", operation: "switch", tabId: 42 },
+        {},
+      ),
+    ).resolves.toEqual({ spoken: "Switched to GitHub." });
+
+    expect(chromeStub.tabs.update).toHaveBeenCalledWith(42, { active: true });
+    expect(chromeStub.windows.update).toHaveBeenCalledWith(5, {
+      focused: true,
+    });
+  });
+
+  it("uses a generic switch confirmation for an untitled tab", async () => {
+    chromeStub.tabs.get.mockResolvedValue(
+      chromeTab({ id: 42, windowId: 5, title: "" }),
+    );
+
+    await expect(
+      tabsAction.execute(
+        { action: "tabs", operation: "switch", tabId: 42 },
+        {},
+      ),
+    ).resolves.toEqual({ spoken: "Switched to the tab." });
+  });
+
+  it("turns stale tab lookup failures into a stable error", async () => {
+    chromeStub.tabs.get.mockRejectedValue(new Error("No tab with id: 12"));
+
+    await expect(
+      tabsAction.execute(
+        { action: "tabs", operation: "switch", tabId: 12 },
+        {},
+      ),
+    ).rejects.toThrow("Tab 12 is no longer open");
+    expect(chromeStub.tabs.update).not.toHaveBeenCalled();
+    expect(chromeStub.windows.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["mute", true, "Muted"],
+    ["unmute", false, "Unmuted"],
+  ] as const)(
+    "%ss an explicitly selected tab",
+    async (operation, muted, spokenVerb) => {
+      chromeStub.tabs.get.mockResolvedValue(
+        chromeTab({ id: 20, windowId: 1, title: "Video" }),
+      );
+
+      await expect(
+        tabsAction.execute(
+          { action: "tabs", operation, tabId: 20 },
+          {},
+        ),
+      ).resolves.toEqual({ spoken: `${spokenVerb} Video.` });
+
+      expect(chromeStub.tabs.get).toHaveBeenCalledWith(20);
+      expect(chromeStub.tabs.update).toHaveBeenCalledWith(20, { muted });
+      expect(chromeStub.tabs.query).not.toHaveBeenCalled();
+    },
+  );
+
+  it("falls back to the active tab when mute has no selected id", async () => {
+    chromeStub.tabs.query.mockResolvedValue([
+      chromeTab({ id: 21, windowId: 1 }),
+    ]);
+
+    await expect(
+      tabsAction.execute({ action: "tabs", operation: "mute" }, {}),
+    ).resolves.toEqual({ spoken: "Muted the tab." });
+
+    expect(chromeStub.tabs.update).toHaveBeenCalledWith(21, { muted: true });
+  });
+
+  it("restores the first recently closed tab session", async () => {
+    chromeStub.sessions.getRecentlyClosed.mockResolvedValue([
+      { window: { sessionId: "window-session" } },
+      { tab: { title: "Missing session" } },
+      { tab: { sessionId: "tab-session" } },
+      { tab: { sessionId: "older-tab-session" } },
+    ]);
+
+    await expect(
+      tabsAction.execute({ action: "tabs", operation: "reopen" }, {}),
+    ).resolves.toEqual({ spoken: "Reopened the last closed tab." });
+
+    expect(chromeStub.sessions.getRecentlyClosed).toHaveBeenCalledWith({
+      maxResults: 10,
+    });
+    expect(chromeStub.sessions.restore).toHaveBeenCalledWith("tab-session");
+  });
+
+  it("does not restore a window or a tab without a session id", async () => {
+    chromeStub.sessions.getRecentlyClosed.mockResolvedValue([
+      { window: { sessionId: "window-session" } },
+      { tab: { title: "Missing session" } },
+    ]);
+
+    await expect(
+      tabsAction.execute({ action: "tabs", operation: "reopen" }, {}),
+    ).rejects.toThrow("There is no recently closed tab to reopen");
+    expect(chromeStub.sessions.restore).not.toHaveBeenCalled();
+  });
+});

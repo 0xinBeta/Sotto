@@ -88,7 +88,7 @@ async function reopenLastTab(): Promise<void> {
   const recentlyClosed = await chrome.sessions.getRecentlyClosed({
     maxResults: 10,
   });
-  const restorable = recentlyClosed.find((session) => session.tab);
+  const restorable = recentlyClosed.find((session) => session.tab?.sessionId);
   if (!restorable?.tab?.sessionId) {
     throw new Error("There is no recently closed tab to reopen");
   }
