@@ -42,15 +42,36 @@ describe("PremiumTtsRouter", () => {
     ).toBe(false);
   });
 
-  it("falls back at 750 ms when premium has not produced first audio", async () => {
+  it("uses system TTS for every sentence when the ready engine is toggled off", async () => {
+    const system = systemHarness();
+    const request = vi.fn().mockResolvedValue(undefined);
+    const router = new PremiumTtsRouter({ system, request });
+    router.updateStatus({ state: "ready", enabled: false });
+
+    await router.speakLong("First. Second.");
+
+    expect(system.speak.mock.calls.map(([text]) => text)).toEqual([
+      "First.",
+      "Second.",
+    ]);
+    expect(request).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "premium-speak" }),
+    );
+  });
+
+  it("stops premium before falling back at the 750 ms boundary", async () => {
     vi.useFakeTimers();
     const system = systemHarness();
     const never = new Promise<unknown>(() => undefined);
-    const request = vi.fn((message: PremiumTtsRequest) =>
-      message.type === "premium-speak"
-        ? never
-        : Promise.resolve(undefined)
-    );
+    let releaseStop!: () => void;
+    const stopped = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    const request = vi.fn((message: PremiumTtsRequest) => {
+      if (message.type === "premium-speak") return never;
+      if (message.type === "premium-stop") return stopped;
+      return Promise.resolve(undefined);
+    });
     const router = new PremiumTtsRouter({ system, request });
     router.updateStatus({ state: "ready", enabled: true });
 
@@ -58,12 +79,18 @@ describe("PremiumTtsRouter", () => {
     await vi.advanceTimersByTimeAsync(PREMIUM_FIRST_AUDIO_TIMEOUT_MS - 1);
     expect(system.speak).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
+    expect(system.speak).not.toHaveBeenCalled();
+    releaseStop();
     await speaking;
 
     expect(system.speak).toHaveBeenCalledWith("Deadline.", {});
     expect(request).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "premium-stop" }),
+      expect.objectContaining({
+        type: "premium-stop",
+        utteranceId: expect.any(String),
+      }),
     );
+    expect(router.consecutiveFailures).toBe(1);
   });
 
   it("opens after two consecutive failures and closes after an idle probe", async () => {
@@ -101,6 +128,26 @@ describe("PremiumTtsRouter", () => {
     expect(router.consecutiveFailures).toBe(0);
   });
 
+  it("closes the circuit when a replacement engine becomes ready", async () => {
+    const system = systemHarness();
+    const request = vi.fn(async (message: PremiumTtsRequest) => {
+      if (message.type === "premium-speak") {
+        throw new Error("device lost");
+      }
+    });
+    const router = new PremiumTtsRouter({ system, request });
+    router.updateStatus({ state: "ready", enabled: true });
+    await router.speak("Failure one.");
+    await router.speak("Failure two.");
+    expect(router.circuitOpen).toBe(true);
+
+    router.updateStatus({ state: "downloading", enabled: true });
+    router.updateStatus({ state: "ready", enabled: true });
+
+    expect(router.circuitOpen).toBe(false);
+    expect(router.consecutiveFailures).toBe(0);
+  });
+
   it("cancels premium playback immediately on barge-in", async () => {
     const system = systemHarness();
     const never = new Promise<unknown>(() => undefined);
@@ -122,8 +169,44 @@ describe("PremiumTtsRouter", () => {
     await speaking;
 
     expect(system.stop).toHaveBeenCalled();
-    expect(request).toHaveBeenCalledWith({ type: "premium-stop" });
+    expect(request).toHaveBeenCalledWith({
+      type: "premium-stop",
+      utteranceId,
+    });
     expect(system.speak).not.toHaveBeenCalled();
+  });
+
+  it("targets stale stops so a newer concurrent request is not cancelled", async () => {
+    const system = systemHarness();
+    const never = new Promise<unknown>(() => undefined);
+    const utteranceIds: string[] = [];
+    const request = vi.fn((message: PremiumTtsRequest) => {
+      if (message.type === "premium-speak") {
+        utteranceIds.push(message.utteranceId ?? "");
+        return never;
+      }
+      return Promise.resolve(undefined);
+    });
+    const router = new PremiumTtsRouter({ system, request });
+    router.updateStatus({ state: "ready", enabled: true });
+
+    const first = router.speak("First.");
+    await vi.waitFor(() => expect(utteranceIds).toHaveLength(1));
+    const second = router.speak("Second.");
+    await vi.waitFor(() => expect(utteranceIds).toHaveLength(2));
+
+    expect(request).toHaveBeenCalledWith({
+      type: "premium-stop",
+      utteranceId: utteranceIds[0],
+    });
+    expect(request).not.toHaveBeenCalledWith({ type: "premium-stop" });
+
+    router.stop();
+    await Promise.all([first, second]);
+    expect(request).toHaveBeenCalledWith({
+      type: "premium-stop",
+      utteranceId: utteranceIds[1],
+    });
   });
 
   it("keeps long-form engine decisions at sentence boundaries", async () => {
@@ -153,6 +236,50 @@ describe("PremiumTtsRouter", () => {
     expect(
       splitPremiumSentences("First sentence. Second sentence."),
     ).toEqual(["First sentence.", "Second sentence."]);
+  });
+
+  it("adopts a newly ready engine during a download transition", async () => {
+    const system = systemHarness();
+    let router!: PremiumTtsRouter;
+    system.speak.mockImplementationOnce(async () => {
+      router.updateStatus({ state: "ready", enabled: true });
+    });
+    const request = vi.fn(async (message: PremiumTtsRequest) => {
+      if (message.type === "premium-speak") {
+        queueMicrotask(() =>
+          router.notifyFirstAudio(message.utteranceId ?? "")
+        );
+      }
+    });
+    router = new PremiumTtsRouter({ system, request });
+    router.updateStatus({ state: "downloading", enabled: true });
+
+    await router.speakLong("System first. Premium second.");
+
+    expect(system.speak).toHaveBeenCalledWith("System first.", {});
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "premium-speak",
+        text: "Premium second.",
+      }),
+    );
+  });
+
+  it("keeps abbreviations and decimals intact and skips punctuation-only input", () => {
+    expect(
+      splitPremiumSentences(
+        "Dr. Smith paid $3.14. Next is the U.S. office.",
+      ),
+    ).toEqual([
+      "Dr. Smith paid $3.14.",
+      "Next is the U.S. office.",
+    ]);
+    expect(splitPremiumSentences(" \n ...?! ")).toEqual([]);
+
+    const longWord = "x".repeat(401);
+    const chunks = splitPremiumSentences(longWord);
+    expect(chunks.map((chunk) => chunk.length)).toEqual([200, 200, 1]);
+    expect(chunks.join("")).toBe(longWord);
   });
 });
 
@@ -197,6 +324,31 @@ describe("InferenceMutex", () => {
       "moonshine:end",
       "nano",
       "kokoro",
+    ]);
+    expect(mutex.pending).toBe(0);
+  });
+
+  it("continues in FIFO order after a holder throws", async () => {
+    const mutex = new InferenceMutex();
+    const order: string[] = [];
+    const failed = mutex.run(async () => {
+      order.push("synthesis");
+      throw new Error("ONNX failed");
+    });
+    const transcription = mutex.run(async () => {
+      order.push("transcription");
+    });
+    const queuedSynthesis = mutex.run(async () => {
+      order.push("queued-synthesis");
+    });
+
+    await expect(failed).rejects.toThrow("ONNX failed");
+    await Promise.all([transcription, queuedSynthesis, mutex.idle()]);
+
+    expect(order).toEqual([
+      "synthesis",
+      "transcription",
+      "queued-synthesis",
     ]);
     expect(mutex.pending).toBe(0);
   });

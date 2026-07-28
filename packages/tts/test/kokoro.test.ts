@@ -46,15 +46,24 @@ class FakeSource {
 
 class FakeAudioContext {
   currentTime = 0;
-  state: AudioContextState = "running";
+  state: AudioContextState;
   readonly destination = {} as AudioDestinationNode;
   readonly sources: FakeSource[] = [];
+  readonly #resumeSucceeds: boolean;
   readonly close = vi.fn(async () => {
     this.state = "closed";
   });
   readonly resume = vi.fn(async () => {
-    this.state = "running";
+    if (this.#resumeSucceeds) this.state = "running";
   });
+
+  constructor(
+    state: AudioContextState = "running",
+    resumeSucceeds = true,
+  ) {
+    this.state = state;
+    this.#resumeSucceeds = resumeSucceeds;
+  }
 
   createBuffer(
     _channels: number,
@@ -139,6 +148,7 @@ function runtimeHarness(options: {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -149,6 +159,50 @@ describe("KokoroTtsEngine", () => {
         revision: "main",
       })
     ).toThrow(`Kokoro revision must be pinned to ${KOKORO_MODEL_REVISION}`);
+  });
+
+  it("pins model and voice fetches without altering other requests", async () => {
+    const upstreamClass = Object.getPrototypeOf(KokoroTTS) as {
+      from_pretrained: ReturnType<typeof vi.fn>;
+    };
+    vi.spyOn(upstreamClass, "from_pretrained").mockResolvedValue({});
+    const upstreamFetch = vi.fn().mockResolvedValue(new Response());
+    vi.stubGlobal("fetch", upstreamFetch);
+
+    await KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
+      revision: KOKORO_MODEL_REVISION,
+    });
+    const installedFetch = globalThis.fetch;
+    await KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
+      revision: KOKORO_MODEL_REVISION,
+    });
+    expect(globalThis.fetch).toBe(installedFetch);
+
+    const otherInit = { headers: { "x-sotto": "untouched" } };
+    await installedFetch("https://example.com/model.bin", otherInit);
+    expect(upstreamFetch).toHaveBeenNthCalledWith(
+      1,
+      "https://example.com/model.bin",
+      otherInit,
+    );
+
+    const voiceRequest = new Request(
+      `https://huggingface.co/${KOKORO_MODEL_ID}/resolve/main/voices/${KOKORO_VOICE}.bin`,
+      {
+        method: "POST",
+        headers: { "x-sotto": "preserved" },
+        body: "voice-body",
+      },
+    );
+    await installedFetch(voiceRequest);
+    const pinnedRequest = upstreamFetch.mock.calls[1]?.[0] as Request;
+    expect(pinnedRequest).toBeInstanceOf(Request);
+    expect(pinnedRequest.url).toContain(
+      `/resolve/${KOKORO_MODEL_REVISION}/voices/${KOKORO_VOICE}.bin`,
+    );
+    expect(pinnedRequest.method).toBe("POST");
+    expect(pinnedRequest.headers.get("x-sotto")).toBe("preserved");
+    await expect(pinnedRequest.text()).resolves.toBe("voice-body");
   });
 
   it("hard-caps TextSplitterStream sentences without breaking UTF-16", () => {
@@ -162,6 +216,25 @@ describe("KokoroTtsEngine", () => {
       chunks.every((chunk) => chunk.length <= MAX_KOKORO_CHUNK_CHARACTERS),
     ).toBe(true);
     expect(chunks.join(" ")).toContain("🙂");
+  });
+
+  it("keeps abbreviations and numbers in the splitter and drops non-speech", () => {
+    expect(
+      splitTextForKokoro("Dr. Smith paid $3.14. Next sentence."),
+    ).toEqual([
+      "Dr. Smith paid $3.14.",
+      "Next sentence.",
+    ]);
+    expect(splitTextForKokoro(" \n ...?! ")).toEqual([]);
+
+    const longWord = "x".repeat(MAX_KOKORO_CHUNK_CHARACTERS * 2 + 1);
+    const chunks = splitTextForKokoro(longWord);
+    expect(chunks.map((chunk) => chunk.length)).toEqual([
+      MAX_KOKORO_CHUNK_CHARACTERS,
+      MAX_KOKORO_CHUNK_CHARACTERS,
+      1,
+    ]);
+    expect(chunks.join("")).toBe(longWord);
   });
 
   it.each([
@@ -242,6 +315,7 @@ describe("KokoroTtsEngine", () => {
     context.sources[0]?.finish();
     await vi.waitFor(() => expect(context.sources).toHaveLength(4));
     expect(harness.generate).toHaveBeenCalledTimes(4);
+    expect(context.sources[0]?.buffer).toBeNull();
 
     for (const source of context.sources) source.finish();
     await expect(speaking).resolves.toBeUndefined();
@@ -273,5 +347,109 @@ describe("KokoroTtsEngine", () => {
     await engine.dispose();
     expect(harness.dispose).toHaveBeenCalledOnce();
     expect(context.close).toHaveBeenCalledOnce();
+  });
+
+  it("returns immediately on barge-in while ONNX stays serialized", async () => {
+    let releaseInference!: () => void;
+    const inferenceGate = new Promise<void>((resolve) => {
+      releaseInference = resolve;
+    });
+    const harness = runtimeHarness({
+      onGenerate: async (text) => {
+        if (text === "First.") await inferenceGate;
+      },
+    });
+    const context = new FakeAudioContext();
+    const engine = new KokoroTtsEngine({
+      runtime: harness.runtime,
+      audioContextFactory: () => context as unknown as AudioContext,
+      runtimeUrl: (path) => path,
+      backend: "wasm",
+    });
+    await engine.init();
+    harness.generate.mockClear();
+
+    const first = engine.speak("First.");
+    await vi.waitFor(() =>
+      expect(harness.generate).toHaveBeenCalledWith("First.", {
+        voice: KOKORO_VOICE,
+        speed: 1,
+      }),
+    );
+    const second = engine.speakLong("Second.");
+    await expect(first).resolves.toBeUndefined();
+    expect(harness.generate).toHaveBeenCalledTimes(1);
+    expect(context.sources).toHaveLength(0);
+
+    releaseInference();
+    await vi.waitFor(() => expect(context.sources).toHaveLength(1));
+    expect(harness.maximumConcurrent()).toBe(1);
+    context.sources[0]?.finish();
+    await expect(second).resolves.toBeUndefined();
+  });
+
+  it("resumes a suspended AudioContext before playback", async () => {
+    const harness = runtimeHarness();
+    const context = new FakeAudioContext("suspended");
+    const engine = new KokoroTtsEngine({
+      runtime: harness.runtime,
+      audioContextFactory: () => context as unknown as AudioContext,
+      runtimeUrl: (path) => path,
+      backend: "wasm",
+    });
+    await engine.init();
+
+    const speaking = engine.speak("Resume.");
+    await vi.waitFor(() => expect(context.sources).toHaveLength(1));
+    expect(context.resume).toHaveBeenCalledOnce();
+    context.sources[0]?.finish();
+    await expect(speaking).resolves.toBeUndefined();
+  });
+
+  it("does not orphan a source when stopped while playback is resuming", async () => {
+    let finishResume!: () => void;
+    const resumeGate = new Promise<void>((resolve) => {
+      finishResume = resolve;
+    });
+    const harness = runtimeHarness();
+    const context = new FakeAudioContext("suspended");
+    context.resume.mockImplementation(async () => {
+      await resumeGate;
+      context.state = "running";
+    });
+    const engine = new KokoroTtsEngine({
+      runtime: harness.runtime,
+      audioContextFactory: () => context as unknown as AudioContext,
+      runtimeUrl: (path) => path,
+      backend: "wasm",
+    });
+    await engine.init();
+
+    const speaking = engine.speak("Do not orphan.");
+    await vi.waitFor(() => expect(context.resume).toHaveBeenCalledOnce());
+    engine.stop();
+    finishResume();
+
+    await expect(speaking).resolves.toBeUndefined();
+    expect(context.sources).toHaveLength(0);
+  });
+
+  it("fails instead of reporting first audio while playback remains suspended", async () => {
+    const harness = runtimeHarness();
+    const context = new FakeAudioContext("suspended", false);
+    const engine = new KokoroTtsEngine({
+      runtime: harness.runtime,
+      audioContextFactory: () => context as unknown as AudioContext,
+      runtimeUrl: (path) => path,
+      backend: "wasm",
+    });
+    await engine.init();
+    const firstAudio = vi.fn();
+
+    await expect(
+      engine.speak("Blocked.", { onFirstAudio: firstAudio }),
+    ).rejects.toThrow("Kokoro audio context is suspended");
+    expect(firstAudio).not.toHaveBeenCalled();
+    expect(context.sources).toHaveLength(0);
   });
 });

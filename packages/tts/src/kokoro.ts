@@ -89,6 +89,7 @@ export interface KokoroTtsEngineOptions {
 interface ScheduledAudio {
   readonly source: AudioBufferSourceNode;
   readonly done: Promise<void>;
+  finish(): void;
 }
 
 interface ActiveOperation {
@@ -173,7 +174,11 @@ export function splitTextForKokoro(
 
   const chunks: string[] = [];
   for (const sentence of splitter) {
-    chunks.push(...splitHardCapped(sentence));
+    chunks.push(
+      ...splitHardCapped(sentence).filter((chunk) =>
+        /[\p{L}\p{N}]/u.test(chunk)
+      ),
+    );
   }
   return chunks;
 }
@@ -317,6 +322,8 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
         scheduled.source.stop();
       } catch {
         // A source that already ended is effectively stopped.
+      } finally {
+        scheduled.finish();
       }
     }
     this.#sources.clear();
@@ -492,6 +499,7 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
         throwIfAborted(operation.controller.signal);
         if (
           !(audio.data instanceof Float32Array) ||
+          audio.data.length === 0 ||
           audio.sampling_rate !== KOKORO_SAMPLE_RATE
         ) {
           throw new Error("Kokoro returned invalid 24 kHz mono PCM");
@@ -561,6 +569,11 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     if (this.#audioContext.state === "suspended") {
       await this.#audioContext.resume();
     }
+    if (this.#audioContext.state !== "running") {
+      throw new Error(
+        `Kokoro audio context is ${this.#audioContext.state}`,
+      );
+    }
     return this.#audioContext;
   }
 
@@ -592,20 +605,38 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
       source.connect(gain).connect(context.destination);
     }
 
-    let finish!: () => void;
+    let resolveDone!: () => void;
     const done = new Promise<void>((resolve) => {
-      finish = resolve;
+      resolveDone = resolve;
     });
-    const scheduled: ScheduledAudio = { source, done };
+    let finished = false;
+    const scheduled: ScheduledAudio = {
+      source,
+      done,
+      finish: () => {
+        if (finished) return;
+        finished = true;
+        source.onended = null;
+        source.buffer = null;
+        this.#sources.delete(scheduled);
+        resolveDone();
+      },
+    };
     source.onended = () => {
-      this.#sources.delete(scheduled);
-      finish();
+      scheduled.finish();
     };
     this.#sources.add(scheduled);
 
+    const previousNextStartTime = this.#nextStartTime;
     const startAt = Math.max(context.currentTime, this.#nextStartTime);
     this.#nextStartTime = startAt + buffer.duration;
-    source.start(startAt);
+    try {
+      source.start(startAt);
+    } catch (error) {
+      this.#nextStartTime = previousNextStartTime;
+      scheduled.finish();
+      throw error;
+    }
     return scheduled;
   }
 

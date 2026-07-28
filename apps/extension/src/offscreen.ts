@@ -88,6 +88,7 @@ let premiumTtsError: string | undefined;
 let premiumTtsInit: Promise<void> | undefined;
 let premiumTtsRecovery: Promise<void> | undefined;
 let premiumSettingsReady: Promise<void> | undefined;
+let premiumTtsUtteranceId: string | undefined;
 
 function cancelActiveModelTask(): void {
   activeModelTask?.abort();
@@ -260,17 +261,27 @@ function progressRatioFromKokoro(
 async function ensurePremiumSettings(): Promise<void> {
   if (premiumSettingsReady) return premiumSettingsReady;
   premiumSettingsReady = (async () => {
-    const stored = await chrome.storage?.local?.get?.([
-      PREMIUM_TTS_ENABLED_KEY,
-      PREMIUM_TTS_DOWNLOADED_KEY,
-    ]) ?? {};
-    premiumTtsDownloaded =
-      stored[PREMIUM_TTS_DOWNLOADED_KEY] === true;
-    premiumTtsEnabled = premiumEnabledByDefault(
-      stored[PREMIUM_TTS_ENABLED_KEY],
-      premiumTtsDownloaded,
-    );
-    premiumTtsState = premiumTtsDownloaded ? "downloading" : "absent";
+    try {
+      const stored = await chrome.storage?.local?.get?.([
+        PREMIUM_TTS_ENABLED_KEY,
+        PREMIUM_TTS_DOWNLOADED_KEY,
+      ]) ?? {};
+      premiumTtsDownloaded =
+        stored[PREMIUM_TTS_DOWNLOADED_KEY] === true;
+      premiumTtsEnabled = premiumEnabledByDefault(
+        stored[PREMIUM_TTS_ENABLED_KEY],
+        premiumTtsDownloaded,
+      );
+      premiumTtsState = premiumTtsDownloaded ? "downloading" : "absent";
+    } catch (error) {
+      premiumTtsDownloaded = false;
+      premiumTtsEnabled = false;
+      premiumTtsState = "absent";
+      console.warn(
+        "Unable to read premium voice settings; using system TTS",
+        error,
+      );
+    }
   })();
   return premiumSettingsReady;
 }
@@ -379,9 +390,10 @@ function scheduleWasmRecovery(error: unknown): void {
   void publishPremiumStatus();
 
   premiumTtsRecovery = (async () => {
-    await inferenceMutex.idle();
-    if (premiumTts === engine) premiumTts = undefined;
-    await engine?.dispose().catch(() => undefined);
+    await inferenceMutex.run(async () => {
+      if (premiumTts === engine) premiumTts = undefined;
+      await engine?.dispose().catch(() => undefined);
+    });
     premiumTtsBackend = undefined;
     premiumTtsError = undefined;
     await ensurePremiumTts("wasm");
@@ -409,6 +421,8 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
     throw new Error("Premium voice is not ready");
   }
 
+  const utteranceId = message.utteranceId;
+  premiumTtsUtteranceId = utteranceId;
   try {
     await premiumTts.speak(message.text, {
       ...(typeof message.rate === "number" &&
@@ -423,7 +437,7 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
       onFirstAudio() {
         void askWorker({
           type: "premium-first-audio",
-          utteranceId: message.utteranceId,
+          utteranceId,
         }).catch(() => undefined);
       },
     });
@@ -432,6 +446,10 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
       scheduleWasmRecovery(error);
     }
     throw error;
+  } finally {
+    if (premiumTtsUtteranceId === utteranceId) {
+      premiumTtsUtteranceId = undefined;
+    }
   }
 }
 
@@ -1103,9 +1121,11 @@ async function handleOffscreenMessage(
       await chrome.storage.local.set({
         [PREMIUM_TTS_ENABLED_KEY]: premiumTtsEnabled,
       });
-      if (!premiumTtsEnabled) {
-        premiumTts?.stop();
-      } else if (premiumTtsDownloaded && premiumTtsState !== "ready") {
+      if (
+        premiumTtsEnabled &&
+        premiumTtsDownloaded &&
+        premiumTtsState !== "ready"
+      ) {
         void ensurePremiumTts().catch((error: unknown) => {
           console.warn("Premium voice could not be enabled", error);
         });
@@ -1116,6 +1136,13 @@ async function handleOffscreenMessage(
       await speakPremium(message);
       return;
     case "premium-stop":
+      if (
+        typeof message.utteranceId === "string" &&
+        message.utteranceId !== premiumTtsUtteranceId
+      ) {
+        return;
+      }
+      premiumTtsUtteranceId = undefined;
       premiumTts?.stop();
       return;
     case "premium-probe":

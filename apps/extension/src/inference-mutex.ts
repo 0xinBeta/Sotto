@@ -11,9 +11,14 @@ export class InferenceMutex {
     const pending = this.#tail
       .catch(() => undefined)
       .then(task);
-    this.#tail = pending.finally(() => {
-      this.#pending -= 1;
-    });
+    this.#tail = pending.then(
+      () => {
+        this.#pending -= 1;
+      },
+      () => {
+        this.#pending -= 1;
+      },
+    );
     return pending;
   }
 

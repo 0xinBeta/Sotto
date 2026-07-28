@@ -50,6 +50,73 @@ vi.mock("@sotto/tts/kokoro", () => ({
   },
 }));
 
+type OffscreenListener = (
+  message: unknown,
+  sender: unknown,
+  respond: (response: unknown) => void,
+) => boolean | void;
+
+async function installPremiumOffscreen(options: {
+  readonly initialStorage?: Record<string, unknown>;
+  readonly storageGetError?: Error;
+} = {}) {
+  nano.getNanoAvailability.mockResolvedValue("unavailable");
+  premium.init.mockResolvedValue(undefined);
+  premium.dispose.mockResolvedValue(undefined);
+  const values = { ...options.initialStorage };
+  const sendMessage = vi.fn().mockImplementation(
+    async (message: { readonly target?: string }) =>
+      message.target === "worker" ? { ok: true } : undefined,
+  );
+  let onMessage: OffscreenListener | undefined;
+  vi.stubGlobal("navigator", {
+    permissions: {
+      query: vi.fn().mockResolvedValue({ state: "granted" }),
+    },
+  });
+  vi.stubGlobal("window", { addEventListener: vi.fn() });
+  vi.stubGlobal("chrome", {
+    runtime: {
+      getURL: vi.fn((path: string) => `chrome-extension://sotto/${path}`),
+      sendMessage,
+      onMessage: {
+        addListener: vi.fn((listener) => {
+          onMessage = listener;
+        }),
+      },
+    },
+    storage: {
+      local: {
+        get: vi.fn(async (keys: string | readonly string[]) => {
+          if (options.storageGetError) throw options.storageGetError;
+          const selected = Array.isArray(keys) ? keys : [keys];
+          return Object.fromEntries(
+            selected
+              .filter((key) => key in values)
+              .map((key) => [key, values[key]]),
+          );
+        }),
+        set: vi.fn(async (updates: Record<string, unknown>) => {
+          Object.assign(values, updates);
+        }),
+      },
+    },
+  });
+
+  await import("../src/offscreen.js");
+  if (!onMessage) throw new Error("Offscreen message listener was not installed");
+  return {
+    sendMessage,
+    values,
+    message: (message: Record<string, unknown>) =>
+      new Promise<unknown>((resolve) => {
+        expect(
+          onMessage?.({ target: "offscreen", ...message }, {}, resolve),
+        ).toBe(true);
+      }),
+  };
+}
+
 afterEach(() => {
   nano.askPageWithPrompt.mockReset();
   vi.resetModules();
@@ -161,6 +228,96 @@ describe("offscreen fail-soft status", () => {
         backend: "webgpu",
       }),
     );
+  });
+
+  it("uses safe system-TTS defaults when settings storage cannot be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const harness = await installPremiumOffscreen({
+      storageGetError: new Error("storage unavailable"),
+    });
+
+    await expect(harness.message({ type: "get-status" })).resolves.toEqual({
+      ok: true,
+    });
+    expect(premium.init).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "premium-tts-state",
+      state: "absent",
+      enabled: false,
+    });
+  });
+
+  it("does not cut the current sentence when premium is toggled off", async () => {
+    let finishSpeech!: () => void;
+    premium.speak.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSpeech = resolve;
+        }),
+    );
+    const harness = await installPremiumOffscreen();
+    await expect(
+      harness.message({ type: "prepare-premium-tts" }),
+    ).resolves.toEqual({ ok: true });
+
+    const speaking = harness.message({
+      type: "premium-speak",
+      utteranceId: "toggle-current",
+      text: "Finish this sentence.",
+    });
+    await vi.waitFor(() => expect(premium.speak).toHaveBeenCalledOnce());
+    await expect(
+      harness.message({
+        type: "set-premium-tts-enabled",
+        enabled: false,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(premium.stop).not.toHaveBeenCalled();
+    finishSpeech();
+    await expect(speaking).resolves.toEqual({ ok: true });
+    expect(harness.values.premiumTtsEnabled).toBe(false);
+  });
+
+  it("ignores a stale targeted stop after a newer utterance starts", async () => {
+    const resolvers: Array<() => void> = [];
+    premium.speak.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const harness = await installPremiumOffscreen();
+    await harness.message({ type: "prepare-premium-tts" });
+
+    const first = harness.message({
+      type: "premium-speak",
+      utteranceId: "older",
+      text: "Older.",
+    });
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1));
+    const second = harness.message({
+      type: "premium-speak",
+      utteranceId: "newer",
+      text: "Newer.",
+    });
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2));
+
+    await expect(
+      harness.message({ type: "premium-stop", utteranceId: "older" }),
+    ).resolves.toEqual({ ok: true });
+    expect(premium.stop).not.toHaveBeenCalled();
+    await expect(
+      harness.message({ type: "premium-stop", utteranceId: "newer" }),
+    ).resolves.toEqual({ ok: true });
+    expect(premium.stop).toHaveBeenCalledOnce();
+
+    for (const resolve of resolvers) resolve();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { ok: true },
+      { ok: true },
+    ]);
   });
 
   it("reports Nano as unavailable through the pipeline message boundary", async () => {

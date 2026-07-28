@@ -10,6 +10,29 @@ export const PREMIUM_FIRST_AUDIO_TIMEOUT_MS = 750;
 
 const IDLE_RETRY_DELAY_MS = 5_000;
 const MAX_SENTENCE_CHARACTERS = 200;
+const SENTENCE_ABBREVIATIONS = new Set([
+  "capt",
+  "col",
+  "dept",
+  "dr",
+  "etc",
+  "gen",
+  "gov",
+  "inc",
+  "jr",
+  "lt",
+  "maj",
+  "mr",
+  "mrs",
+  "ms",
+  "prof",
+  "rep",
+  "sen",
+  "sgt",
+  "sr",
+  "st",
+  "vs",
+]);
 
 export type PremiumTtsState =
   | "absent"
@@ -83,9 +106,58 @@ export function splitPremiumSentences(text: string): string[] {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) return [];
 
-  const sentences =
-    normalized.match(/[^.!?…]+(?:[.!?…]+["'”’)\]]*)?|[.!?…]+/g) ??
-      [normalized];
+  const sentences: string[] = [];
+  let start = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index];
+    if (
+      character !== "." &&
+      character !== "!" &&
+      character !== "?" &&
+      character !== "…"
+    ) {
+      continue;
+    }
+
+    let punctuationEnd = index + 1;
+    while (
+      punctuationEnd < normalized.length &&
+      /[.!?…"'”’)\]]/.test(normalized[punctuationEnd] ?? "")
+    ) {
+      punctuationEnd += 1;
+    }
+    let next = punctuationEnd;
+    while (next < normalized.length && /\s/.test(normalized[next] ?? "")) {
+      next += 1;
+    }
+    if (next < normalized.length && next === punctuationEnd) continue;
+
+    if (character === "." && next < normalized.length) {
+      const tokenStart = normalized.lastIndexOf(" ", index - 1) + 1;
+      const token = normalized.slice(tokenStart, index + 1);
+      const bareToken = token.replace(/\.+$/, "").toLowerCase();
+      if (
+        SENTENCE_ABBREVIATIONS.has(bareToken) ||
+        /^(?:[A-Za-z]\.){2,}$/.test(token) ||
+        (/\d/.test(normalized[index - 1] ?? "") &&
+          /\d/.test(normalized[index + 1] ?? "")) ||
+        /[a-z]/.test(normalized[next] ?? "")
+      ) {
+        continue;
+      }
+    }
+
+    const sentence = normalized.slice(start, punctuationEnd).trim();
+    if (/[\p{L}\p{N}]/u.test(sentence)) sentences.push(sentence);
+    start = punctuationEnd;
+    while (start < normalized.length && /\s/.test(normalized[start] ?? "")) {
+      start += 1;
+    }
+    index = start - 1;
+  }
+
+  const remainder = normalized.slice(start).trim();
+  if (/[\p{L}\p{N}]/u.test(remainder)) sentences.push(remainder);
   return sentences.flatMap(hardCapSentence).filter(Boolean);
 }
 
@@ -142,10 +214,16 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
   }
 
   updateStatus(status: PremiumTtsStatus): void {
+    const wasReady = this.#state === "ready";
+    const wasEnabled = this.#enabled;
     this.#state = status.state;
     this.#enabled = status.enabled;
     if (!status.enabled || status.state !== "ready") {
       this.#clearRetry();
+    } else if (!wasReady) {
+      this.#premiumSucceeded();
+    } else if (!wasEnabled && this.#circuitOpen) {
+      this.#scheduleRetry();
     }
   }
 
@@ -210,9 +288,13 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     this.#generation += 1;
     this.#active = false;
     this.#system.stop();
+    const utteranceIds = [...this.#waiters.keys()];
     for (const waiter of this.#waiters.values()) waiter.resolve();
     this.#waiters.clear();
-    void this.#request({ type: "premium-stop" }).catch(() => undefined);
+    for (const utteranceId of utteranceIds) {
+      void this.#request({ type: "premium-stop", utteranceId })
+        .catch(() => undefined);
+    }
   }
 
   #begin(): number {
@@ -273,20 +355,21 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
       if (firstOutcome === "audio") {
         firstHeard = true;
         await premium;
+        if (generation !== this.#generation) return;
         this.#premiumSucceeded();
         return;
       }
 
-      void this.#request({ type: "premium-stop", utteranceId })
+      await this.#request({ type: "premium-stop", utteranceId })
         .catch(() => undefined);
+      if (generation !== this.#generation) return;
       this.#premiumFailed();
       void premium.catch(() => undefined);
-      if (generation === this.#generation) {
-        await this.#system.speak(text, options);
-      }
+      await this.#system.speak(text, options);
     } catch {
+      if (generation !== this.#generation) return;
       this.#premiumFailed();
-      if (!firstHeard && generation === this.#generation) {
+      if (!firstHeard) {
         await this.#system.speak(text, options);
       }
     } finally {
