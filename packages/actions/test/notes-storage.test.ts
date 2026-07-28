@@ -171,6 +171,24 @@ describe("reminder scheduling", () => {
     });
   });
 
+  it("dismisses a persisted reminder when its alarm cannot be created", async () => {
+    const storage = new MemoryStorageArea();
+    const alarms = new MemoryAlarmStore();
+    alarms.create.mockRejectedValue(new Error("alarm unavailable"));
+    const { store } = makeStore(storage, alarms);
+
+    await expect(
+      store.scheduleReminder({
+        text: "Do not surprise me later",
+        delayMinutes: 1,
+      }),
+    ).rejects.toThrow("alarm unavailable");
+    expect(storage.values["reminder:record-1"]).toMatchObject({
+      text: "Do not surprise me later",
+      status: "dismissed",
+    });
+  });
+
   it("retries duplicate reminder ids without overwriting the first record", async () => {
     const { store, storage } = makeStore(
       undefined,
@@ -261,7 +279,8 @@ describe("alarm reconciliation", () => {
       schemaVersion: NOTES_SCHEMA_VERSION,
       "reminder:retry": due,
     });
-    const { store } = makeStore(storage);
+    const alarms = new MemoryAlarmStore();
+    const { store } = makeStore(storage, alarms);
 
     await expect(
       store.reconcileReminders({
@@ -272,6 +291,9 @@ describe("alarm reconciliation", () => {
       }),
     ).rejects.toThrow("notification unavailable");
     expect(storage.values["reminder:retry"]).toEqual(due);
+    expect(alarms.create).toHaveBeenCalledWith("reminder:retry", {
+      when: NOW.getTime() + 30_000,
+    });
   });
 
   it("commits each overdue delivery before attempting the next one", async () => {
@@ -358,5 +380,29 @@ describe("alarm reconciliation", () => {
     expect(onDue).not.toHaveBeenCalled();
     expect(storage.set).not.toHaveBeenCalled();
     expect(alarms.create).not.toHaveBeenCalled();
+  });
+
+  it("reschedules a consumed alarm when reminder delivery fails", async () => {
+    const due = reminder("retry-alarm", "2026-07-28T11:59:00.000Z");
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      "reminder:retry-alarm": due,
+    });
+    const alarms = new MemoryAlarmStore();
+    const { store } = makeStore(storage, alarms);
+
+    await expect(
+      store.handleReminderAlarm("reminder:retry-alarm", {
+        now: NOW,
+        onDue: async () => {
+          throw new Error("all delivery sinks unavailable");
+        },
+      }),
+    ).rejects.toThrow("all delivery sinks unavailable");
+    expect(storage.values["reminder:retry-alarm"]).toEqual(due);
+    expect(alarms.create).toHaveBeenCalledWith(
+      "reminder:retry-alarm",
+      { when: NOW.getTime() + 30_000 },
+    );
   });
 });

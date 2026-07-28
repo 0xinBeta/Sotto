@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./ask-page": {
+      "types": "./dist/ask-page/index.d.ts",
+      "import": "./dist/ask-page/index.js"
+    },
     "./summarize": {
       "types": "./dist/summarize/index.d.ts",
       "import": "./dist/summarize/index.js"

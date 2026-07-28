@@ -34,6 +34,7 @@ interface WorkerMessage {
   readonly command?: unknown;
   readonly transcript?: unknown;
   readonly completion?: unknown;
+  readonly reminderId?: unknown;
 }
 
 const actionRegistry = new ActionRegistry(actions);
@@ -42,6 +43,17 @@ const commandRouter = new CommandRouter(actionRegistry);
 const tts = new SystemTtsEngine();
 
 let creatingOffscreen: Promise<void> | undefined;
+let commandGeneration = 0;
+
+function beginCommandGeneration(): number {
+  commandGeneration += 1;
+  tts.stop();
+  return commandGeneration;
+}
+
+function commandIsCurrent(generation: number): boolean {
+  return generation === commandGeneration;
+}
 
 async function ensureOffscreen(path = "offscreen.html"): Promise<void> {
   const url = chrome.runtime.getURL(path);
@@ -74,13 +86,25 @@ async function sendOffscreen(message: Record<string, unknown>): Promise<unknown>
   await ensureOffscreen();
 
   let rawResponse: unknown;
-  try {
-    rawResponse = await chrome.runtime.sendMessage(request);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    if (!detail.includes("Receiving end does not exist")) throw error;
-    await ensureOffscreen();
-    rawResponse = await chrome.runtime.sendMessage(request);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      rawResponse = await chrome.runtime.sendMessage(request);
+      break;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (
+        !detail.includes("Receiving end does not exist") ||
+        attempt === 2
+      ) {
+        throw error;
+      }
+      // createDocument() can resolve just before a module listener finishes
+      // registering. Give that existing context a bounded readiness window.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 25 * (attempt + 1));
+      });
+      await ensureOffscreen();
+    }
   }
 
   const response = rawResponse as
@@ -159,7 +183,7 @@ async function publishNotes(): Promise<readonly NoteRecord[]> {
 }
 
 async function deliverReminder(reminder: ReminderRecord): Promise<void> {
-  const notificationId = `reminder:${reminder.id}`;
+  const notificationId = reminderNotificationId(reminder);
   const permission = await chrome.notifications.getPermissionLevel();
   let notificationDelivered = false;
   if (permission === "granted") {
@@ -202,18 +226,70 @@ async function reconcileReminders(): Promise<void> {
 }
 
 async function loadReminder(
-  notificationId: string,
+  reminderKey: string,
 ): Promise<ReminderRecord | undefined> {
   const values = await chrome.storage.local.get([
     "schemaVersion",
-    notificationId,
+    reminderKey,
   ]);
-  const value = values[notificationId];
+  const value = values[reminderKey];
   return isReminderRecord(value) ? value : undefined;
+}
+
+const REMINDER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const REMINDER_NOTIFICATION_PATTERN =
+  /^reminder:([A-Za-z0-9][A-Za-z0-9_-]{0,127})(?::window:(\d+))?$/;
+
+function reminderNotificationId(reminder: ReminderRecord): string {
+  return reminder.sourceWindowId === undefined
+    ? `reminder:${reminder.id}`
+    : `reminder:${reminder.id}:window:${reminder.sourceWindowId}`;
+}
+
+function parseReminderNotificationId(
+  value: unknown,
+):
+  | {
+      readonly reminderId: string;
+      readonly reminderKey: string;
+      readonly sourceWindowId?: number;
+    }
+  | undefined {
+  if (typeof value !== "string") return undefined;
+  const match = REMINDER_NOTIFICATION_PATTERN.exec(value);
+  const reminderId = match?.[1];
+  if (!reminderId) return undefined;
+  const rawWindowId = match[2];
+  if (rawWindowId === undefined) {
+    return {
+      reminderId,
+      reminderKey: `reminder:${reminderId}`,
+    };
+  }
+  const sourceWindowId = Number(rawWindowId);
+  if (!Number.isSafeInteger(sourceWindowId) || sourceWindowId < 0) {
+    return undefined;
+  }
+  return {
+    reminderId,
+    reminderKey: `reminder:${reminderId}`,
+    sourceWindowId,
+  };
 }
 
 function safeTranscript(value: unknown): string {
   return typeof value === "string" ? value.trim().slice(0, 2_000) : "";
+}
+
+function safeTtsLanguage(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length > 35 ||
+    !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value.trim())
+  ) {
+    return "en-US";
+  }
+  return value.trim();
 }
 
 const PAGE_SOURCES = new Set<ExtractedPageText["source"]>([
@@ -351,7 +427,14 @@ interface EditorBridgeLocation {
 }
 
 const editorSnapshots = new Map<string, EditorBridgeLocation>();
-const rewriteOutputs = new Set<string>();
+const rewriteFallbacks = new Map<string, string>();
+const pendingClipboardWorkflows = new Map<
+  string,
+  {
+    readonly followUp?: DestinationFollowUp;
+    readonly spoken?: string;
+  }
+>();
 
 function bridgeMessageOptions(
   location: Pick<EditorBridgeLocation, "frameId" | "documentId">,
@@ -498,10 +581,11 @@ async function commitEditable(
 ): ReturnType<EditableActionServices["commit"]> {
   const location = editorSnapshots.get(options.snapshotId);
   editorSnapshots.delete(options.snapshotId);
-  const isRewriteOutput = rewriteOutputs.delete(options.text);
-  if (!location) throw new Error("The editor snapshot is no longer valid.");
+  const rewriteFallback = rewriteFallbacks.get(options.snapshotId);
+  rewriteFallbacks.delete(options.snapshotId);
 
   try {
+    if (!location) throw new Error("The editor snapshot is no longer valid.");
     const raw = (await chrome.tabs.sendMessage(
       location.tabId,
       {
@@ -510,6 +594,7 @@ async function commitEditable(
         snapshotId: location.bridgeSnapshotId,
         text: options.text,
         inputType: options.inputType,
+        rememberAsDictation: options.rememberAsDictation,
       },
       bridgeMessageOptions(location),
     )) as
@@ -536,7 +621,7 @@ async function commitEditable(
     }
     return { kind };
   } catch (error) {
-    if (isRewriteOutput) {
+    if (rewriteFallback === options.text) {
       await sendPanel({
         type: "rewrite-fallback",
         text: options.text,
@@ -549,6 +634,9 @@ async function commitEditable(
 async function rewriteEditable(
   options: Parameters<EditableActionServices["rewrite"]>[0],
 ): ReturnType<EditableActionServices["rewrite"]> {
+  if (!editorSnapshots.has(options.snapshotId)) {
+    throw new Error("The editor snapshot is no longer valid.");
+  }
   if (!options.source.trim() || options.source.length > 24_000) {
     throw new TypeError("Rewrite source is empty or exceeds the edit bound");
   }
@@ -564,7 +652,7 @@ async function rewriteEditable(
   ) {
     throw new Error("The on-device rewrite model returned invalid text");
   }
-  rewriteOutputs.add(value);
+  rewriteFallbacks.set(options.snapshotId, value);
   return value;
 }
 
@@ -632,18 +720,32 @@ function parseClipboardWorkflowCompletion(
 async function completeClipboardWorkflow(
   completion: ClipboardWorkflowCompletion,
 ): Promise<void> {
-  if (completion.followUp) {
-    await executeDestinationFollowUp(completion.followUp);
+  if (!pendingClipboardWorkflows.has(completion.workflowId)) {
+    throw new TypeError("Clipboard workflow is unknown or already completed");
   }
+  const issued = pendingClipboardWorkflows.get(completion.workflowId)!;
+  pendingClipboardWorkflows.delete(completion.workflowId);
+  if (issued.followUp) {
+    await executeDestinationFollowUp(issued.followUp);
+  }
+  const spoken = issued.spoken ?? "Screenshot copied.";
   await sendOffscreen({
     type: "workflow-complete",
-    spoken: completion.spoken ?? "Screenshot copied.",
+    spoken,
   });
   await sendPanel({
     type: "action-log",
     heard: "copy screenshot",
-    did: completion.followUp ? "copied and opened Claude" : "copied",
+    did: issued.followUp ? "copied and opened Claude" : "copied",
   });
+}
+
+function registerClipboardWorkflow(workflow: ClipboardWorkflow): void {
+  pendingClipboardWorkflows.clear();
+  pendingClipboardWorkflows.set(
+    workflow.id,
+    workflow.afterWrite ?? {},
+  );
 }
 
 async function writeClipboardInActiveTab(
@@ -715,18 +817,24 @@ async function publishActionResult(
   transcript: string,
   command: ActionCommand,
   result: ActionResult,
+  generation: number,
 ): Promise<void> {
+  if (!commandIsCurrent(generation)) return;
   if (command.action === "notes") {
     await publishNotes();
+    if (!commandIsCurrent(generation)) return;
   }
   if (result.pageText) {
-    const { text, title, speech } = result.pageText;
+    const { text, title, lang, speech } = result.pageText;
     if (
       typeof text !== "string" ||
       !text.trim() ||
       text.length > 120_000 ||
       (title !== undefined &&
-        (typeof title !== "string" || title.length > 600))
+        (typeof title !== "string" || title.length > 600)) ||
+      (lang !== undefined &&
+        (typeof lang !== "string" || lang.length > 35)) ||
+      (speech !== "short" && speech !== "long")
     ) {
       throw new TypeError("Rejected invalid page-derived presentation text");
     }
@@ -735,16 +843,20 @@ async function publishActionResult(
       text,
       ...(title === undefined ? {} : { title }),
     });
+    if (!commandIsCurrent(generation)) return;
     await sendPanel({ type: "earcon", kind: "complete" });
     await sendPanel({
       type: "action-log",
       heard: transcript,
       did: result.spoken,
     });
+    if (!commandIsCurrent(generation)) return;
+    const speechLanguage = safeTtsLanguage(lang);
     if (speech === "long") {
       await tts.speakLong(text, {
-        lang: "en-US",
+        lang: speechLanguage,
         onProgress(progress) {
+          if (!commandIsCurrent(generation)) return;
           void sendPanel({
             type: "reading-progress",
             current: progress.charIndex,
@@ -753,7 +865,7 @@ async function publishActionResult(
         },
       });
     } else {
-      await tts.speak(text, { lang: "en-US" });
+      await tts.speak(text, { lang: speechLanguage });
     }
     return;
   }
@@ -764,19 +876,15 @@ async function publishActionResult(
     });
   }
   if (
-    result.workflow?.kind === "clipboard-write" &&
-    (await writeClipboardInActiveTab(result.workflow))
+    result.workflow?.kind === "clipboard-write"
   ) {
-    await completeClipboardWorkflow({
-      workflowId: result.workflow.id,
-      ...(result.workflow.afterWrite?.followUp === undefined
-        ? {}
-        : { followUp: result.workflow.afterWrite.followUp }),
-      ...(result.workflow.afterWrite?.spoken === undefined
-        ? {}
-        : { spoken: result.workflow.afterWrite.spoken }),
-    });
-    return;
+    registerClipboardWorkflow(result.workflow);
+    if (await writeClipboardInActiveTab(result.workflow)) {
+      await completeClipboardWorkflow({
+        workflowId: result.workflow.id,
+      });
+      return;
+    }
   }
   await sendOffscreen({
     type: "action-result",
@@ -789,6 +897,7 @@ async function publishActionResult(
 async function executeCommand(
   command: unknown,
   transcript: string,
+  generation: number,
 ): Promise<ActionResult | undefined> {
   try {
     const validated = commandRouter.parse(command);
@@ -798,9 +907,11 @@ async function executeCommand(
       page: pageActionServices,
       type: editableActionServices,
     });
-    await publishActionResult(transcript, validated, result);
+    if (!commandIsCurrent(generation)) return undefined;
+    await publishActionResult(transcript, validated, result, generation);
     return result;
   } catch (error) {
+    if (!commandIsCurrent(generation)) return undefined;
     const rejected = error instanceof CommandValidationError;
     const actionId =
       typeof command === "object" &&
@@ -831,10 +942,14 @@ async function retryScreenshot(command: unknown): Promise<ActionResult> {
   if (validated.action !== "screenshot") {
     throw new TypeError("Only a pending screenshot can be retried");
   }
-  return commandRouter.route(validated, {
+  const result = await commandRouter.route(validated, {
     dispatchDestination: (id, input) =>
       destinationRegistry.dispatch(id, input),
   });
+  if (result.workflow?.kind === "clipboard-write") {
+    registerClipboardWorkflow(result.workflow);
+  }
+  return result;
 }
 
 async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
@@ -843,28 +958,44 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return sendOffscreen({ type: "get-status" });
     case "get-notes":
       return (await publishNotes()).map(panelNote);
+    case "get-reminder": {
+      if (
+        typeof message.reminderId !== "string" ||
+        !REMINDER_ID_PATTERN.test(message.reminderId)
+      ) {
+        throw new TypeError("A valid reminder id is required");
+      }
+      const reminder = await loadReminder(`reminder:${message.reminderId}`);
+      return reminder === undefined
+        ? undefined
+        : {
+            id: reminder.id,
+            text: reminder.text,
+            dueAt: reminder.dueAt,
+          };
+    }
     case "export-notes":
       return createNotesMarkdownExport(
         await notesReminderStore.listNotes(),
       );
     case "start-listening":
-      tts.stop();
+      beginCommandGeneration();
       return sendOffscreen({ type: "start-listening" });
     case "stop-listening":
       return sendOffscreen({ type: "stop-listening" });
     case "toggle-listening":
-      tts.stop();
+      beginCommandGeneration();
       return sendOffscreen({ type: "toggle-listening" });
     case "text-command": {
-      tts.stop();
+      beginCommandGeneration();
       const text = safeTranscript(message.text);
       if (!text) throw new TypeError("A non-empty text command is required");
       return sendOffscreen({ type: "parse-transcript", transcript: text });
     }
     case "execute-command": {
-      tts.stop();
+      const generation = beginCommandGeneration();
       const transcript = safeTranscript(message.transcript);
-      return executeCommand(message.command, transcript);
+      return executeCommand(message.command, transcript, generation);
     }
     case "retry-screenshot":
       return retryScreenshot(message.command);
@@ -928,7 +1059,7 @@ chrome.runtime.onMessage.addListener(
 
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command !== "toggle-sotto") return;
-  tts.stop();
+  beginCommandGeneration();
   let panelOpening: Promise<void> = Promise.resolve();
   if (tab?.id !== undefined) {
     panelOpening = chrome.sidePanel.open({ tabId: tab.id });
@@ -976,17 +1107,22 @@ chrome.alarms?.onAlarm?.addListener((alarm) => {
 });
 
 chrome.notifications?.onClicked?.addListener((notificationId) => {
-  if (!notificationId.startsWith("reminder:")) return;
+  const parsed = parseReminderNotificationId(notificationId);
+  if (!parsed) return;
 
   // The open call is initiated in the notification click's first synchronous
   // turn so Chrome can preserve the user gesture.
-  const panelOpening = chrome.sidePanel.open({
-    windowId: chrome.windows.WINDOW_ID_CURRENT,
-  });
+  const targetWindowId =
+    parsed.sourceWindowId ?? chrome.windows.WINDOW_ID_CURRENT;
+  let panelOpening: Promise<void>;
+  try {
+    panelOpening = chrome.sidePanel.open({ windowId: targetWindowId });
+  } catch (error) {
+    panelOpening = Promise.reject(error);
+  }
   runAndReport(
     (async () => {
-      await panelOpening;
-      const reminder = await loadReminder(notificationId);
+      const reminder = await loadReminder(parsed.reminderKey);
       if (reminder?.sourceWindowId !== undefined) {
         await chrome.windows
           .update(reminder.sourceWindowId, {
@@ -998,6 +1134,28 @@ chrome.notifications?.onClicked?.addListener((notificationId) => {
         await chrome.tabs
           .update(reminder.sourceTabId, { active: true })
           .catch(() => undefined);
+      }
+      try {
+        await panelOpening;
+      } catch (error) {
+        console.warn(
+          "Sotto could not open the reminder in the side panel; opening an extension page",
+          error,
+        );
+        const fallbackUrl = chrome.runtime.getURL(
+          `sidepanel.html#reminder=${encodeURIComponent(parsed.reminderId)}`,
+        );
+        try {
+          await chrome.tabs.create({
+            url: fallbackUrl,
+            active: true,
+            ...(reminder?.sourceWindowId === undefined
+              ? {}
+              : { windowId: reminder.sourceWindowId }),
+          });
+        } catch {
+          await chrome.tabs.create({ url: fallbackUrl, active: true });
+        }
       }
       await chrome.notifications.clear(notificationId);
       if (reminder) {

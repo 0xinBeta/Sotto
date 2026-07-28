@@ -60,6 +60,7 @@ describe("MoonshineEngine fail-soft initialization", () => {
       "onnx-community/moonshine-tiny-ONNX",
       expect.objectContaining({
         device: "webgpu",
+        revision: "a6da1241cd305dcd64eab1edbd615f2bb9aabb95",
         dtype: {
           encoder_model: "fp32",
           decoder_model_merged: "q4",
@@ -72,6 +73,7 @@ describe("MoonshineEngine fail-soft initialization", () => {
       "onnx-community/moonshine-tiny-ONNX",
       expect.objectContaining({
         device: "wasm",
+        revision: "a6da1241cd305dcd64eab1edbd615f2bb9aabb95",
         dtype: {
           encoder_model: "fp32",
           decoder_model_merged: "q8",

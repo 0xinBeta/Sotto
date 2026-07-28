@@ -156,48 +156,95 @@ class FakeRange {
   }
 
   cloneRange(): Range {
-    return new FakeRange(
+    const clone = new FakeRange(
       this.target,
       this.startOffset,
       this.endOffset,
-    ) as unknown as Range;
+    );
+    clone.startContainer = this.startContainer;
+    clone.endContainer = this.endContainer;
+    return clone as unknown as Range;
   }
 
-  selectNodeContents(): void {
+  private globalOffset(container: Node, offset: number): number {
+    if (container === (this.target as unknown as Node)) return offset;
+    return (
+      (container as unknown as { start?: number }).start ?? 0
+    ) + offset;
+  }
+
+  selectNodeContents(node: Node = this.target as unknown as Node): void {
+    this.startContainer = node;
+    this.endContainer = node;
     this.startOffset = 0;
-    this.endOffset = this.target.textContent.length;
+    this.endOffset =
+      node === (this.target as unknown as Node)
+        ? this.target.textContent.length
+        : (node as unknown as { data?: string }).data?.length ?? 0;
   }
 
-  setEnd(_node: Node, offset: number): void {
+  setStart(node: Node, offset: number): void {
+    this.startContainer = node;
+    this.startOffset = offset;
+  }
+
+  setEnd(node: Node, offset: number): void {
+    this.endContainer = node;
     this.endOffset = offset;
   }
 
   toString(): string {
-    return this.target.textContent.slice(this.startOffset, this.endOffset);
+    return this.target.textContent.slice(
+      this.globalOffset(this.startContainer, this.startOffset),
+      this.globalOffset(this.endContainer, this.endOffset),
+    );
   }
 
   deleteContents(): void {
+    const start = this.globalOffset(this.startContainer, this.startOffset);
+    const end = this.globalOffset(this.endContainer, this.endOffset);
     this.target.textContent =
-      this.target.textContent.slice(0, this.startOffset) +
-      this.target.textContent.slice(this.endOffset);
-    this.endOffset = this.startOffset;
+      this.target.textContent.slice(0, start) +
+      this.target.textContent.slice(end);
+    if (this.startContainer !== (this.target as unknown as Node)) {
+      const node = this.startContainer as unknown as {
+        data?: string;
+        end?: number;
+      };
+      node.data = "";
+      node.end = start;
+    }
+    this.startContainer = this.target as unknown as Node;
+    this.endContainer = this.target as unknown as Node;
+    this.startOffset = start;
+    this.endOffset = start;
   }
 
   insertNode(node: Node): void {
-    const inserted = node as unknown as { data: string; end?: number };
+    const start = this.globalOffset(this.startContainer, this.startOffset);
+    const inserted = node as unknown as {
+      data: string;
+      start?: number;
+      end?: number;
+      target?: FakeContentEditable;
+    };
     this.target.textContent =
-      this.target.textContent.slice(0, this.startOffset) +
+      this.target.textContent.slice(0, start) +
       inserted.data +
-      this.target.textContent.slice(this.startOffset);
-    inserted.end = this.startOffset + inserted.data.length;
+      this.target.textContent.slice(start);
+    inserted.start = start;
+    inserted.end = start + inserted.data.length;
+    inserted.target = this.target;
   }
 
   setStartAfter(node: Node): void {
+    this.startContainer = this.target as unknown as Node;
     this.startOffset =
       (node as unknown as { end?: number }).end ?? this.startOffset;
   }
 
   collapse(): void {
+    this.endContainer = this.startContainer;
     this.endOffset = this.startOffset;
   }
 }
@@ -239,6 +286,7 @@ function contentEditable(
     range: undefined as unknown as FakeRange,
   };
   const execCommand = vi.fn();
+  let target: FakeContentEditable;
   const fakeDocument = {
     activeElement: null,
     defaultView: { InputEvent: FakeInputEvent },
@@ -252,8 +300,13 @@ function contentEditable(
       },
     }),
     createTextNode: (data: string) => ({ data }) as unknown as Text,
+    createRange: () => new FakeRange(
+      target,
+      0,
+      0,
+    ) as unknown as Range,
   } as unknown as Document;
-  const target: FakeContentEditable = {
+  target = {
     localName: "div",
     tagName: "DIV",
     isContentEditable: true,
@@ -267,7 +320,9 @@ function contentEditable(
     hasAttribute: () => false,
     getAttribute: (name) =>
       name === "contenteditable" ? "plaintext-only" : null,
-    contains: (node) => node === (target as unknown as Node),
+    contains: (node) =>
+      node === (target as unknown as Node) ||
+      (node as unknown as { target?: FakeContentEditable }).target === target,
     matches: () => false,
     querySelector: () => null,
     querySelectorAll: () => [],
@@ -522,6 +577,41 @@ describe("text-control commits", () => {
     );
     expect(control.value).toBe("Thank you.");
   });
+
+  it("remembers dictation that replaced a prior selection", () => {
+    const { document, control } = textControl({
+      value: "replace me",
+      selectionStart: 0,
+      selectionEnd: 10,
+    });
+    const session = new EditorSnapshotSession(document);
+    const dictate = session.capture({
+      requireSelection: false,
+      allowLastDictated: false,
+    });
+    session.commit(
+      dictate.snapshotId,
+      "thanks",
+      "insertReplacementText",
+      true,
+    );
+
+    const rewrite = session.capture({
+      requireSelection: true,
+      allowLastDictated: true,
+    });
+    expect(rewrite).toMatchObject({
+      selectedText: "thanks",
+      source: "last-dictated",
+    });
+    session.commit(
+      rewrite.snapshotId,
+      "Thank you.",
+      "insertReplacementText",
+      false,
+    );
+    expect(control.value).toBe("Thank you.");
+  });
 });
 
 describe("contenteditable exact-range commits", () => {
@@ -570,5 +660,71 @@ describe("contenteditable exact-range commits", () => {
     expect(harness.target.textContent).toBe("first target second target");
     expect(harness.target.textContent).not.toContain("MODEL_OUTPUT");
     expect(harness.target.events).toEqual(["beforeinput"]);
+  });
+
+  it("can rewrite the last dictated contenteditable range", () => {
+    const harness = contentEditable("prefix suffix", 7, 7);
+    const session = new EditorSnapshotSession(harness.document);
+    const dictate = session.capture({
+      requireSelection: false,
+      allowLastDictated: false,
+    });
+    session.commit(dictate.snapshotId, "thanks", "insertText", true);
+
+    const rewrite = session.capture({
+      requireSelection: true,
+      allowLastDictated: true,
+    });
+    expect(rewrite).toMatchObject({
+      selectedText: "thanks",
+      source: "last-dictated",
+    });
+    session.commit(
+      rewrite.snapshotId,
+      "Thank you.",
+      "insertReplacementText",
+      false,
+    );
+    expect(harness.target.textContent).toBe("prefix Thank you.suffix");
+  });
+
+  it("uses verified native insertion for ordinary rich contenteditable", () => {
+    const harness = contentEditable("prefix selected suffix", 7, 15);
+    harness.target.getAttribute = (name) =>
+      name === "contenteditable" ? "true" : null;
+    harness.target.querySelectorAll = () => [
+      { localName: "span", tagName: "SPAN" } as Element,
+    ];
+    harness.execCommand.mockImplementation(
+      (_command: string, _showUi: boolean, value: string) => {
+        const range = harness.selection.range;
+        range.deleteContents();
+        const inserted = { data: value } as unknown as Node;
+        range.insertNode(inserted);
+        range.setStartAfter(inserted);
+        range.collapse();
+        return true;
+      },
+    );
+    const session = new EditorSnapshotSession(harness.document);
+    const capture = session.capture({
+      requireSelection: true,
+      allowLastDictated: false,
+    });
+
+    expect(
+      session.commit(
+        capture.snapshotId,
+        "rewritten",
+        "insertReplacementText",
+        false,
+      ),
+    ).toEqual({ kind: "contenteditable" });
+    expect(harness.target.textContent).toBe("prefix rewritten suffix");
+    expect(harness.execCommand).toHaveBeenCalledWith(
+      "insertText",
+      false,
+      "rewritten",
+    );
   });
 });

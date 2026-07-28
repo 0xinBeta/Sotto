@@ -62,11 +62,18 @@ describe("type action schema", () => {
           source: "selection",
         };
       }),
-      rewrite: vi.fn(async ({ source, transformation }) => {
+      rewrite: vi.fn(async ({ snapshotId, source, transformation }) => {
+        expect(snapshotId).toBe("snapshot-1");
         order.push(`rewrite:${transformation}:${source}`);
         return "Thank you.";
       }),
-      commit: vi.fn(async ({ snapshotId, text, inputType }) => {
+      commit: vi.fn(async ({
+        snapshotId,
+        text,
+        inputType,
+        rememberAsDictation,
+      }) => {
+        expect(rememberAsDictation).toBe(false);
         order.push(`commit:${snapshotId}:${inputType}:${text}`);
         return { kind: "textarea" };
       }),
@@ -115,6 +122,7 @@ describe("type action schema", () => {
       snapshotId: "snapshot-2",
       text: "sounds good, see you at five",
       inputType: "insertText",
+      rememberAsDictation: true,
     });
   });
 });

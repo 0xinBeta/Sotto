@@ -51,8 +51,10 @@ export interface TypeActionServices {
     readonly snapshotId: string;
     readonly text: string;
     readonly inputType: "insertText" | "insertReplacementText";
+    readonly rememberAsDictation: boolean;
   }): Promise<EditorCommit>;
   rewrite(options: {
+    readonly snapshotId: string;
     readonly source: string;
     readonly transformation: RewriteTransformation;
   }): Promise<string>;

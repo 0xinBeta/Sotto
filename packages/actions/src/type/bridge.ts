@@ -20,6 +20,7 @@ export type TypeBridgeMessage =
       readonly snapshotId: string;
       readonly text: string;
       readonly inputType: "insertText" | "insertReplacementText";
+      readonly rememberAsDictation: boolean;
     };
 
 export type TypeBridgeResponse =
@@ -37,6 +38,13 @@ export type TypeBridgeResponse =
 
 interface RuntimeMessageEvent {
   addListener(
+    listener: (
+      message: unknown,
+      sender: unknown,
+      sendResponse: (response: TypeBridgeResponse) => void,
+    ) => boolean | void,
+  ): void;
+  removeListener?(
     listener: (
       message: unknown,
       sender: unknown,
@@ -66,6 +74,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
+
 function parseMessage(value: unknown): TypeBridgeMessage | null {
   if (
     !isRecord(value) ||
@@ -76,7 +91,13 @@ function parseMessage(value: unknown): TypeBridgeMessage | null {
   }
 
   if (value.type === "capture") {
-    if (!isRecord(value.options)) return null;
+    if (
+      !hasOnlyKeys(value, ["target", "type", "options"]) ||
+      !isRecord(value.options) ||
+      !hasOnlyKeys(value.options, ["requireSelection", "allowLastDictated"])
+    ) {
+      return null;
+    }
     if (
       typeof value.options.requireSelection !== "boolean" ||
       typeof value.options.allowLastDictated !== "boolean"
@@ -94,10 +115,22 @@ function parseMessage(value: unknown): TypeBridgeMessage | null {
   }
 
   if (
+    !hasOnlyKeys(value, [
+      "target",
+      "type",
+      "snapshotId",
+      "text",
+      "inputType",
+      "rememberAsDictation",
+    ]) ||
     typeof value.snapshotId !== "string" ||
+    value.snapshotId.length < 1 ||
+    value.snapshotId.length > 128 ||
     typeof value.text !== "string" ||
+    value.text.length > 24_000 ||
     (value.inputType !== "insertText" &&
-      value.inputType !== "insertReplacementText")
+      value.inputType !== "insertReplacementText") ||
+    typeof value.rememberAsDictation !== "boolean"
   ) {
     return null;
   }
@@ -107,6 +140,7 @@ function parseMessage(value: unknown): TypeBridgeMessage | null {
     snapshotId: value.snapshotId,
     text: value.text,
     inputType: value.inputType,
+    rememberAsDictation: value.rememberAsDictation,
   };
 }
 
@@ -121,8 +155,9 @@ function errorResponse(error: unknown): TypeBridgeResponse {
 }
 
 /**
- * Installs one long-lived listener in an isolated content-script world.
- * Repeated imports/calls in the same world reuse the first snapshot session.
+ * Installs one listener in an isolated content-script world. It survives the
+ * capture/model/commit round trip, then removes itself. Repeated injections
+ * during a live operation reuse the first snapshot session.
  */
 export function installTypeContentScriptBridge(
   options: TypeBridgeInstallOptions = {},
@@ -145,9 +180,26 @@ export function installTypeContentScriptBridge(
   }
 
   const session = new EditorSnapshotSession(bridgeDocument);
-  runtime.onMessage.addListener((raw, _sender, sendResponse) => {
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+  const cleanUp = (): void => {
+    if (!runtime.onMessage.removeListener) return;
+    runtime.onMessage.removeListener(listener);
+    if (cleanupTimer !== undefined) clearTimeout(cleanupTimer);
+    if (scope[INSTALL_KEY] === session) delete scope[INSTALL_KEY];
+  };
+  const scheduleCleanup = (): void => {
+    if (!runtime.onMessage.removeListener) return;
+    if (cleanupTimer !== undefined) clearTimeout(cleanupTimer);
+    cleanupTimer = setTimeout(cleanUp, 5 * 60_000);
+  };
+  const listener = (
+    raw: unknown,
+    _sender: unknown,
+    sendResponse: (response: TypeBridgeResponse) => void,
+  ): void => {
     const message = parseMessage(raw);
     if (!message) return;
+    let shouldCleanUp = message.type === "commit";
     try {
       const value =
         message.type === "capture"
@@ -156,12 +208,18 @@ export function installTypeContentScriptBridge(
               message.snapshotId,
               message.text,
               message.inputType,
+              message.rememberAsDictation,
             );
       sendResponse({ ok: true, value });
+      if (message.type === "capture") scheduleCleanup();
     } catch (error) {
+      if (message.type === "capture") shouldCleanUp = true;
       sendResponse(errorResponse(error));
+    } finally {
+      if (shouldCleanUp) cleanUp();
     }
-  });
+  };
+  runtime.onMessage.addListener(listener);
   scope[INSTALL_KEY] = session;
   return session;
 }

@@ -79,4 +79,53 @@ describe("page-model session isolation", () => {
       ownedSessions.every((session) => session.destroy.mock.calls.length === 1),
     ).toBe(true);
   });
+
+  it("fits untrusted page data to the session input quota", async () => {
+    const prompt = vi.fn().mockResolvedValue("bounded model text");
+    sessions.create.mockResolvedValue({
+      ok: true,
+      availability: "available",
+      session: {
+        model: {
+          inputQuota: 100,
+          measureInputUsage: vi.fn(async (input: string) => input.length),
+        },
+        prompt,
+        destroy: vi.fn(),
+      },
+    });
+
+    await summarizeWithPrompt("x".repeat(500));
+
+    const userPrompt = prompt.mock.calls[0]?.[0] as string;
+    const source = JSON.parse(
+      userPrompt.slice("PAGE_DATA_JSON: ".length),
+    ) as string;
+    expect(userPrompt.length).toBeLessThanOrEqual(90);
+    expect(source.length).toBeGreaterThan(0);
+    expect(source.length).toBeLessThan(500);
+  });
+
+  it("fails before prompting when trusted framing alone exceeds model quota", async () => {
+    const prompt = vi.fn();
+    const destroy = vi.fn();
+    sessions.create.mockResolvedValue({
+      ok: true,
+      availability: "available",
+      session: {
+        model: {
+          inputQuota: 1,
+          measureInputUsage: vi.fn(async (input: string) => input.length),
+        },
+        prompt,
+        destroy,
+      },
+    });
+
+    await expect(summarizeWithPrompt("page")).rejects.toThrow(
+      "too little input quota",
+    );
+    expect(prompt).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
 });

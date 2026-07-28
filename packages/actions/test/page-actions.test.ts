@@ -161,4 +161,35 @@ describe("page action service boundary", () => {
       },
     });
   });
+
+  it("prefers an existing selection for Ask Page without requiring one", async () => {
+    const page = {
+      text: "Selected context.",
+      title: "Article",
+      url: "https://example.test",
+      source: "selection",
+      truncated: false,
+    } as const;
+    const extract = async (options: {
+      readonly preferSelection: boolean;
+      readonly requireSelection?: boolean;
+    }) => {
+      expect(options).toEqual({ preferSelection: true });
+      return page;
+    };
+
+    await askPage.execute(
+      {
+        action: "ask-page",
+        question: "What does this mean?",
+        scope: "page",
+      },
+      {
+        page: {
+          extract,
+          runModelTask: async () => "It means the selected context.",
+        },
+      },
+    );
+  });
 });

@@ -182,11 +182,13 @@ const completion = {
 };
 
 async function installSidepanel(options: {
+  readonly capturePermissionGranted?: boolean;
   readonly retryWorkflow?: typeof workflow;
 } = {}) {
   const elements = Object.fromEntries(
     elementIds.map((id) => [id, new FakeElement()]),
   ) as Record<(typeof elementIds)[number], FakeElement>;
+  elements["capture-setup"].hidden = true;
   elements["clipboard-card"].hidden = true;
   const emptyLog = new FakeElement("li");
   emptyLog.className = "empty-log";
@@ -194,6 +196,7 @@ async function installSidepanel(options: {
   elements["action-log"].append(emptyLog);
 
   let onMessage: ((message: unknown) => void) | undefined;
+  const requestPermission = vi.fn().mockResolvedValue(true);
   const sendMessage = vi.fn().mockImplementation(
     async (message: { readonly type?: string }) => {
       if (message.type === "retry-screenshot") {
@@ -230,8 +233,10 @@ async function installSidepanel(options: {
       },
     },
     permissions: {
-      contains: vi.fn().mockResolvedValue(true),
-      request: vi.fn().mockResolvedValue(true),
+      contains: vi
+        .fn()
+        .mockResolvedValue(options.capturePermissionGranted ?? true),
+      request: requestPermission,
     },
     commands: {
       getAll: vi.fn().mockResolvedValue([
@@ -245,7 +250,7 @@ async function installSidepanel(options: {
   sendMessage.mockClear();
   if (!onMessage) throw new Error("Side-panel message listener was not installed");
 
-  return { elements, onMessage, sendMessage };
+  return { elements, onMessage, requestPermission, sendMessage };
 }
 
 afterEach(() => {
@@ -256,6 +261,22 @@ afterEach(() => {
 });
 
 describe("side-panel screenshot clipboard fallback", () => {
+  it("shows first-run capture setup and hides it live after the one-time grant", async () => {
+    const { elements, requestPermission } = await installSidepanel({
+      capturePermissionGranted: false,
+    });
+
+    await vi.waitFor(() => {
+      expect(elements["capture-setup"].hidden).toBe(false);
+    });
+    await elements["enable-capture"].emit("click");
+
+    expect(requestPermission).toHaveBeenCalledWith({
+      origins: ["<all_urls>"],
+    });
+    expect(elements["capture-setup"].hidden).toBe(true);
+  });
+
   it("renders page-model and note text as inert textContent", async () => {
     const { elements, onMessage } = await installSidepanel();
     const untrusted = '<img src=x onerror="chrome.runtime.sendMessage(1)">';
@@ -284,6 +305,37 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["notes-list"].firstElementChild?.textContent).toContain(
       untrusted,
     );
+  });
+
+  it("rejects malformed v0.2 panel payloads before rendering", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { elements, onMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "page-text",
+      title: "Answer",
+      text: { hostile: true },
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "notes-updated",
+      notes: "not-an-array",
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "screenshot-permission-needed",
+      workflow: {
+        kind: "screenshot-permission",
+        host: "example.com",
+        pendingCommand: { action: "screenshot", destination: "copy" },
+      },
+    });
+
+    expect(elements["page-text-output"].textContent).toBe("");
+    expect(elements["notes-list"].children).toEqual([]);
+    expect(elements["clipboard-card"].hidden).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(3);
   });
 
   it("automatically writes on receipt without showing the copy card", async () => {
@@ -350,7 +402,12 @@ describe("side-panel screenshot clipboard fallback", () => {
 
   it("automatically attempts a workflow returned by the permission retry", async () => {
     clipboard.perform.mockResolvedValue(completion);
-    const { elements, onMessage, sendMessage } = await installSidepanel({
+    const {
+      elements,
+      onMessage,
+      requestPermission,
+      sendMessage,
+    } = await installSidepanel({
       retryWorkflow: workflow,
     });
 
@@ -359,12 +416,16 @@ describe("side-panel screenshot clipboard fallback", () => {
       type: "screenshot-permission-needed",
       workflow: {
         kind: "screenshot-permission",
+        originPattern: "<all_urls>",
         host: "example.com",
         pendingCommand: { action: "screenshot", destination: "claude" },
       },
     });
     await elements["copy-screenshot"].emit("click");
 
+    expect(requestPermission).toHaveBeenCalledWith({
+      origins: ["<all_urls>"],
+    });
     expect(clipboard.perform).toHaveBeenCalledOnce();
     expect(sendMessage).toHaveBeenCalledWith({
       target: "worker",

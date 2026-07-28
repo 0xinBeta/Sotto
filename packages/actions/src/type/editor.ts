@@ -23,19 +23,36 @@ interface ContentEditableSnapshot {
   readonly kind: "contenteditable";
   readonly target: HTMLElement;
   readonly document: Document;
-  readonly range: Range;
+  /** The live selection/caret that must remain unchanged until commit. */
+  readonly expectedRange: Range;
+  /** The exact range that may be replaced. */
+  readonly replacementRange: Range;
   readonly selectedText: string;
 }
 
 type Snapshot = TextControlSnapshot | ContentEditableSnapshot;
 
 interface LastDictatedTextRange {
+  readonly kind: "text-control";
   readonly target: TextControl;
   readonly document: Document;
   readonly start: number;
   readonly end: number;
   readonly text: string;
 }
+
+interface LastDictatedContentEditableRange {
+  readonly kind: "contenteditable";
+  readonly target: HTMLElement;
+  readonly document: Document;
+  readonly replacementRange: Range;
+  readonly expectedCaret: Range;
+  readonly text: string;
+}
+
+type LastDictatedRange =
+  | LastDictatedTextRange
+  | LastDictatedContentEditableRange;
 
 const SAFE_INPUT_TYPES = new Set(["text", "search", "url", "tel"]);
 
@@ -214,21 +231,80 @@ function textOffset(target: HTMLElement, range: Range): number | null {
   }
 }
 
-function isSimpleContentEditable(target: HTMLElement): boolean {
-  const explicitlyPlain =
-    target.getAttribute("contenteditable")?.toLowerCase() === "plaintext-only";
-  const complexMarker =
+function hasComplexEditorMarker(target: HTMLElement): boolean {
+  return (
     target.matches(
       '[data-lexical-editor], [data-slate-editor], .ProseMirror, [role="application"]',
     ) ||
     target.querySelector(
       '[data-lexical-editor], [data-slate-editor], .ProseMirror, [role="application"]',
-    ) !== null;
-  if (complexMarker) return false;
+    ) !== null
+  );
+}
+
+function isSimpleContentEditable(target: HTMLElement): boolean {
+  const explicitlyPlain =
+    target.getAttribute("contenteditable")?.toLowerCase() === "plaintext-only";
+  if (hasComplexEditorMarker(target)) return false;
   if (explicitlyPlain) return true;
   return Array.from(target.querySelectorAll("*")).every(
     (element) => elementName(element) === "br",
   );
+}
+
+function rangeFromTextOffsets(
+  document: Document,
+  target: HTMLElement,
+  start: number,
+  end: number,
+): Range | null {
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start ||
+    end > (target.textContent ?? "").length
+  ) {
+    return null;
+  }
+
+  const textNodes: Text[] = [];
+  const visit = (node: Node): void => {
+    if (node.nodeType === 3) {
+      textNodes.push(node as Text);
+      return;
+    }
+    for (const child of Array.from(node.childNodes)) visit(child);
+  };
+  visit(target);
+  if (textNodes.length === 0) {
+    if (start !== 0 || end !== 0) return null;
+    const empty = document.createRange();
+    empty.setStart(target, 0);
+    empty.setEnd(target, 0);
+    return empty;
+  }
+
+  const pointAt = (
+    offset: number,
+  ): { readonly node: Text; readonly offset: number } | undefined => {
+    let consumed = 0;
+    for (const node of textNodes) {
+      const next = consumed + node.data.length;
+      if (offset <= next) {
+        return { node, offset: offset - consumed };
+      }
+      consumed = next;
+    }
+    return undefined;
+  };
+  const startPoint = pointAt(start);
+  const endPoint = pointAt(end);
+  if (!startPoint || !endPoint) return null;
+  const range = document.createRange();
+  range.setStart(startPoint.node, startPoint.offset);
+  range.setEnd(endPoint.node, endPoint.offset);
+  return range;
 }
 
 function assertCurrentTarget(snapshot: Snapshot): void {
@@ -248,7 +324,7 @@ function assertCurrentTarget(snapshot: Snapshot): void {
 
 export class EditorSnapshotSession {
   readonly #snapshots = new Map<string, Snapshot>();
-  #lastDictated: LastDictatedTextRange | undefined;
+  #lastDictated: LastDictatedRange | undefined;
   #sequence = 0;
 
   constructor(readonly document: Document) {}
@@ -307,6 +383,7 @@ export class EditorSnapshotSession {
         options.requireSelection &&
         !selectedText &&
         options.allowLastDictated &&
+        last?.kind === "text-control" &&
         last?.target === control &&
         last.document === this.document &&
         selectionStart === selectionEnd &&
@@ -338,26 +415,47 @@ export class EditorSnapshotSession {
       };
     } else {
       const editable = target as HTMLElement;
-      const range = selectedRange(this.document, editable);
-      if (!range) {
+      const currentRange = selectedRange(this.document, editable);
+      if (!currentRange) {
         throw new EditorGuardError(
           "unsafe-editor",
           "This editor does not expose a safe selection",
         );
       }
-      const selectedText = range.toString();
+      let selectedText = currentRange.toString();
+      let replacementRange = currentRange.cloneRange();
+      source = selectedText ? "selection" : "caret";
+
+      const last = this.#lastDictated;
+      if (
+        options.requireSelection &&
+        !selectedText &&
+        options.allowLastDictated &&
+        last?.kind === "contenteditable" &&
+        last.target === editable &&
+        last.document === this.document &&
+        rangesMatch(currentRange, last.expectedCaret) &&
+        last.replacementRange.toString() === last.text &&
+        nodeIsInside(editable, last.replacementRange.startContainer) &&
+        nodeIsInside(editable, last.replacementRange.endContainer)
+      ) {
+        selectedText = last.text;
+        replacementRange = last.replacementRange.cloneRange();
+        source = "last-dictated";
+      }
+
       if (options.requireSelection && !selectedText) {
         throw new EditorGuardError(
           "selection-required",
           "Select text before asking Sotto to rewrite it",
         );
       }
-      source = selectedText ? "selection" : "caret";
       snapshot = {
         kind,
         target: editable,
         document: this.document,
-        range: range.cloneRange(),
+        expectedRange: currentRange.cloneRange(),
+        replacementRange,
         selectedText,
       };
     }
@@ -372,6 +470,7 @@ export class EditorSnapshotSession {
     snapshotId: string,
     text: string,
     inputType: "insertText" | "insertReplacementText",
+    rememberAsDictation = inputType === "insertText",
   ): EditorCommit {
     const snapshot = this.#snapshots.get(snapshotId);
     this.#snapshots.delete(snapshotId);
@@ -384,12 +483,18 @@ export class EditorSnapshotSession {
     assertCurrentTarget(snapshot);
 
     if (snapshot.kind === "input" || snapshot.kind === "textarea") {
-      return this.#commitTextControl(snapshot, text, inputType);
+      return this.#commitTextControl(
+        snapshot,
+        text,
+        inputType,
+        rememberAsDictation,
+      );
     }
     return this.#commitContentEditable(
       snapshot as ContentEditableSnapshot,
       text,
       inputType,
+      rememberAsDictation,
     );
   }
 
@@ -397,6 +502,7 @@ export class EditorSnapshotSession {
     snapshot: TextControlSnapshot,
     text: string,
     inputType: "insertText" | "insertReplacementText",
+    rememberAsDictation: boolean,
   ): EditorCommit {
     const {
       target,
@@ -451,8 +557,9 @@ export class EditorSnapshotSession {
       );
     }
 
-    if (inputType === "insertText") {
+    if (rememberAsDictation) {
       this.#lastDictated = {
+        kind: "text-control",
         target,
         document: snapshot.document,
         start: replacementStart,
@@ -469,15 +576,23 @@ export class EditorSnapshotSession {
     snapshot: ContentEditableSnapshot,
     text: string,
     inputType: "insertText" | "insertReplacementText",
+    rememberAsDictation: boolean,
   ): EditorCommit {
     const current = selectedRange(snapshot.document, snapshot.target);
-    if (!current || !rangesMatch(current, snapshot.range)) {
+    if (!current || !rangesMatch(current, snapshot.expectedRange)) {
       throw new EditorGuardError(
         "stale-snapshot",
         "The selection changed before Sotto could type",
       );
     }
-    if (current.toString() !== snapshot.selectedText) {
+    if (
+      snapshot.replacementRange.toString() !== snapshot.selectedText ||
+      !nodeIsInside(
+        snapshot.target,
+        snapshot.replacementRange.startContainer,
+      ) ||
+      !nodeIsInside(snapshot.target, snapshot.replacementRange.endContainer)
+    ) {
       throw new EditorGuardError(
         "stale-snapshot",
         "The selected text changed before Sotto could type",
@@ -485,15 +600,22 @@ export class EditorSnapshotSession {
     }
     if (snapshot.selectedText === text) return { kind: "contenteditable" };
 
-    if (!isSimpleContentEditable(snapshot.target)) {
+    if (hasComplexEditorMarker(snapshot.target)) {
       throw new EditorGuardError(
         "complex-editor",
         "Sotto cannot safely edit this complex editor",
       );
     }
+    if (!isSimpleContentEditable(snapshot.target)) {
+      return this.#commitRichContentEditable(
+        snapshot,
+        text,
+        rememberAsDictation,
+      );
+    }
 
     const beforeText = snapshot.target.textContent ?? "";
-    const start = textOffset(snapshot.target, current);
+    const start = textOffset(snapshot.target, snapshot.replacementRange);
     if (start === null) {
       throw new EditorGuardError(
         "complex-editor",
@@ -514,11 +636,19 @@ export class EditorSnapshotSession {
     }
 
     assertCurrentTarget(snapshot);
-    const commitRange = selectedRange(snapshot.document, snapshot.target);
+    const currentAfterBeforeInput = selectedRange(
+      snapshot.document,
+      snapshot.target,
+    );
     if (
-      !commitRange ||
-      !rangesMatch(commitRange, snapshot.range) ||
-      commitRange.toString() !== snapshot.selectedText ||
+      !currentAfterBeforeInput ||
+      !rangesMatch(currentAfterBeforeInput, snapshot.expectedRange) ||
+      snapshot.replacementRange.toString() !== snapshot.selectedText ||
+      !nodeIsInside(
+        snapshot.target,
+        snapshot.replacementRange.startContainer,
+      ) ||
+      !nodeIsInside(snapshot.target, snapshot.replacementRange.endContainer) ||
       (snapshot.target.textContent ?? "") !== beforeText
     ) {
       throw new EditorGuardError(
@@ -527,6 +657,7 @@ export class EditorSnapshotSession {
       );
     }
 
+    const commitRange = snapshot.replacementRange;
     commitRange.deleteContents();
     const inserted = snapshot.document.createTextNode(text);
     commitRange.insertNode(inserted);
@@ -544,7 +675,105 @@ export class EditorSnapshotSession {
         "The editor did not preserve Sotto's text change",
       );
     }
-    this.#lastDictated = undefined;
+    if (rememberAsDictation) {
+      const replacementRange = snapshot.document.createRange();
+      replacementRange.setStart(inserted, 0);
+      replacementRange.setEnd(inserted, text.length);
+      this.#lastDictated = {
+        kind: "contenteditable",
+        target: snapshot.target,
+        document: snapshot.document,
+        replacementRange,
+        expectedCaret: commitRange.cloneRange(),
+        text,
+      };
+    } else {
+      this.#lastDictated = undefined;
+    }
+    return { kind: "contenteditable" };
+  }
+
+  #commitRichContentEditable(
+    snapshot: ContentEditableSnapshot,
+    text: string,
+    rememberAsDictation: boolean,
+  ): EditorCommit {
+    const beforeText = snapshot.target.textContent ?? "";
+    const start = textOffset(snapshot.target, snapshot.replacementRange);
+    if (start === null) {
+      throw new EditorGuardError(
+        "complex-editor",
+        "Sotto cannot safely locate this rich-text selection",
+      );
+    }
+    const expected =
+      beforeText.slice(0, start) +
+      text +
+      beforeText.slice(start + snapshot.selectedText.length);
+    const selection = snapshot.document.getSelection();
+    const execCommand = snapshot.document.execCommand;
+    if (!selection || typeof execCommand !== "function") {
+      throw new EditorGuardError(
+        "complex-editor",
+        "This rich-text editor does not support safe native insertion",
+      );
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(snapshot.replacementRange.cloneRange());
+    let nativeError: unknown;
+    try {
+      execCommand.call(snapshot.document, "insertText", false, text);
+    } catch (error) {
+      nativeError = error;
+    }
+
+    const afterText = snapshot.target.textContent ?? "";
+    if (afterText === beforeText) {
+      selection.removeAllRanges();
+      selection.addRange(snapshot.expectedRange.cloneRange());
+      throw new EditorGuardError(
+        "complex-editor",
+        nativeError instanceof Error
+          ? `This rich-text editor rejected native insertion: ${nativeError.message}`
+          : "This rich-text editor rejected native insertion",
+      );
+    }
+    if (afterText !== expected) {
+      throw new EditorGuardError(
+        "commit-failed",
+        "The rich-text editor changed outside the captured range",
+      );
+    }
+    assertCurrentTarget(snapshot);
+    const expectedCaret = selectedRange(snapshot.document, snapshot.target);
+    if (!expectedCaret) {
+      throw new EditorGuardError(
+        "commit-failed",
+        "The rich-text editor did not preserve a safe caret",
+      );
+    }
+
+    if (rememberAsDictation) {
+      const replacementRange = rangeFromTextOffsets(
+        snapshot.document,
+        snapshot.target,
+        start,
+        start + text.length,
+      );
+      this.#lastDictated = replacementRange
+        ? {
+            kind: "contenteditable",
+            target: snapshot.target,
+            document: snapshot.document,
+            replacementRange,
+            expectedCaret: expectedCaret.cloneRange(),
+            text,
+          }
+        : undefined;
+    } else {
+      this.#lastDictated = undefined;
+    }
     return { kind: "contenteditable" };
   }
 }

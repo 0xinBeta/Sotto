@@ -85,7 +85,7 @@ export interface ClipboardWorkflow {
 
 export interface ScreenshotPermissionWorkflow {
   readonly kind: "screenshot-permission";
-  readonly originPattern: "<all_urls>";
+  readonly originPattern: string;
   readonly host: string;
   readonly pendingCommand: ActionCommand;
 }
@@ -106,6 +106,7 @@ export interface ActionResult {
   readonly pageText?: {
     readonly text: string;
     readonly title?: string;
+    readonly lang?: string;
     readonly speech: "short" | "long";
   };
 }
@@ -153,6 +154,7 @@ export interface EditableActionServices {
     readonly source: "caret" | "selection" | "last-dictated";
   }>;
   rewrite(options: {
+    readonly snapshotId: string;
     readonly source: string;
     readonly transformation:
       | "more-formal"
@@ -168,6 +170,7 @@ export interface EditableActionServices {
     readonly snapshotId: string;
     readonly text: string;
     readonly inputType: "insertText" | "insertReplacementText";
+    readonly rememberAsDictation: boolean;
   }): Promise<{
     readonly kind: "input" | "textarea" | "contenteditable";
   }>;

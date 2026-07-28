@@ -31,7 +31,9 @@ interface ReminderHarness {
   readonly notificationCreate: ReturnType<typeof vi.fn>;
   readonly notificationClear: ReturnType<typeof vi.fn>;
   readonly panelSend: ReturnType<typeof vi.fn>;
+  readonly sidePanelOpen: ReturnType<typeof vi.fn>;
   readonly storageSet: ReturnType<typeof vi.fn>;
+  readonly tabCreate: ReturnType<typeof vi.fn>;
   readonly tabUpdate: ReturnType<typeof vi.fn>;
   readonly windowUpdate: ReturnType<typeof vi.fn>;
 }
@@ -59,8 +61,9 @@ async function installBackground(options: {
   readonly values?: Record<string, unknown>;
   readonly existingAlarms?: readonly string[];
   readonly notificationPermission?: "granted" | "denied";
-  readonly panelAvailable?: boolean;
-  readonly windowUpdateRejects?: boolean;
+    readonly panelAvailable?: boolean;
+    readonly sidePanelRejects?: boolean;
+    readonly windowUpdateRejects?: boolean;
 } = {}): Promise<ReminderHarness> {
   const values = { ...(options.values ?? {}) };
   const alarms = new Map(
@@ -109,6 +112,10 @@ async function installBackground(options: {
   );
   const notificationCreate = vi.fn().mockResolvedValue(undefined);
   const notificationClear = vi.fn().mockResolvedValue(true);
+  const sidePanelOpen = options.sidePanelRejects
+    ? vi.fn().mockRejectedValue(new Error("side panel unavailable"))
+    : vi.fn().mockResolvedValue(undefined);
+  const tabCreate = vi.fn().mockResolvedValue({ id: 99 });
   const windowUpdate = options.windowUpdateRejects
     ? vi.fn().mockRejectedValue(new Error("window was closed"))
     : vi.fn().mockResolvedValue(undefined);
@@ -127,7 +134,7 @@ async function installBackground(options: {
     },
     offscreen: { createDocument: vi.fn() },
     sidePanel: {
-      open: vi.fn().mockResolvedValue(undefined),
+      open: sidePanelOpen,
       setPanelBehavior: vi.fn().mockResolvedValue(undefined),
     },
     storage: {
@@ -161,7 +168,7 @@ async function installBackground(options: {
     },
     tabs: {
       query: vi.fn().mockResolvedValue([]),
-      create: vi.fn(),
+      create: tabCreate,
       update: tabUpdate,
       sendMessage: vi.fn(),
     },
@@ -186,7 +193,9 @@ async function installBackground(options: {
     notificationCreate,
     notificationClear,
     panelSend,
+    sidePanelOpen,
     storageSet,
+    tabCreate,
     tabUpdate,
     windowUpdate,
   };
@@ -273,6 +282,40 @@ describe("background reminder recovery", () => {
     });
   });
 
+  it("encodes the source window in a delivered notification id", async () => {
+    const future = reminder(
+      "windowed",
+      "2099-01-01T00:00:00.000Z",
+      "scheduled",
+      { sourceWindowId: 7 },
+    );
+    const harness = await installBackground({
+      values: {
+        schemaVersion: 1,
+        "reminder:windowed": future,
+      },
+      existingAlarms: ["reminder:windowed"],
+    });
+    harness.values["reminder:windowed"] = reminder(
+      "windowed",
+      "2000-01-01T00:00:00.000Z",
+      "scheduled",
+      { sourceWindowId: 7 },
+    );
+    worker.speak.mockResolvedValue(undefined);
+
+    harness.alarmListener({ name: "reminder:windowed" });
+    await vi.waitFor(() =>
+      expect(harness.notificationCreate).toHaveBeenCalledWith(
+        "reminder:windowed:window:7",
+        expect.objectContaining({
+          type: "basic",
+          message: "Reminder windowed",
+        }),
+      ),
+    );
+  });
+
   it("keeps a denied reminder scheduled when every fallback fails", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const future = reminder("retry", "2099-01-01T00:00:00.000Z");
@@ -318,13 +361,14 @@ describe("background reminder recovery", () => {
       windowUpdateRejects: true,
     });
 
-    harness.notificationClickListener("reminder:clicked");
+    harness.notificationClickListener("reminder:clicked:window:4");
     await vi.waitFor(() =>
       expect(harness.notificationClear).toHaveBeenCalledWith(
-        "reminder:clicked",
+        "reminder:clicked:window:4",
       ),
     );
 
+    expect(harness.sidePanelOpen).toHaveBeenCalledWith({ windowId: 4 });
     expect(harness.windowUpdate).toHaveBeenCalledWith(4, { focused: true });
     expect(harness.tabUpdate).toHaveBeenCalledWith(8, { active: true });
     expect(harness.panelSend).toHaveBeenCalledWith(
@@ -333,6 +377,36 @@ describe("background reminder recovery", () => {
         type: "reminder-opened",
         reminder: expect.objectContaining({ id: "clicked" }),
       }),
+    );
+  });
+
+  it("opens a reminder extension page when side-panel opening is rejected", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const record = reminder(
+      "fallback",
+      "2026-07-28T12:00:00.000Z",
+      "delivered",
+      { sourceWindowId: 6 },
+    );
+    const harness = await installBackground({
+      values: {
+        schemaVersion: 1,
+        "reminder:fallback": record,
+      },
+      sidePanelRejects: true,
+    });
+
+    harness.notificationClickListener("reminder:fallback:window:6");
+    await vi.waitFor(() =>
+      expect(harness.tabCreate).toHaveBeenCalledWith({
+        url:
+          "chrome-extension://sotto/sidepanel.html#reminder=fallback",
+        active: true,
+        windowId: 6,
+      }),
+    );
+    expect(harness.notificationClear).toHaveBeenCalledWith(
+      "reminder:fallback:window:6",
     );
   });
 });

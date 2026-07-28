@@ -80,6 +80,7 @@ const summarize = defineAction<SummarizeCommand>({
         pageText: {
           text: page.text,
           title: page.title || "Page",
+          ...(page.language === undefined ? {} : { lang: page.language }),
           speech: "long",
         },
       };

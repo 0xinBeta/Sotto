@@ -63,4 +63,94 @@ describe("type content-script bridge", () => {
     expect(listener?.({ target: "sidepanel" }, {}, respond)).toBeUndefined();
     expect(respond).not.toHaveBeenCalled();
   });
+
+  it("rejects an oversized or incompletely validated commit message", () => {
+    let listener:
+      | ((
+          message: unknown,
+          sender: unknown,
+          respond: (response: unknown) => void,
+        ) => boolean | void)
+      | undefined;
+    installTypeContentScriptBridge({
+      runtime: {
+        onMessage: {
+          addListener: vi.fn((registered: typeof listener) => {
+            listener = registered;
+          }),
+        },
+      },
+      document: {} as Document,
+    });
+    const respond = vi.fn();
+
+    listener?.(
+      {
+        target: "sotto-type-bridge",
+        type: "commit",
+        snapshotId: "editor-1",
+        text: "x".repeat(24_001),
+        inputType: "insertText",
+        rememberAsDictation: true,
+      },
+      {},
+      respond,
+    );
+    listener?.(
+      {
+        target: "sotto-type-bridge",
+        type: "commit",
+        snapshotId: "editor-1",
+        text: "safe",
+        inputType: "insertText",
+      },
+      {},
+      respond,
+    );
+
+    expect(respond).not.toHaveBeenCalled();
+  });
+
+  it("removes a failed capture listener so the injected bridge does not linger", () => {
+    let listener:
+      | ((
+          message: unknown,
+          sender: unknown,
+          respond: (response: unknown) => void,
+        ) => boolean | void)
+      | undefined;
+    const removeListener = vi.fn();
+    installTypeContentScriptBridge({
+      runtime: {
+        onMessage: {
+          addListener: vi.fn((registered: typeof listener) => {
+            listener = registered;
+          }),
+          removeListener,
+        },
+      },
+      document: {
+        hasFocus: () => true,
+        activeElement: null,
+      } as unknown as Document,
+    });
+
+    listener?.(
+      {
+        target: "sotto-type-bridge",
+        type: "capture",
+        options: {
+          requireSelection: false,
+          allowLastDictated: false,
+        },
+      },
+      {},
+      vi.fn(),
+    );
+
+    expect(removeListener).toHaveBeenCalledWith(listener);
+    expect(
+      (globalThis as Record<PropertyKey, unknown>)[installKey],
+    ).toBeUndefined();
+  });
 });

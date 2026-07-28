@@ -7,6 +7,7 @@ export const MIN_REMINDER_DELAY_MINUTES = 0.5;
 export const MAX_REMINDER_DELAY_MINUTES = 525_600;
 export const MAX_NOTE_BODY_LENGTH = 10_000;
 export const MAX_REMINDER_TEXT_LENGTH = 1_000;
+const REMINDER_DELIVERY_RETRY_MS = 30_000;
 
 export interface NoteSource {
   readonly title: string;
@@ -386,15 +387,28 @@ export class NotesReminderStore {
         throw new TypeError("Reminder input is invalid");
       }
 
-      // Storage is authoritative. If alarm creation fails, startup
-      // reconciliation can recreate it from this scheduled record.
+      // Storage is authoritative, so persist before creating the disposable
+      // alarm registry entry.
       await this.#storage.set({
         [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
         [`${REMINDER_KEY_PREFIX}${id}`]: reminder,
       });
-      await this.#alarms.create(alarmName, {
-        when: Date.parse(reminder.dueAt),
-      });
+      try {
+        await this.#alarms.create(alarmName, {
+          when: Date.parse(reminder.dueAt),
+        });
+      } catch (error) {
+        // Do not leave an apparently failed command scheduled to surprise the
+        // user after a later worker restart.
+        await this.#storage.set({
+          [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
+          [`${REMINDER_KEY_PREFIX}${id}`]: {
+            ...reminder,
+            status: "dismissed",
+          } satisfies ReminderRecord,
+        });
+        throw error;
+      }
       return reminder;
     });
   }
@@ -412,7 +426,14 @@ export class NotesReminderStore {
         if (reminder.status !== "scheduled") continue;
 
         if (Date.parse(reminder.dueAt) <= now.getTime()) {
-          await options.onDue?.(reminder);
+          try {
+            await options.onDue?.(reminder);
+          } catch (error) {
+            await this.#alarms.create(reminder.alarmName, {
+              when: now.getTime() + REMINDER_DELIVERY_RETRY_MS,
+            });
+            throw error;
+          }
           const deliveredReminder: ReminderRecord = {
             ...reminder,
             status: "delivered",
@@ -465,7 +486,14 @@ export class NotesReminderStore {
         return undefined;
       }
 
-      await options.onDue?.(raw);
+      try {
+        await options.onDue?.(raw);
+      } catch (error) {
+        await this.#alarms.create(raw.alarmName, {
+          when: now.getTime() + REMINDER_DELIVERY_RETRY_MS,
+        });
+        throw error;
+      }
       const delivered: ReminderRecord = {
         ...raw,
         status: "delivered",

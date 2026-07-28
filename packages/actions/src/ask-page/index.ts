@@ -67,7 +67,9 @@ const askPage = defineAction<AskPageCommand>({
     const service = requirePageServices(context.page);
     const selection = command.scope === "selection";
     const page = await service.extract({
-      preferSelection: selection,
+      // A current selection is the narrowest and most relevant Ask Page
+      // context, even when the transcript did not explicitly say "selection".
+      preferSelection: true,
       ...(selection ? { requireSelection: true } : {}),
     });
     const answer = await service.runModelTask({

@@ -17,6 +17,34 @@ interface PanelNote {
   readonly updatedAt: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBoundedString(
+  value: unknown,
+  maximum: number,
+  minimum = 0,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= minimum &&
+    value.length <= maximum
+  );
+}
+
+function isPanelNote(value: unknown): value is PanelNote {
+  if (!isRecord(value)) return false;
+  return (
+    isBoundedString(value.id, 128, 1) &&
+    isBoundedString(value.body, 10_000, 1) &&
+    isBoundedString(value.createdAt, 35, 1) &&
+    isBoundedString(value.updatedAt, 35, 1) &&
+    Number.isFinite(Date.parse(value.createdAt)) &&
+    Number.isFinite(Date.parse(value.updatedAt))
+  );
+}
+
 type PanelMessage =
   | {
       target: "sidepanel";
@@ -78,6 +106,87 @@ type PanelMessage =
       };
     }
   | { target: "sidepanel"; type: "pipeline-error"; message: string };
+
+function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
+  switch (message.type) {
+    case "screenshot-permission-needed": {
+      if (!isRecord(message.workflow)) return false;
+      const workflow = message.workflow;
+      if (
+        !Object.keys(workflow).every((key) =>
+          ["kind", "originPattern", "host", "pendingCommand"].includes(key)
+        ) ||
+        workflow.kind !== "screenshot-permission" ||
+        workflow.originPattern !== "<all_urls>" ||
+        !isBoundedString(workflow.host, 300, 1) ||
+        !isRecord(workflow.pendingCommand)
+      ) {
+        return false;
+      }
+      const command = workflow.pendingCommand;
+      return (
+        Object.keys(command).length === 2 &&
+        command.action === "screenshot" &&
+        (command.destination === "copy" ||
+          command.destination === "claude")
+      );
+    }
+    case "page-text":
+      return (
+        isBoundedString(message.text, 120_000, 1) &&
+        (message.title === undefined ||
+          isBoundedString(message.title, 600))
+      );
+    case "rewrite-fallback":
+      return isBoundedString(message.text, 24_000, 1);
+    case "reading-progress":
+      return (
+        typeof message.current === "number" &&
+        Number.isFinite(message.current) &&
+        message.current >= 0 &&
+        typeof message.total === "number" &&
+        Number.isFinite(message.total) &&
+        message.total > 0 &&
+        message.current <= message.total
+      );
+    case "notes-updated":
+      return (
+        Array.isArray(message.notes) &&
+        message.notes.length <= 5_000 &&
+        message.notes.every(isPanelNote)
+      );
+    case "reminder-fired":
+    case "reminder-opened": {
+      if (!isRecord(message.reminder)) return false;
+      return (
+        isBoundedString(message.reminder.id, 128, 1) &&
+        isBoundedString(message.reminder.text, 1_000, 1) &&
+        isBoundedString(message.reminder.dueAt, 35, 1) &&
+        Number.isFinite(Date.parse(message.reminder.dueAt)) &&
+        (message.reminder.notificationPermission === undefined ||
+          message.reminder.notificationPermission === "granted" ||
+          message.reminder.notificationPermission === "denied")
+      );
+    }
+    case "model-progress":
+      return (
+        (message.model === "nano" ||
+          message.model === "stt" ||
+          message.model === "summarizer" ||
+          message.model === "rewriter") &&
+        typeof message.progress === "number" &&
+        Number.isFinite(message.progress) &&
+        message.progress >= 0 &&
+        message.progress <= 1 &&
+        (message.status === undefined ||
+          isBoundedString(message.status, 100)) &&
+        (message.file === undefined ||
+          isBoundedString(message.file, 1_000))
+      );
+    default:
+      return true;
+  }
+}
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -337,6 +446,20 @@ function renderNotes(notes: readonly PanelNote[]): void {
     item.append(body, time);
     notesList.append(item);
   }
+}
+
+function showReminder(
+  reminder: {
+    readonly text: string;
+    readonly notificationPermission?: string;
+  },
+  notificationDenied = false,
+): void {
+  reminderBanner.textContent =
+    notificationDenied && reminder.notificationPermission === "denied"
+      ? `Reminder: ${reminder.text} — desktop notifications are disabled.`
+      : `Reminder: ${reminder.text}`;
+  reminderBanner.hidden = false;
 }
 
 function updateLogTime(time: HTMLTimeElement, now: Date): void {
@@ -652,8 +775,13 @@ copyScreenshot.addEventListener("click", async () => {
 
 chrome.runtime.onMessage.addListener((raw: unknown) => {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return;
-  const message = raw as PanelMessage;
-  if (message.target !== "sidepanel") return;
+  const record = raw as Record<string, unknown>;
+  if (record.target !== "sidepanel") return;
+  if (!validatesV02PanelPayload(record)) {
+    console.warn("Sotto rejected an invalid side-panel message", record.type);
+    return;
+  }
+  const message = record as unknown as PanelMessage;
 
   switch (message.type) {
     case "engine-status":
@@ -707,12 +835,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       break;
     case "reminder-fired":
     case "reminder-opened":
-      reminderBanner.textContent =
-        message.type === "reminder-fired" &&
-        message.reminder.notificationPermission === "denied"
-          ? `Reminder: ${message.reminder.text} — desktop notifications are disabled.`
-          : `Reminder: ${message.reminder.text}`;
-      reminderBanner.hidden = false;
+      showReminder(message.reminder, message.type === "reminder-fired");
       break;
     case "earcon":
       void playEarcon(message.kind);
@@ -755,6 +878,39 @@ async function showAssignedShortcut(): Promise<void> {
   }
 }
 
+async function showReminderFromLocation(): Promise<void> {
+  if (typeof location === "undefined" || !location.hash.startsWith("#")) return;
+  const reminderId = new URLSearchParams(location.hash.slice(1)).get("reminder");
+  if (
+    !reminderId ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(reminderId)
+  ) {
+    return;
+  }
+  try {
+    const reminder = await requestWorker<{
+      readonly id: string;
+      readonly text: string;
+      readonly dueAt: string;
+    }>({ type: "get-reminder", reminderId });
+    if (
+      reminder?.id === reminderId &&
+      typeof reminder.text === "string" &&
+      reminder.text.length >= 1 &&
+      reminder.text.length <= 1_000 &&
+      typeof reminder.dueAt === "string" &&
+      Number.isFinite(Date.parse(reminder.dueAt))
+    ) {
+      showReminder(reminder);
+    }
+  } catch (error) {
+    appendLog(
+      "reminder",
+      error instanceof Error ? error.message : "Reminder is unavailable",
+    );
+  }
+}
+
 showTranscript("");
 void send({ type: "get-status" });
 void requestWorker<readonly PanelNote[]>({ type: "get-notes" })
@@ -769,3 +925,4 @@ void requestWorker<readonly PanelNote[]>({ type: "get-notes" })
   });
 void loadCapturePermissionState();
 void showAssignedShortcut();
+void showReminderFromLocation();

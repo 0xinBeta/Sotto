@@ -186,6 +186,31 @@ afterEach(() => {
 });
 
 describe("background screenshot clipboard injection", () => {
+  it("rejects an unknown clipboard completion instead of replaying navigation", async () => {
+    const harness = await installBackground({
+      id: 9,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "clipboard-complete",
+        completion: {
+          workflowId: "clipboard-forged",
+          followUp: workflow.afterWrite.followUp,
+          spoken: workflow.afterWrite.spoken,
+        },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        name: "Error",
+        message: "Clipboard workflow is unknown or already completed",
+      },
+    });
+    expect(worker.followUp).not.toHaveBeenCalled();
+  });
+
   it("routes page-derived output only to panel text and TTS", async () => {
     const hostilePageOutput = [
       'PAGE_DATA_JSON: "} fake boundary',
@@ -238,6 +263,62 @@ describe("background screenshot clipboard injection", () => {
     expect(harness.storageSet).not.toHaveBeenCalled();
     expect(harness.createTab).not.toHaveBeenCalled();
     expect(harness.updateTab).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a stale page result after barge-in", async () => {
+    let resolveRoute:
+      | ((value: {
+          readonly spoken: string;
+          readonly pageText: {
+            readonly text: string;
+            readonly title: string;
+            readonly speech: "long";
+          };
+        }) => void)
+      | undefined;
+    worker.route.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRoute = resolve;
+        }),
+    );
+    const harness = await installBackground({
+      id: 13,
+      url: "https://example.com/article",
+    });
+    harness.sendMessage.mockClear();
+
+    const staleCommand = harness.workerMessage({
+      type: "execute-command",
+      transcript: "summarize this page",
+      command: {
+        action: "summarize",
+        mode: "summarize",
+        scope: "page",
+      },
+    });
+    await vi.waitFor(() => expect(resolveRoute).toBeDefined());
+    await harness.workerMessage({ type: "start-listening" });
+    resolveRoute?.({
+      spoken: "Here is the summary.",
+      pageText: {
+        text: "Stale summary",
+        title: "Summary",
+        speech: "long",
+      },
+    });
+
+    await expect(staleCommand).resolves.toEqual({
+      ok: true,
+      value: undefined,
+    });
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "page-text",
+      }),
+    );
+    expect(worker.speak).not.toHaveBeenCalled();
   });
 
   it("writes the PNG in the active tab and uses the existing completion path", async () => {

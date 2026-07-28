@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const nano = vi.hoisted(() => ({
+  askPageWithPrompt: vi.fn(),
   getNanoAvailability: vi.fn(),
   respondOneSentence: vi.fn(),
+  rewriteWithPrompt: vi.fn(),
+  summarizeWithPrompt: vi.fn(),
 }));
 
 vi.mock("@ricky0123/vad-web", () => ({
@@ -13,11 +16,14 @@ vi.mock("@sotto/core", () => ({
   ActionRegistry: class ActionRegistry {},
 }));
 vi.mock("@sotto/nano", () => ({
+  askPageWithPrompt: nano.askPageWithPrompt,
   createParserSession: vi.fn(),
   createResponderSession: vi.fn(),
   getNanoAvailability: nano.getNanoAvailability,
   parseCommand: vi.fn(),
   respondOneSentence: nano.respondOneSentence,
+  rewriteWithPrompt: nano.rewriteWithPrompt,
+  summarizeWithPrompt: nano.summarizeWithPrompt,
 }));
 vi.mock("@sotto/stt", () => ({
   MoonshineEngine: class MoonshineEngine {
@@ -28,9 +34,12 @@ vi.mock("@sotto/stt", () => ({
 }));
 
 afterEach(() => {
+  nano.askPageWithPrompt.mockReset();
   vi.resetModules();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  nano.rewriteWithPrompt.mockReset();
+  nano.summarizeWithPrompt.mockReset();
 });
 
 describe("offscreen fail-soft status", () => {
@@ -178,5 +187,95 @@ describe("offscreen fail-soft status", () => {
       type: "speak",
       text: "Screenshot ready. Click Copy in Sotto.",
     });
+  });
+
+  it("aborts a pending page task when a new transcript barges in", async () => {
+    nano.getNanoAvailability.mockResolvedValue("unavailable");
+    let taskSignal: AbortSignal | undefined;
+    nano.askPageWithPrompt.mockImplementation(
+      async (
+        _question: string,
+        _pageText: string,
+        options: { readonly signal?: AbortSignal },
+      ) => {
+        taskSignal = options.signal;
+        return new Promise<string>((_resolve, reject) => {
+          options.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    );
+    const sendMessage = vi.fn().mockImplementation(
+      async (message: { readonly target?: string }) =>
+        message.target === "worker" ? { ok: true } : undefined,
+    );
+    let onMessage:
+      | ((
+          message: unknown,
+          sender: unknown,
+          respond: (response: unknown) => void,
+        ) => boolean | void)
+      | undefined;
+    vi.stubGlobal("navigator", {
+      permissions: {
+        query: vi.fn().mockResolvedValue({ state: "denied" }),
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+    });
+    vi.stubGlobal("chrome", {
+      runtime: {
+        getURL: vi.fn((path: string) => `chrome-extension://sotto/${path}`),
+        sendMessage,
+        onMessage: {
+          addListener: vi.fn((listener) => {
+            onMessage = listener;
+          }),
+        },
+      },
+    });
+
+    await import("../src/offscreen.js");
+    if (!onMessage) throw new Error("Offscreen message listener was not installed");
+
+    const pageResponse = new Promise<unknown>((resolve) => {
+      onMessage?.(
+        {
+          target: "offscreen",
+          type: "page-task",
+          task: {
+            role: "ask-page",
+            pageText: "Page data",
+            question: "What happened?",
+          },
+        },
+        {},
+        resolve,
+      );
+    });
+    await vi.waitFor(() => expect(taskSignal).toBeDefined());
+
+    const transcriptResponse = new Promise<unknown>((resolve) => {
+      onMessage?.(
+        {
+          target: "offscreen",
+          type: "parse-transcript",
+          transcript: "new command",
+        },
+        {},
+        resolve,
+      );
+    });
+
+    await expect(transcriptResponse).resolves.toEqual({ ok: true });
+    await expect(pageResponse).resolves.toEqual({
+      ok: false,
+      error: { name: "Error", message: "Aborted" },
+    });
+    expect(taskSignal?.aborted).toBe(true);
   });
 });

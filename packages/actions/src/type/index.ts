@@ -70,6 +70,7 @@ const typeAction = defineAction<TypeCommand>({
           snapshot.source === "selection"
             ? "insertReplacementText"
             : "insertText",
+        rememberAsDictation: true,
       });
       return { spoken: "Typed it." };
     }
@@ -80,6 +81,7 @@ const typeAction = defineAction<TypeCommand>({
       allowLastDictated: true,
     });
     const rewritten = await services.rewrite({
+      snapshotId: snapshot.snapshotId,
       source: snapshot.selectedText,
       transformation: command.transformation,
     });
@@ -87,6 +89,7 @@ const typeAction = defineAction<TypeCommand>({
       snapshotId: snapshot.snapshotId,
       text: rewritten,
       inputType: "insertReplacementText",
+      rememberAsDictation: false,
     });
     return { spoken: "Rewrote the selection." };
   },

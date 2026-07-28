@@ -7,6 +7,7 @@ import type {
 } from "./types.js";
 
 const MODEL_ID = "onnx-community/moonshine-tiny-ONNX";
+const MODEL_REVISION = "a6da1241cd305dcd64eab1edbd615f2bb9aabb95";
 const WASM_ASSET_PATH = "assets/ort-transformers/";
 
 const DTYPE = {
@@ -158,6 +159,7 @@ export class MoonshineEngine implements SttEngine {
       {
         device,
         dtype,
+        revision: MODEL_REVISION,
         progress_callback: (progress) => {
           this.#emitProgress(progress as SttProgress);
         },
