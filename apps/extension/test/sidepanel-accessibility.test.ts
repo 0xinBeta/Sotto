@@ -9,6 +9,10 @@ const panelStyles = readFileSync(
   new URL("../src/styles.css", import.meta.url),
   "utf8",
 );
+const panelSource = readFileSync(
+  new URL("../src/sidepanel.ts", import.meta.url),
+  "utf8",
+);
 
 function openingTag(id: string): string {
   const tag = panelMarkup.match(
@@ -44,6 +48,16 @@ describe("side-panel accessibility structure", () => {
     );
     expect(openingTag("pause-reading")).toContain('type="button"');
     expect(openingTag("skip-reading")).toContain('type="button"');
+    expect(openingTag("reading-text-output")).toContain('role="region"');
+    expect(openingTag("reading-text-output")).toContain('tabindex="0"');
+  });
+
+  it("renders reading sentences through textContent only", () => {
+    expect(panelSource).toContain(
+      "sentenceElement.textContent = sentence.text;",
+    );
+    expect(panelSource).not.toContain("innerHTML");
+    expect(panelSource).not.toContain("insertAdjacentHTML");
   });
 
   it("uses labels and ordered headings", () => {

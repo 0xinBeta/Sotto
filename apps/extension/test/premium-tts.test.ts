@@ -280,6 +280,72 @@ describe("PremiumTtsRouter", () => {
     ).toEqual(["First sentence.", "Second sentence."]);
   });
 
+  it("reports the same aggregate boundaries for system and premium speech", async () => {
+    const readWith = async (premium: boolean) => {
+      const system = systemHarness();
+      let router!: PremiumTtsRouter;
+      const request = vi.fn(async (message: PremiumTtsRequest) => {
+        if (message.type !== "premium-speak") return;
+        await new Promise<void>((resolve) => {
+          queueMicrotask(() => {
+            router.notifyFirstAudio(message.utteranceId ?? "");
+            resolve();
+          });
+        });
+      });
+      const onProgress = vi.fn();
+      router = new PremiumTtsRouter({ system, request });
+      router.updateStatus({ state: "ready", enabled: premium });
+
+      await router.speakLong("One. Two.", { onProgress });
+
+      expect(
+        system.speakLong.mock.calls.every(
+          ([, options]) => options?.onProgress === undefined,
+        ),
+      ).toBe(true);
+      return onProgress.mock.calls.map(([progress]) => progress);
+    };
+
+    const systemProgress = await readWith(false);
+    const premiumProgress = await readWith(true);
+    expect(systemProgress).toEqual(premiumProgress);
+    expect(systemProgress).toEqual([
+      {
+        charIndex: 0,
+        totalChars: 9,
+        chunkIndex: 0,
+        chunkCount: 2,
+        chunkCharIndex: 0,
+        eventType: "start",
+      },
+      {
+        charIndex: 4,
+        totalChars: 9,
+        chunkIndex: 0,
+        chunkCount: 2,
+        chunkCharIndex: 4,
+        eventType: "end",
+      },
+      {
+        charIndex: 5,
+        totalChars: 9,
+        chunkIndex: 1,
+        chunkCount: 2,
+        chunkCharIndex: 0,
+        eventType: "sentence",
+      },
+      {
+        charIndex: 9,
+        totalChars: 9,
+        chunkIndex: 1,
+        chunkCount: 2,
+        chunkCharIndex: 4,
+        eventType: "end",
+      },
+    ]);
+  });
+
   it("adopts a newly ready engine during a download transition", async () => {
     const system = systemHarness();
     let router!: PremiumTtsRouter;

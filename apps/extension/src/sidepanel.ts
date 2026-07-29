@@ -4,6 +4,7 @@ import type {
   ScreenshotPermissionWorkflow,
 } from "@sotto/core";
 import { performClipboardWorkflow } from "@sotto/destinations";
+import type { TtsProgressEventType } from "@sotto/tts";
 import {
   isKokoroVoiceId,
   KOKORO_VOICE,
@@ -26,6 +27,12 @@ import {
   DEFAULT_SPEECH_SETTINGS,
   type SpeechSettings,
 } from "./speech-settings.js";
+import {
+  activeReadingSentenceIndex,
+  createReadingPlan,
+  type ReadingPlan,
+  type ReadingProgressPoint,
+} from "./reading-progress.js";
 import {
   deriveSetupViewState,
   type NanoSetupState,
@@ -223,6 +230,10 @@ type PanelMessage =
       type: "reading-progress";
       current: number;
       total: number;
+      chunkIndex?: number;
+      chunkCount?: number;
+      chunkCharIndex?: number;
+      eventType?: TtsProgressEventType;
     }
   | {
       target: "sidepanel";
@@ -353,7 +364,34 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         typeof message.total === "number" &&
         Number.isFinite(message.total) &&
         message.total > 0 &&
-        message.current <= message.total
+        message.current <= message.total &&
+        (
+          (
+            message.chunkIndex === undefined &&
+            message.chunkCount === undefined &&
+            message.chunkCharIndex === undefined &&
+            message.eventType === undefined
+          ) ||
+          (
+            typeof message.chunkIndex === "number" &&
+            Number.isInteger(message.chunkIndex) &&
+            message.chunkIndex >= 0 &&
+            typeof message.chunkCount === "number" &&
+            Number.isInteger(message.chunkCount) &&
+            message.chunkCount > 0 &&
+            message.chunkIndex < message.chunkCount &&
+            typeof message.chunkCharIndex === "number" &&
+            Number.isInteger(message.chunkCharIndex) &&
+            message.chunkCharIndex >= 0 &&
+            (
+              message.eventType === "start" ||
+              message.eventType === "word" ||
+              message.eventType === "sentence" ||
+              message.eventType === "marker" ||
+              message.eventType === "end"
+            )
+          )
+        )
       );
     case "reading-state":
       return (
@@ -638,6 +676,8 @@ const copyDiagnosticReport =
 const pageTextCard = requiredElement<HTMLElement>("#page-text-card");
 const pageTextTitle = requiredElement<HTMLElement>("#page-text-title");
 const pageTextOutput = requiredElement<HTMLElement>("#page-text-output");
+const readingTextOutput =
+  requiredElement<HTMLElement>("#reading-text-output");
 const closePageText = requiredElement<HTMLButtonElement>("#close-page-text");
 const readingProgress = requiredElement<HTMLProgressElement>("#reading-progress");
 const readingControls = requiredElement<HTMLElement>("#reading-controls");
@@ -658,6 +698,13 @@ let isListening = false;
 let isQuietMode = false;
 let isReading = false;
 let isReadingPaused = false;
+let readingView:
+  | {
+      readonly plan: ReadingPlan;
+      readonly elements: readonly HTMLElement[];
+      activeSentence: number;
+    }
+  | undefined;
 let isDictating = false;
 let isDictationPaused = false;
 let panelNotes: readonly PanelNote[] = [];
@@ -965,9 +1012,85 @@ function showTranscript(text: string): void {
   transcript.dataset.placeholder = String(!text);
 }
 
+function updateReadingSentence(
+  element: HTMLElement,
+  state: "past" | "active" | "upcoming",
+): void {
+  element.dataset.state = state;
+  if (state === "active") {
+    element.setAttribute("aria-current", "true");
+  } else {
+    element.removeAttribute("aria-current");
+  }
+}
+
+function showActiveReadingSentence(
+  progress: ReadingProgressPoint,
+  autoScroll = true,
+): void {
+  if (!readingView) return;
+  const next = activeReadingSentenceIndex(readingView.plan, progress);
+  if (next < 0 || next === readingView.activeSentence) return;
+
+  for (const [index, element] of readingView.elements.entries()) {
+    updateReadingSentence(
+      element,
+      index < next ? "past" : index === next ? "active" : "upcoming",
+    );
+  }
+  readingView.activeSentence = next;
+  if (
+    autoScroll &&
+    !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
+    readingView.elements[next]?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  }
+}
+
+function startReadingView(text: string): void {
+  const plan = createReadingPlan(text);
+  const elements: HTMLElement[] = [];
+  readingTextOutput.replaceChildren();
+
+  for (const [index, sentence] of plan.sentences.entries()) {
+    if (index > 0) {
+      readingTextOutput.append(document.createTextNode(" "));
+    }
+    const sentenceElement = document.createElement("span");
+    sentenceElement.className = "reading-sentence";
+    sentenceElement.textContent = sentence.text;
+    readingTextOutput.append(sentenceElement);
+    elements.push(sentenceElement);
+  }
+
+  readingView = { plan, elements, activeSentence: -1 };
+  pageTextOutput.hidden = true;
+  readingTextOutput.hidden = false;
+  pageTextCard.hidden = false;
+  showActiveReadingSentence({ charIndex: 0 }, false);
+}
+
+function clearReadingView(): void {
+  readingView = undefined;
+  readingTextOutput.replaceChildren();
+  readingTextOutput.hidden = true;
+  pageTextOutput.hidden = false;
+  pageTextOutput.textContent = "";
+  pageTextCard.hidden = true;
+}
+
 function showReadingState(active: boolean, paused: boolean): void {
+  const wasReading = isReading;
   isReading = active;
   isReadingPaused = paused;
+  if (active && !wasReading) {
+    startReadingView(pageTextOutput.textContent);
+  } else if (!active && readingView) {
+    clearReadingView();
+  }
   readingControls.hidden = !active;
   pauseReading.textContent = paused ? "Resume" : "Pause";
   pauseReading.setAttribute(
@@ -1642,7 +1765,7 @@ function showReminder(
 ): void {
   reminderBanner.textContent =
     notificationDenied && reminder.notificationPermission === "denied"
-      ? `Reminder: ${reminder.text} — desktop notifications are disabled.`
+      ? `Reminder: ${reminder.text}. Desktop notifications are off.`
       : `Reminder: ${reminder.text}`;
   reminderBanner.hidden = false;
 }
@@ -2119,7 +2242,7 @@ async function receiveClipboardWorkflow(
   } catch {
     showClipboardWorkflow(workflow);
     const message =
-      "Chrome blocks clipboard writes while Sotto and the page are both unfocused — click Copy.";
+      "Chrome cannot copy while Sotto and the page are inactive. Select Copy.";
     clipboardCopy.textContent = message;
     appendLog("copy screenshot", message);
   }
@@ -2270,12 +2393,25 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       );
       break;
     case "reading-progress":
+      if (!isReading || !readingView) break;
       readingProgress.hidden = false;
       readingProgress.max = Math.max(1, message.total);
       readingProgress.value = Math.max(
         0,
         Math.min(readingProgress.max, message.current),
       );
+      showActiveReadingSentence({
+        charIndex: message.current,
+        ...(message.chunkIndex === undefined
+          ? {}
+          : { chunkIndex: message.chunkIndex }),
+        ...(message.chunkCount === undefined
+          ? {}
+          : { chunkCount: message.chunkCount }),
+        ...(message.eventType === undefined
+          ? {}
+          : { eventType: message.eventType }),
+      });
       break;
     case "reading-state":
       showReadingState(message.active, message.paused);

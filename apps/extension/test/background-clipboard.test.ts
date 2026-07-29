@@ -1058,6 +1058,84 @@ describe("background screenshot clipboard injection", () => {
     );
   });
 
+  it("forwards read chunk progress and clears the completed read", async () => {
+    const pageText = "One. Two.";
+    worker.route.mockResolvedValue({
+      spoken: "Reading the page.",
+      pageText: {
+        text: pageText,
+        title: "Local page",
+        speech: "long",
+      },
+    });
+    worker.speak.mockImplementation(
+      async (
+        _text: string,
+        options: {
+          readonly onProgress?: (progress: {
+            readonly charIndex: number;
+            readonly totalChars: number;
+            readonly chunkIndex: number;
+            readonly chunkCount: number;
+            readonly chunkCharIndex: number;
+            readonly eventType: "sentence";
+          }) => void;
+        },
+      ) => {
+        options.onProgress?.({
+          charIndex: 5,
+          totalChars: pageText.length,
+          chunkIndex: 1,
+          chunkCount: 2,
+          chunkCharIndex: 0,
+          eventType: "sentence",
+        });
+      },
+    );
+    const harness = await installBackground({
+      id: 112,
+      url: "https://example.com/article",
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "read this page",
+      command: {
+        action: "summarize",
+        mode: "read",
+        scope: "page",
+      },
+    });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reading-progress",
+      current: 5,
+      total: pageText.length,
+      chunkIndex: 1,
+      chunkCount: 2,
+      chunkCharIndex: 0,
+      eventType: "sentence",
+    });
+    const readingStates = harness.sendMessage.mock.calls
+      .map(([message]) => message)
+      .filter((message) => message.type === "reading-state");
+    expect(readingStates).toEqual([
+      {
+        target: "sidepanel",
+        type: "reading-state",
+        active: true,
+        paused: false,
+      },
+      {
+        target: "sidepanel",
+        type: "reading-state",
+        active: false,
+        paused: false,
+      },
+    ]);
+  });
+
   it("does not publish a stale page result after barge-in", async () => {
     let resolveRoute:
       | ((value: {

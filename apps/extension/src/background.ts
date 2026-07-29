@@ -1647,6 +1647,10 @@ async function publishActionResult(
                   type: "reading-progress",
                   current: progress.charIndex,
                   total: progress.totalChars,
+                  chunkIndex: progress.chunkIndex,
+                  chunkCount: progress.chunkCount,
+                  chunkCharIndex: progress.chunkCharIndex,
+                  eventType: progress.eventType,
                 });
               },
             }, false),

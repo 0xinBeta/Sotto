@@ -96,6 +96,10 @@ class FakeElement {
     return this.attributes[name] ?? null;
   }
 
+  removeAttribute(name: string): void {
+    delete this.attributes[name];
+  }
+
   setAttribute(name: string, value: string): void {
     this.attributes[name] = value;
   }
@@ -213,6 +217,7 @@ const elementIds = [
   "page-text-card",
   "page-text-title",
   "page-text-output",
+  "reading-text-output",
   "close-page-text",
   "reading-progress",
   "reading-controls",
@@ -258,6 +263,7 @@ async function installSidepanel(options: {
   readonly capturePermissionGranted?: boolean;
   readonly quietMode?: boolean;
   readonly retryWorkflow?: typeof workflow;
+  readonly reducedMotion?: boolean;
   readonly speechSettings?: {
     readonly rate: number;
     readonly volume: number;
@@ -268,6 +274,7 @@ async function installSidepanel(options: {
   ) as Record<(typeof elementIds)[number], FakeElement>;
   elements["setup-complete"].hidden = true;
   elements["clipboard-card"].hidden = true;
+  elements["reading-text-output"].hidden = true;
   elements["reading-controls"].hidden = true;
   const emptyLog = new FakeElement("li");
   emptyLog.className = "empty-log";
@@ -340,6 +347,9 @@ async function installSidepanel(options: {
   });
   vi.stubGlobal("window", {
     clearTimeout,
+    matchMedia: vi.fn(() => ({
+      matches: options.reducedMotion ?? false,
+    })),
     setTimeout,
   });
   vi.stubGlobal("navigator", {
@@ -946,6 +956,114 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["reading-progress"].hidden).toBe(true);
   });
 
+  it("advances the highlight on progress and skip, then clears on stop", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    const text = "First sentence. Second sentence. Third sentence.";
+    onMessage({
+      target: "sidepanel",
+      type: "page-text",
+      title: "Article",
+      text,
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "reading-state",
+      active: true,
+      paused: false,
+    });
+
+    const sentences = elements["reading-text-output"].children.filter(
+      (child): child is FakeElement => child instanceof FakeElement,
+    );
+    expect(sentences.map((sentence) => sentence.textContent)).toEqual([
+      "First sentence.",
+      "Second sentence.",
+      "Third sentence.",
+    ]);
+    expect(sentences[0]?.dataset.state).toBe("active");
+    expect(sentences[1]?.dataset.state).toBe("upcoming");
+    expect(elements["page-text-output"].hidden).toBe(true);
+    expect(elements["reading-text-output"].hidden).toBe(false);
+
+    onMessage({
+      target: "sidepanel",
+      type: "reading-progress",
+      current: "First sentence.".length,
+      total: text.length,
+      chunkIndex: 0,
+      chunkCount: 3,
+      chunkCharIndex: "First sentence.".length,
+      eventType: "end",
+    });
+    expect(sentences[0]?.dataset.state).toBe("past");
+    expect(sentences[1]?.dataset.state).toBe("active");
+    expect(sentences[1]?.scrollIntoView).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "nearest",
+    });
+
+    await elements["skip-reading"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "playback-control",
+      operation: "skip",
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "reading-progress",
+      current: "First sentence. Second sentence.".length,
+      total: text.length,
+      chunkIndex: 1,
+      chunkCount: 3,
+      chunkCharIndex: "Second sentence.".length,
+      eventType: "end",
+    });
+    expect(sentences[1]?.dataset.state).toBe("past");
+    expect(sentences[2]?.dataset.state).toBe("active");
+
+    onMessage({
+      target: "sidepanel",
+      type: "reading-state",
+      active: false,
+      paused: false,
+    });
+    expect(elements["reading-text-output"].hidden).toBe(true);
+    expect(elements["reading-text-output"].children).toHaveLength(0);
+    expect(elements["page-text-output"].textContent).toBe("");
+    expect(elements["page-text-card"].hidden).toBe(true);
+  });
+
+  it("moves the highlight without auto-scroll for reduced motion", async () => {
+    const { elements, onMessage } = await installSidepanel({
+      reducedMotion: true,
+    });
+    const text = "First. Second.";
+    onMessage({ target: "sidepanel", type: "page-text", text });
+    onMessage({
+      target: "sidepanel",
+      type: "reading-state",
+      active: true,
+      paused: false,
+    });
+    const sentences = elements["reading-text-output"].children.filter(
+      (child): child is FakeElement => child instanceof FakeElement,
+    );
+
+    onMessage({
+      target: "sidepanel",
+      type: "reading-progress",
+      current: "First.".length,
+      total: text.length,
+      chunkIndex: 0,
+      chunkCount: 2,
+      chunkCharIndex: "First.".length,
+      eventType: "end",
+    });
+
+    expect(sentences[1]?.dataset.state).toBe("active");
+    expect(sentences[1]?.scrollIntoView).not.toHaveBeenCalled();
+  });
+
   it("keeps the guided setup expanded on a fresh install", async () => {
     const { elements } = await installSidepanel({
       capturePermissionGranted: false,
@@ -1059,7 +1177,8 @@ describe("side-panel screenshot clipboard fallback", () => {
 
   it("renders page-model and note text as inert textContent", async () => {
     const { elements, onMessage } = await installSidepanel();
-    const untrusted = '<img src=x onerror="chrome.runtime.sendMessage(1)">';
+    const untrusted =
+      '<img src=x onerror="chrome.runtime.sendMessage(1)">. Safe sentence.';
 
     onMessage({
       target: "sidepanel",
@@ -1085,6 +1204,25 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["notes-list"].firstElementChild?.textContent).toContain(
       untrusted,
     );
+
+    onMessage({
+      target: "sidepanel",
+      type: "reading-state",
+      active: true,
+      paused: false,
+    });
+    const sentences = elements["reading-text-output"].children.filter(
+      (child): child is FakeElement => child instanceof FakeElement,
+    );
+    expect(sentences.every((sentence) => sentence.tagName === "span")).toBe(
+      true,
+    );
+    expect(sentences.map((sentence) => sentence.textContent).join(" ")).toBe(
+      untrusted,
+    );
+    expect(
+      sentences.every((sentence) => !sentence.listeners.has("click")),
+    ).toBe(true);
   });
 
   it("filters notes by text without a worker request", async () => {
@@ -1309,7 +1447,7 @@ describe("side-panel screenshot clipboard fallback", () => {
       expect(elements["clipboard-card"].hidden).toBe(false);
     });
     const message =
-      "Chrome blocks clipboard writes while Sotto and the page are both unfocused — click Copy.";
+      "Chrome cannot copy while Sotto and the page are inactive. Select Copy.";
     expect(elements["clipboard-copy"].textContent).toBe(message);
     expect(elements["copy-screenshot"].textContent).toBe(workflow.buttonLabel);
     expect(elements["action-log"].textContent).toContain(

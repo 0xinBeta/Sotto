@@ -8,6 +8,9 @@ import {
   KOKORO_VOICE,
   type KokoroVoiceId,
 } from "@sotto/tts/kokoro";
+import { createReadingPlan } from "./reading-progress.js";
+
+export { splitReadingChunks as splitPremiumSentences } from "./reading-progress.js";
 
 export const PREMIUM_TTS_ENABLED_KEY = "premiumTtsEnabled";
 export const PREMIUM_TTS_DOWNLOADED_KEY = "premiumTtsDownloaded";
@@ -16,30 +19,6 @@ export const PREMIUM_FIRST_AUDIO_TIMEOUT_MS = 750;
 export const PREMIUM_TTS_PREVIEW_TEXT = "This is my Sotto voice.";
 
 const IDLE_RETRY_DELAY_MS = 5_000;
-const MAX_SENTENCE_CHARACTERS = 200;
-const SENTENCE_ABBREVIATIONS = new Set([
-  "capt",
-  "col",
-  "dept",
-  "dr",
-  "etc",
-  "gen",
-  "gov",
-  "inc",
-  "jr",
-  "lt",
-  "maj",
-  "mr",
-  "mrs",
-  "ms",
-  "prof",
-  "rep",
-  "sen",
-  "sgt",
-  "sr",
-  "st",
-  "vs",
-]);
 
 export type PremiumTtsState =
   | "absent"
@@ -104,94 +83,6 @@ export async function previewPremiumVoiceSelection(
     await options.persist(options.previousVoice);
     throw error;
   }
-}
-
-function safeUtf16End(text: string, end: number): number {
-  if (end <= 0 || end >= text.length) return end;
-  const previous = text.charCodeAt(end - 1);
-  const next = text.charCodeAt(end);
-  return previous >= 0xd800 &&
-      previous <= 0xdbff &&
-      next >= 0xdc00 &&
-      next <= 0xdfff
-    ? end - 1
-    : end;
-}
-
-function hardCapSentence(sentence: string): string[] {
-  const chunks: string[] = [];
-  let remaining = sentence.trim();
-  while (remaining.length > MAX_SENTENCE_CHARACTERS) {
-    const maximum = safeUtf16End(remaining, MAX_SENTENCE_CHARACTERS);
-    const candidate = remaining.slice(0, maximum);
-    const whitespace = candidate.lastIndexOf(" ");
-    const boundary = whitespace >= Math.floor(maximum * 0.55)
-      ? whitespace
-      : maximum;
-    chunks.push(remaining.slice(0, boundary).trim());
-    remaining = remaining.slice(boundary).trim();
-  }
-  if (remaining) chunks.push(remaining);
-  return chunks;
-}
-
-export function splitPremiumSentences(text: string): string[] {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) return [];
-
-  const sentences: string[] = [];
-  let start = 0;
-  for (let index = 0; index < normalized.length; index += 1) {
-    const character = normalized[index];
-    if (
-      character !== "." &&
-      character !== "!" &&
-      character !== "?" &&
-      character !== "…"
-    ) {
-      continue;
-    }
-
-    let punctuationEnd = index + 1;
-    while (
-      punctuationEnd < normalized.length &&
-      /[.!?…"'”’)\]]/.test(normalized[punctuationEnd] ?? "")
-    ) {
-      punctuationEnd += 1;
-    }
-    let next = punctuationEnd;
-    while (next < normalized.length && /\s/.test(normalized[next] ?? "")) {
-      next += 1;
-    }
-    if (next < normalized.length && next === punctuationEnd) continue;
-
-    if (character === "." && next < normalized.length) {
-      const tokenStart = normalized.lastIndexOf(" ", index - 1) + 1;
-      const token = normalized.slice(tokenStart, index + 1);
-      const bareToken = token.replace(/\.+$/, "").toLowerCase();
-      if (
-        SENTENCE_ABBREVIATIONS.has(bareToken) ||
-        /^(?:[A-Za-z]\.){2,}$/.test(token) ||
-        (/\d/.test(normalized[index - 1] ?? "") &&
-          /\d/.test(normalized[index + 1] ?? "")) ||
-        /[a-z]/.test(normalized[next] ?? "")
-      ) {
-        continue;
-      }
-    }
-
-    const sentence = normalized.slice(start, punctuationEnd).trim();
-    if (/[\p{L}\p{N}]/u.test(sentence)) sentences.push(sentence);
-    start = punctuationEnd;
-    while (start < normalized.length && /\s/.test(normalized[start] ?? "")) {
-      start += 1;
-    }
-    index = start - 1;
-  }
-
-  const remainder = normalized.slice(start).trim();
-  if (/[\p{L}\p{N}]/u.test(remainder)) sentences.push(remainder);
-  return sentences.flatMap(hardCapSentence).filter(Boolean);
 }
 
 export function premiumEnabledByDefault(
@@ -300,22 +191,41 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     text: string,
     options: TtsLongSpeakOptions = {},
   ): Promise<void> {
-    const chunks = splitPremiumSentences(text);
+    const plan = createReadingPlan(text);
+    const chunks = plan.chunks;
     if (chunks.length === 0) return;
-    const normalized = chunks.join(" ");
     const generation = this.#begin();
     this.#active = true;
     this.#activeLongGeneration = generation;
     this.#playbackState = "playing";
-    let charIndex = 0;
     let firstAudioEmitted = false;
+    const { onProgress, ...speakOptions } = options;
     const sentenceOptions: TtsLongSpeakOptions = {
-      ...options,
+      ...speakOptions,
       onFirstAudio() {
         if (firstAudioEmitted) return;
         firstAudioEmitted = true;
         options.onFirstAudio?.();
       },
+    };
+    const reportProgress = (
+      chunkIndex: number,
+      eventType: "start" | "sentence" | "end",
+    ): void => {
+      const chunk = chunks[chunkIndex];
+      if (!chunk) return;
+      try {
+        onProgress?.({
+          charIndex: eventType === "end" ? chunk.end : chunk.start,
+          totalChars: plan.text.length,
+          chunkIndex,
+          chunkCount: chunks.length,
+          chunkCharIndex: eventType === "end" ? chunk.text.length : 0,
+          eventType,
+        });
+      } catch (error) {
+        console.warn("Premium TTS progress callback failed", error);
+      }
     };
 
     try {
@@ -325,8 +235,12 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
         if (this.#pendingSkips > 0) {
           this.#pendingSkips -= 1;
         } else {
+          reportProgress(
+            chunkIndex,
+            chunkIndex === 0 ? "start" : "sentence",
+          );
           await this.#speakSentence(
-            chunk,
+            chunk.text,
             sentenceOptions,
             generation,
             undefined,
@@ -335,22 +249,7 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
           );
         }
         if (generation !== this.#generation) return;
-        charIndex = Math.min(
-          normalized.length,
-          charIndex + chunk.length + (chunkIndex > 0 ? 1 : 0),
-        );
-        try {
-          options.onProgress?.({
-            charIndex,
-            totalChars: normalized.length,
-            chunkIndex,
-            chunkCount: chunks.length,
-            chunkCharIndex: chunk.length,
-            eventType: "end",
-          });
-        } catch (error) {
-          console.warn("Premium TTS progress callback failed", error);
-        }
+        reportProgress(chunkIndex, "end");
       }
     } finally {
       if (generation === this.#generation) {

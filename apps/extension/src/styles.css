@@ -1197,6 +1197,30 @@ progress::-webkit-progress-value {
   white-space: pre-wrap;
 }
 
+.page-text-output:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 3px;
+}
+
+.reading-sentence {
+  border-radius: 3px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.reading-sentence[data-state="past"] {
+  color: var(--paper-dim);
+}
+
+.reading-sentence[data-state="active"] {
+  padding: 0.08em 0.18em;
+  background: var(--acid);
+  box-decoration-break: clone;
+  color: var(--acid-ink);
+  -webkit-box-decoration-break: clone;
+}
+
 .reading-controls {
   display: flex;
   gap: 8px;
