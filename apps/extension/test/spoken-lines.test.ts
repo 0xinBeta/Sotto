@@ -22,6 +22,8 @@ const KNOWN_KEYS: readonly SpokenLineKey[] = [
   "rewritten",
   "searching",
   "screenshot-copied",
+  "media-paused",
+  "media-playing",
 ];
 
 describe("spoken confirmation lines", () => {

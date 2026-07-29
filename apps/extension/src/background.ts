@@ -4,6 +4,7 @@ import type {
   PlaybackCommand,
   PlaybackOperation,
 } from "@sotto/actions/playback";
+import type { MediaCommand } from "@sotto/actions/media";
 import type { SummarizeCommand } from "@sotto/actions/summarize";
 import {
   isReminderRecord,
@@ -28,6 +29,8 @@ import {
   type FindActionServices,
   type FindPageOperation,
   type FindPageResult,
+  type MediaActionServices,
+  type MediaControlResult,
   type PageActionServices,
   type PageModelTask,
   type ScreenQuestionServices,
@@ -187,6 +190,7 @@ function actionContext(): ActionContext {
     type: editableActionServices,
     dictation: dictationActionServices,
     find: findActionServices,
+    media: mediaActionServices,
     settings: {
       get: async () => ({
         ...await speechSettings.get(),
@@ -1052,6 +1056,78 @@ async function runFindOnActivePage(
 
 const findActionServices: FindActionServices = {
   run: runFindOnActivePage,
+};
+
+function parseMediaControlResult(value: unknown): MediaControlResult {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    throw new TypeError("The page media control returned invalid data");
+  }
+  const result = value as { readonly status?: unknown };
+  if (
+    (
+      result.status !== "paused" &&
+      result.status !== "playing" &&
+      result.status !== "blocked" &&
+      result.status !== "no-media"
+    ) ||
+    Object.keys(result).some((key) => key !== "status")
+  ) {
+    throw new TypeError("The page media control returned invalid data");
+  }
+  return { status: result.status };
+}
+
+async function runMediaOnActivePage(
+  operation: MediaCommand["operation"],
+): Promise<MediaControlResult> {
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (activeTab?.id === undefined) return { status: "no-media" };
+
+  try {
+    const epochNonce = crypto.randomUUID();
+    await chrome.scripting.executeScript({
+      target: { tabId: activeTab.id, frameIds: [0] },
+      files: ["mediaControl.js"],
+      world: "ISOLATED",
+    });
+    const raw = (await chrome.tabs.sendMessage(
+      activeTab.id,
+      {
+        target: "sotto-media-control",
+        epochNonce,
+        operation,
+      },
+      { frameId: 0 },
+    )) as
+      | {
+          readonly ok?: unknown;
+          readonly epoch?: unknown;
+          readonly value?: unknown;
+        }
+      | undefined;
+    await assertFreshNavigationEpoch(
+      activeTab.id,
+      0,
+      raw?.epoch,
+      epochNonce,
+    );
+    if (raw?.ok !== true) return { status: "no-media" };
+    return parseMediaControlResult(raw.value);
+  } catch (error) {
+    if (errorMessage(error) === PAGE_CHANGED_RESPONSE) throw error;
+    return { status: "no-media" };
+  }
+}
+
+const mediaActionServices: MediaActionServices = {
+  run: runMediaOnActivePage,
 };
 
 function parseExtractedPage(value: unknown): ExtractedPageText {

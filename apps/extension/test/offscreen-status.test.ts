@@ -1544,6 +1544,32 @@ describe("offscreen fail-soft status", () => {
     });
   });
 
+  it("speaks the exact media result in brief mode", async () => {
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockClear();
+    nano.respondOneSentence.mockReset();
+
+    await expect(
+      harness.message({
+        type: "action-result",
+        transcript: "pause the video",
+        command: { action: "media", operation: "pause" },
+        result: { spoken: "Paused." },
+        verbosity: "brief",
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(nano.respondOneSentence).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "speak",
+      text: "Paused.",
+      heard: "pause the video",
+      did: "Paused.",
+      timings: { input: "voice" },
+    });
+  });
+
   it("suppresses the completion earcon when quiet mode is on", async () => {
     const harness = await installPremiumOffscreen();
     harness.sendMessage.mockImplementation(

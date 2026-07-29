@@ -235,6 +235,72 @@
     "transcript": "next sentence",
     "expected": { "action": "playback", "operation": "skip" }
   },
+  {
+    "id": "media-pause-video-01",
+    "transcript": "pause the video",
+    "expected": { "action": "media", "operation": "pause" }
+  },
+  {
+    "id": "media-pause-video-02",
+    "transcript": "pause this video",
+    "expected": { "action": "media", "operation": "pause" }
+  },
+  {
+    "id": "media-pause-audio-01",
+    "transcript": "pause the music",
+    "expected": { "action": "media", "operation": "pause" }
+  },
+  {
+    "id": "media-pause-audio-02",
+    "transcript": "pause the audio",
+    "expected": { "action": "media", "operation": "pause" }
+  },
+  {
+    "id": "media-play-video-01",
+    "transcript": "play the video",
+    "expected": { "action": "media", "operation": "play" }
+  },
+  {
+    "id": "media-play-video-02",
+    "transcript": "play this video",
+    "expected": { "action": "media", "operation": "play" }
+  },
+  {
+    "id": "media-play-audio-01",
+    "transcript": "play the music",
+    "expected": { "action": "media", "operation": "play" }
+  },
+  {
+    "id": "media-play-video-03",
+    "transcript": "resume the video",
+    "expected": { "action": "media", "operation": "play" }
+  },
+  {
+    "id": "media-negative-01",
+    "transcript": "pause my reading",
+    "negativeFor": "media",
+    "confusable": true,
+    "expected": { "action": "playback", "operation": "pause" }
+  },
+  {
+    "id": "media-negative-02",
+    "transcript": "mute the video tab",
+    "negativeFor": "media",
+    "confusable": true,
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "media-negative-03",
+    "transcript": "turn the video volume down",
+    "negativeFor": "media",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "media-negative-04",
+    "transcript": "skip ahead in the video",
+    "negativeFor": "media",
+    "expected": { "action": "unknown" }
+  },
 
   {
     "id": "ask-page-01",

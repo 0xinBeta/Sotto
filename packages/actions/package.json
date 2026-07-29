@@ -62,6 +62,10 @@
       "types": "./dist/navigate/index.d.ts",
       "import": "./dist/navigate/index.js"
     },
+    "./media": {
+      "types": "./dist/media/index.d.ts",
+      "import": "./dist/media/index.js"
+    },
     "./playback": {
       "types": "./dist/playback/index.d.ts",
       "import": "./dist/playback/index.js"

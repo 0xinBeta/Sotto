@@ -83,6 +83,13 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps at least six media-control cases", () => {
+    expect(
+      cases.filter((testCase) => testCase.expected.action === "media")
+        .length,
+    ).toBeGreaterThanOrEqual(6);
+  });
+
   it("keeps at least four quiet mode cases", () => {
     expect(
       cases.filter((testCase) =>

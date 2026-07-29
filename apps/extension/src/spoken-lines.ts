@@ -15,6 +15,8 @@ export const SPOKEN_LINE_KEYS = [
   "rewritten",
   "searching",
   "screenshot-copied",
+  "media-paused",
+  "media-playing",
 ] as const;
 
 export type SpokenLineKey = (typeof SPOKEN_LINE_KEYS)[number];
@@ -80,6 +82,14 @@ const SPOKEN_LINES: Record<SpokenLineKey, SpokenLineVariants> = {
   "screenshot-copied": {
     normal: "Screenshot copied.",
     brief: "Copied.",
+  },
+  "media-paused": {
+    normal: "Paused.",
+    brief: "Paused.",
+  },
+  "media-playing": {
+    normal: "Playing.",
+    brief: "Playing.",
   },
 };
 

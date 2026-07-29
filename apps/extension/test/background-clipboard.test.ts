@@ -309,6 +309,134 @@ afterEach(() => {
 });
 
 describe("background navigation epochs", () => {
+  it("runs page media control through an on-demand epoch bridge", async () => {
+    worker.route.mockImplementation(
+      async (
+        _command: unknown,
+        context: {
+          readonly media: {
+            run(operation: "pause" | "play"): Promise<{
+              readonly status: string;
+            }>;
+          };
+        },
+      ) => {
+        const result = await context.media.run("pause");
+        return {
+          spoken: result.status === "paused" ? "Paused." : "Not paused.",
+        };
+      },
+    );
+    const harness = await installBackground({
+      id: 27,
+      url: "https://example.test/watch",
+    });
+    harness.executeScript.mockImplementation(
+      async (details: { readonly files?: readonly string[] }) =>
+        details.files
+          ? [{ frameId: 0 }]
+          : [{ frameId: 0, result: "https://example.test/watch" }],
+    );
+    harness.tabSendMessage.mockImplementation(
+      async (
+        _tabId: number,
+        message: { readonly epochNonce: string },
+      ) => ({
+        ok: true,
+        epoch: {
+          href: "https://example.test/watch",
+          nonce: message.epochNonce,
+        },
+        value: { status: "paused" },
+      }),
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "pause the video",
+        command: { action: "media", operation: "pause" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Paused." },
+    });
+
+    expect(harness.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 27, frameIds: [0] },
+      files: ["mediaControl.js"],
+      world: "ISOLATED",
+    });
+    expect(harness.tabSendMessage).toHaveBeenCalledWith(
+      27,
+      {
+        target: "sotto-media-control",
+        epochNonce: expect.any(String),
+        operation: "pause",
+      },
+      { frameId: 0 },
+    );
+  });
+
+  it("discards a media result after the frame URL changes", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    worker.route.mockImplementation(
+      async (
+        _command: unknown,
+        context: {
+          readonly media: {
+            run(operation: "pause" | "play"): Promise<{
+              readonly status: string;
+            }>;
+          };
+        },
+      ) => {
+        const result = await context.media.run("play");
+        return { spoken: result.status };
+      },
+    );
+    const harness = await installBackground({
+      id: 28,
+      url: "https://example.test/one",
+    });
+    harness.executeScript.mockImplementation(
+      async (details: { readonly files?: readonly string[] }) =>
+        details.files
+          ? [{ frameId: 0 }]
+          : [{ frameId: 0, result: "https://example.test/two" }],
+    );
+    harness.tabSendMessage.mockImplementation(
+      async (
+        _tabId: number,
+        message: { readonly epochNonce: string },
+      ) => ({
+        ok: true,
+        epoch: {
+          href: "https://example.test/one",
+          nonce: message.epochNonce,
+        },
+        value: { status: "playing" },
+      }),
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "play the video",
+        command: { action: "media", operation: "play" },
+      }),
+    ).resolves.toEqual({ ok: true, value: undefined });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-error",
+        spoken: "The page changed. Try again.",
+        detail: "The page changed. Try again.",
+      }),
+    );
+  });
+
   it("runs page search through an on-demand epoch bridge", async () => {
     worker.route.mockImplementation(
       async (
@@ -584,6 +712,7 @@ describe("background screenshot clipboard injection", () => {
       "find",
       { action: "find", operation: "search", query: "pricing" },
     ],
+    ["media", { action: "media", operation: "pause" }],
     ["scroll", { action: "page-control", operation: "scroll-down" }],
     ["zoom", { action: "page-control", operation: "zoom-in" }],
   ])("refuses the %s page action on a blocked site", async (_name, command) => {

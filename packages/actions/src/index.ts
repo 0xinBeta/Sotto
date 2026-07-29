@@ -4,6 +4,7 @@ import bookmarksAction from "./bookmarks/index.js";
 import dictationAction from "./dictation/index.js";
 import findAction from "./find/index.js";
 import helpAction from "./help/index.js";
+import mediaAction from "./media/index.js";
 import navigateAction from "./navigate/index.js";
 import notesAction from "./notes/index.js";
 import pageControlAction from "./page-control/index.js";
@@ -60,6 +61,14 @@ export type {
   HelpCommand,
   HelpMode,
 } from "./help/index.js";
+export {
+  default as mediaAction,
+  mediaSchema,
+} from "./media/index.js";
+export type {
+  MediaCommand,
+  MediaOperation,
+} from "./media/index.js";
 export {
   default as notesAction,
   notesSchema,
@@ -173,6 +182,7 @@ export const actions = [
   navigateAction,
   notesAction,
   pageControlAction,
+  mediaAction,
   playbackAction,
   quietModeAction,
   settingsAction,

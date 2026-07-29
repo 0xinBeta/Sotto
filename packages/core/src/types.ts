@@ -235,6 +235,16 @@ export interface FindActionServices {
   run(operation: FindPageOperation): Promise<FindPageResult>;
 }
 
+export type MediaControlOperation = "pause" | "play";
+
+export interface MediaControlResult {
+  readonly status: "paused" | "playing" | "blocked" | "no-media";
+}
+
+export interface MediaActionServices {
+  run(operation: MediaControlOperation): Promise<MediaControlResult>;
+}
+
 export type ScreenQuestionResult =
   | {
       readonly availability: "unavailable";
@@ -295,6 +305,8 @@ export interface ActionContext {
   readonly dictation?: DictationActionServices;
   /** Worker-owned bridge to the active page search. */
   readonly find?: FindActionServices;
+  /** Worker-owned bridge to media on the active page. */
+  readonly media?: MediaActionServices;
   /** Worker-owned bridge from a visible-tab image to an isolated screen model. */
   readonly screen?: ScreenQuestionServices;
   /** Worker-owned access to the closed set of speech settings. */

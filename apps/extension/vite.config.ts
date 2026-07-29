@@ -165,6 +165,16 @@ function inlineExtractPageRuntime(): Plugin {
           "The findPage content script must be a self-contained script",
         );
       }
+      const mediaControl = bundle["mediaControl.js"];
+      if (
+        !mediaControl ||
+        mediaControl.type !== "chunk" ||
+        /^\s*(?:import|export)\b/m.test(mediaControl.code)
+      ) {
+        throw new Error(
+          "The mediaControl content script must be a self-contained script",
+        );
+      }
     },
   };
 }
@@ -326,6 +336,7 @@ export default defineConfig({
         background: resolve(extensionRoot, "src/background.ts"),
         extractPage: resolve(extensionRoot, "src/extract-page.ts"),
         findPage: resolve(extensionRoot, "src/find-page.ts"),
+        mediaControl: resolve(extensionRoot, "src/media-control.ts"),
         sidepanel: resolve(extensionRoot, "sidepanel.html"),
         offscreen: resolve(extensionRoot, "offscreen.html"),
         requestMic: resolve(extensionRoot, "request-mic.html"),
