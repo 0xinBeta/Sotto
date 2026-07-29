@@ -82,6 +82,7 @@ interface ChromeHarness {
   readonly alarmCreate: ReturnType<typeof vi.fn>;
   readonly createTab: ReturnType<typeof vi.fn>;
   readonly executeScript: ReturnType<typeof vi.fn>;
+  readonly insertCSS: ReturnType<typeof vi.fn>;
   readonly queryTabs: ReturnType<typeof vi.fn>;
   readonly sendMessage: ReturnType<typeof vi.fn>;
   readonly storageSet: ReturnType<typeof vi.fn>;
@@ -153,6 +154,7 @@ async function installBackground(
       ) => void)
     | undefined;
   const executeScript = vi.fn();
+  const insertCSS = vi.fn().mockResolvedValue(undefined);
   const queryTabs = vi.fn().mockResolvedValue([activeTab]);
   const createTab = vi.fn();
   const updateTab = vi.fn();
@@ -190,6 +192,7 @@ async function installBackground(
     },
     scripting: {
       executeScript,
+      insertCSS,
     },
     tabs: {
       query: queryTabs,
@@ -268,6 +271,7 @@ async function installBackground(
     alarmCreate,
     createTab,
     executeScript,
+    insertCSS,
     queryTabs,
     sendMessage,
     storageSet,
@@ -305,6 +309,102 @@ afterEach(() => {
 });
 
 describe("background navigation epochs", () => {
+  it("runs page search through an on-demand epoch bridge", async () => {
+    worker.route.mockImplementation(
+      async (
+        _command: unknown,
+        context: {
+          readonly find: {
+            run(operation: {
+              readonly operation: "search";
+              readonly query: string;
+            }): Promise<{
+              readonly availability: "available" | "unavailable";
+              readonly matches?: number;
+            }>;
+          };
+        },
+      ) => {
+        const result = await context.find.run({
+          operation: "search",
+          query: "pricing",
+        });
+        return {
+          spoken: result.availability === "available"
+            ? `${result.matches} matches.`
+            : "I cannot search this page.",
+        };
+      },
+    );
+    const harness = await installBackground({
+      id: 29,
+      url: "https://example.test/pricing",
+    });
+    harness.executeScript.mockImplementation(
+      async (details: { readonly files?: readonly string[] }) =>
+        details.files
+          ? [{ frameId: 0 }]
+          : [{
+              frameId: 0,
+              result: "https://example.test/pricing",
+            }],
+    );
+    harness.tabSendMessage.mockImplementation(
+      async (
+        _tabId: number,
+        message: { readonly epochNonce: string },
+      ) => ({
+        ok: true,
+        epoch: {
+          href: "https://example.test/pricing",
+          nonce: message.epochNonce,
+        },
+        value: {
+          matches: 2,
+          wrapped: false,
+        },
+      }),
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "find pricing",
+        command: {
+          action: "find",
+          operation: "search",
+          query: "pricing",
+        },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "2 matches." },
+    });
+
+    expect(harness.insertCSS).toHaveBeenCalledWith({
+      target: { tabId: 29, frameIds: [0] },
+      css: expect.stringContaining(
+        "::highlight(sotto-find-current)",
+      ),
+      origin: "USER",
+    });
+    expect(harness.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 29, frameIds: [0] },
+      files: ["findPage.js"],
+      world: "ISOLATED",
+    });
+    expect(harness.tabSendMessage).toHaveBeenCalledWith(
+      29,
+      {
+        target: "sotto-page-find",
+        epochNonce: expect.any(String),
+        operation: "search",
+        query: "pricing",
+      },
+      { frameId: 0 },
+    );
+  });
+
   it("discards extracted page data after the frame URL changes", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     worker.route.mockImplementation(
@@ -480,6 +580,10 @@ describe("background screenshot clipboard injection", () => {
     ],
     ["type", { action: "type", operation: "insert", text: "Local text" }],
     ["dictation", { action: "dictation", operation: "start" }],
+    [
+      "find",
+      { action: "find", operation: "search", query: "pricing" },
+    ],
     ["scroll", { action: "page-control", operation: "scroll-down" }],
     ["zoom", { action: "page-control", operation: "zoom-in" }],
   ])("refuses the %s page action on a blocked site", async (_name, command) => {

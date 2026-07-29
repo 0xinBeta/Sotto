@@ -8,6 +8,7 @@ const PAGE_TOUCHING_ACTIONS = new Set([
   "ask-page",
   "ask-screen",
   "dictation",
+  "find",
   "page-control",
   "screenshot",
   "summarize",

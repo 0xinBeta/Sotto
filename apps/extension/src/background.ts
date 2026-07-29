@@ -25,6 +25,9 @@ import {
   type DictationActionServices,
   type EditableActionServices,
   type ExtractedPageText,
+  type FindActionServices,
+  type FindPageOperation,
+  type FindPageResult,
   type PageActionServices,
   type PageModelTask,
   type ScreenQuestionServices,
@@ -183,6 +186,7 @@ function actionContext(): ActionContext {
     screen: screenQuestionServices,
     type: editableActionServices,
     dictation: dictationActionServices,
+    find: findActionServices,
     settings: {
       get: async () => ({
         ...await speechSettings.get(),
@@ -954,6 +958,101 @@ async function assertFreshNavigationEpoch(
   }
   return epoch;
 }
+
+const FIND_HIGHLIGHT_CSS = [
+  "::highlight(sotto-find-match) {",
+  "  background-color: #fde68a;",
+  "  color: #111827;",
+  "}",
+  "::highlight(sotto-find-current) {",
+  "  background-color: #f59e0b;",
+  "  color: #111827;",
+  "}",
+].join("\n");
+
+function parseFindPageResult(value: unknown): FindPageResult {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    throw new TypeError("The page search returned invalid data");
+  }
+  const result = value as {
+    readonly matches?: unknown;
+    readonly wrapped?: unknown;
+  };
+  if (
+    !Number.isSafeInteger(result.matches) ||
+    (result.matches as number) < 0 ||
+    typeof result.wrapped !== "boolean" ||
+    Object.keys(result).some((key) =>
+      key !== "matches" && key !== "wrapped"
+    )
+  ) {
+    throw new TypeError("The page search returned invalid data");
+  }
+  return {
+    availability: "available",
+    matches: result.matches as number,
+    wrapped: result.wrapped,
+  };
+}
+
+async function runFindOnActivePage(
+  operation: FindPageOperation,
+): Promise<FindPageResult> {
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (activeTab?.id === undefined) return { availability: "unavailable" };
+
+  try {
+    if (operation.operation === "search") {
+      await chrome.scripting.insertCSS({
+        target: { tabId: activeTab.id, frameIds: [0] },
+        css: FIND_HIGHLIGHT_CSS,
+        origin: "USER",
+      });
+    }
+    const epochNonce = crypto.randomUUID();
+    await chrome.scripting.executeScript({
+      target: { tabId: activeTab.id, frameIds: [0] },
+      files: ["findPage.js"],
+      world: "ISOLATED",
+    });
+    const raw = (await chrome.tabs.sendMessage(
+      activeTab.id,
+      {
+        target: "sotto-page-find",
+        epochNonce,
+        ...operation,
+      },
+      { frameId: 0 },
+    )) as
+      | {
+          readonly ok?: unknown;
+          readonly epoch?: unknown;
+          readonly value?: unknown;
+        }
+      | undefined;
+    await assertFreshNavigationEpoch(
+      activeTab.id,
+      0,
+      raw?.epoch,
+      epochNonce,
+    );
+    if (raw?.ok !== true) return { availability: "unavailable" };
+    return parseFindPageResult(raw.value);
+  } catch {
+    return { availability: "unavailable" };
+  }
+}
+
+const findActionServices: FindActionServices = {
+  run: runFindOnActivePage,
+};
 
 function parseExtractedPage(value: unknown): ExtractedPageText {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

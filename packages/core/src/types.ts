@@ -212,6 +212,29 @@ export interface DictationActionServices {
   stop(): Promise<string>;
 }
 
+export type FindPageOperation =
+  | {
+      readonly operation: "search";
+      readonly query: string;
+    }
+  | {
+      readonly operation: "next" | "clear";
+    };
+
+export type FindPageResult =
+  | {
+      readonly availability: "unavailable";
+    }
+  | {
+      readonly availability: "available";
+      readonly matches: number;
+      readonly wrapped: boolean;
+    };
+
+export interface FindActionServices {
+  run(operation: FindPageOperation): Promise<FindPageResult>;
+}
+
 export type ScreenQuestionResult =
   | {
       readonly availability: "unavailable";
@@ -270,6 +293,8 @@ export interface ActionContext {
   readonly type?: EditableActionServices;
   /** Worker-owned continuous dictation session. */
   readonly dictation?: DictationActionServices;
+  /** Worker-owned bridge to the active page search. */
+  readonly find?: FindActionServices;
   /** Worker-owned bridge from a visible-tab image to an isolated screen model. */
   readonly screen?: ScreenQuestionServices;
   /** Worker-owned access to the closed set of speech settings. */

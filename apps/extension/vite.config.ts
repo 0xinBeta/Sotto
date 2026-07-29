@@ -155,6 +155,16 @@ function inlineExtractPageRuntime(): Plugin {
           "The typeBridge content script must be a self-contained script",
         );
       }
+      const findPage = bundle["findPage.js"];
+      if (
+        !findPage ||
+        findPage.type !== "chunk" ||
+        /^\s*(?:import|export)\b/m.test(findPage.code)
+      ) {
+        throw new Error(
+          "The findPage content script must be a self-contained script",
+        );
+      }
     },
   };
 }
@@ -315,6 +325,7 @@ export default defineConfig({
       input: {
         background: resolve(extensionRoot, "src/background.ts"),
         extractPage: resolve(extensionRoot, "src/extract-page.ts"),
+        findPage: resolve(extensionRoot, "src/find-page.ts"),
         sidepanel: resolve(extensionRoot, "sidepanel.html"),
         offscreen: resolve(extensionRoot, "offscreen.html"),
         requestMic: resolve(extensionRoot, "request-mic.html"),

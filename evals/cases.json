@@ -2359,5 +2359,72 @@
     "transcript": "set the video volume to full",
     "negativeFor": "settings",
     "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "find-search-01",
+    "transcript": "find pricing on this page",
+    "expected": { "action": "find", "operation": "search", "query": "pricing" }
+  },
+  {
+    "id": "find-search-02",
+    "transcript": "find privacy",
+    "expected": { "action": "find", "operation": "search", "query": "privacy" }
+  },
+  {
+    "id": "find-search-03",
+    "transcript": "find local setup on this page",
+    "expected": { "action": "find", "operation": "search", "query": "local setup" }
+  },
+  {
+    "id": "find-search-04",
+    "transcript": "find permissions",
+    "expected": { "action": "find", "operation": "search", "query": "permissions" }
+  },
+  {
+    "id": "find-next-01",
+    "transcript": "next match",
+    "expected": { "action": "find", "operation": "next" }
+  },
+  {
+    "id": "find-next-02",
+    "transcript": "go to the next match",
+    "expected": { "action": "find", "operation": "next" }
+  },
+  {
+    "id": "find-clear-01",
+    "transcript": "clear the search",
+    "expected": { "action": "find", "operation": "clear" }
+  },
+  {
+    "id": "find-clear-02",
+    "transcript": "clear page search",
+    "expected": { "action": "find", "operation": "clear" }
+  },
+  {
+    "id": "find-negative-01",
+    "transcript": "search the web for pricing",
+    "negativeFor": "find",
+    "confusable": true,
+    "expected": { "action": "navigate", "operation": "search", "query": "pricing" }
+  },
+  {
+    "id": "find-negative-02",
+    "transcript": "find the calendar browser tab",
+    "negativeFor": "find",
+    "confusable": true,
+    "expected": { "action": "tabs", "operation": "switch", "target": "calendar" }
+  },
+  {
+    "id": "find-negative-03",
+    "transcript": "go to the next tab",
+    "negativeFor": "find",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "find-negative-04",
+    "transcript": "clear my browsing history",
+    "negativeFor": "find",
+    "expected": { "action": "unknown" }
   }
 ]
