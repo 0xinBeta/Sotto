@@ -14,8 +14,12 @@ import {
 import { nextLogEntry, type LogEntry } from "./log.js";
 import {
   formatExchangeTimings,
+  formatLatencyDuration,
   isExchangeTimings,
+  isLatencyStatistics,
   type ExchangeTimings,
+  type LatencyStageStatistics,
+  type LatencyStatistics,
 } from "./timings.js";
 import {
   isCommandReference,
@@ -210,6 +214,11 @@ type PanelMessage =
     }
   | {
       target: "sidepanel";
+      type: "latency-statistics";
+      statistics: LatencyStatistics;
+    }
+  | {
+      target: "sidepanel";
       type: "screenshot-ready";
       workflow: ClipboardWorkflow;
     }
@@ -314,6 +323,8 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         (message.timings === undefined ||
           isExchangeTimings(message.timings))
       );
+    case "latency-statistics":
+      return isLatencyStatistics(message.statistics);
     case "screenshot-permission-needed": {
       if (!isRecord(message.workflow)) return false;
       const workflow = message.workflow;
@@ -615,6 +626,12 @@ const actionLog = requiredElement<HTMLOListElement>("#action-log");
 const actionLogAnnouncer =
   requiredElement<HTMLElement>("#action-log-announcer");
 const clearLog = requiredElement<HTMLButtonElement>("#clear-log");
+const latencyReadout =
+  requiredElement<HTMLDetailsElement>("#latency-readout");
+const latencySummary =
+  requiredElement<HTMLElement>("#latency-summary");
+const latencyDetails =
+  requiredElement<HTMLTableSectionElement>("#latency-details");
 const nanoProgressCard = requiredElement<HTMLElement>("#nano-progress-card");
 const nanoProgress = requiredElement<HTMLProgressElement>("#nano-progress");
 const nanoProgressValue = requiredElement<HTMLOutputElement>("#nano-progress-value");
@@ -1798,6 +1815,63 @@ function createTimingLine(
   return line;
 }
 
+const latencyStages: readonly [
+  string,
+  keyof Pick<
+    LatencyStatistics,
+    "stt" | "parse" | "act" | "voice" | "total"
+  >,
+][] = [
+  ["Speech input", "stt"],
+  ["Parse", "parse"],
+  ["Act", "act"],
+  ["Voice", "voice"],
+  ["Total", "total"],
+];
+
+function latencyValue(
+  stage: LatencyStageStatistics,
+  percentile: "p50Ms" | "p95Ms",
+): string {
+  const value = stage[percentile];
+  return value === undefined ? "—" : formatLatencyDuration(value);
+}
+
+function renderLatencyStatistics(statistics: LatencyStatistics): void {
+  if (
+    statistics.sampleCount === 0 ||
+    statistics.total.p50Ms === undefined ||
+    statistics.total.p95Ms === undefined
+  ) {
+    latencyReadout.hidden = true;
+    latencyDetails.replaceChildren();
+    return;
+  }
+
+  latencyReadout.hidden = false;
+  latencySummary.textContent =
+    `p50 ${formatLatencyDuration(statistics.total.p50Ms)} · ` +
+    `p95 ${formatLatencyDuration(statistics.total.p95Ms)} ` +
+    `(n=${statistics.sampleCount})`;
+  latencyDetails.replaceChildren(
+    ...latencyStages.map(([label, key]) => {
+      const stage = statistics[key];
+      const row = document.createElement("tr");
+      const name = document.createElement("th");
+      const p50 = document.createElement("td");
+      const p95 = document.createElement("td");
+      const count = document.createElement("td");
+      name.scope = "row";
+      name.textContent = label;
+      p50.textContent = latencyValue(stage, "p50Ms");
+      p95.textContent = latencyValue(stage, "p95Ms");
+      count.textContent = String(stage.sampleCount);
+      row.append(name, p50, p95, count);
+      return row;
+    }),
+  );
+}
+
 function actionLogAnnouncement(heard: string, did: string): string {
   const heardText = /[.!?]$/.test(heard) ? heard : `${heard}.`;
   const didText = /[.!?]$/.test(did) ? did : `${did}.`;
@@ -2441,6 +2515,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
     case "action-log":
       appendLog(message.heard, message.did, message.timings);
       break;
+    case "latency-statistics":
+      renderLatencyStatistics(message.statistics);
+      break;
     case "screenshot-ready":
       void receiveClipboardWorkflow(message.workflow);
       break;
@@ -2519,6 +2596,15 @@ async function loadCommandReference(): Promise<void> {
   }
 }
 
+async function loadLatencyStatistics(): Promise<void> {
+  const statistics = await requestWorker<unknown>({
+    type: "get-latency-statistics",
+  });
+  if (isLatencyStatistics(statistics)) {
+    renderLatencyStatistics(statistics);
+  }
+}
+
 showTranscript("");
 micMeter.dataset.state = "idle";
 micMeterFill.style.transform = "scaleX(0)";
@@ -2550,5 +2636,6 @@ void loadCapturePermissionState();
 void showAssignedShortcut();
 void showReminderFromLocation();
 void loadCommandReference().catch(() => undefined);
+void loadLatencyStatistics().catch(() => undefined);
 void loadSpeechSettings();
 void loadQuietMode();

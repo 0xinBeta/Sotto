@@ -38,7 +38,8 @@ type ReportField =
   | "rate"
   | "volume"
   | "storageBytes"
-  | "pipelineErrors";
+  | "pipelineErrors"
+  | "latency";
 
 const reportTypeHasOnlyAllowedFields: Equal<
   keyof DiagnosticReportInput,
@@ -94,6 +95,14 @@ function reportInput(): DiagnosticReportInput {
         message: "WebGPU device was lost",
       },
     ],
+    latency: {
+      sampleCount: 2,
+      stt: { sampleCount: 1, p50Ms: 420, p95Ms: 420 },
+      parse: { sampleCount: 2, p50Ms: 310, p95Ms: 500 },
+      act: { sampleCount: 2, p50Ms: 45, p95Ms: 90 },
+      voice: { sampleCount: 1, p50Ms: 1_100, p95Ms: 1_100 },
+      total: { sampleCount: 2, p50Ms: 855, p95Ms: 1_690 },
+    },
   };
 }
 
@@ -145,11 +154,37 @@ describe("diagnostic report", () => {
         "## Permissions",
         "Microphone: granted",
         "",
+        "## Latency",
+        "Samples: 2",
+        "| Stage | p50 | p95 | Samples |",
+        "| --- | ---: | ---: | ---: |",
+        "| Speech input | 420ms | 420ms | 1 |",
+        "| Parse | 310ms | 500ms | 2 |",
+        "| Act | 45ms | 90ms | 2 |",
+        "| Voice | 1.1s | 1.1s | 1 |",
+        "| Total | 855ms | 1.7s | 2 |",
+        "",
         "## Pipeline errors",
         "- 2026-07-29T10:19:00.000Z — WebGPU device was lost",
       ].join("\n"),
     );
     expect(report.split("\n").length).toBeLessThanOrEqual(120);
+  });
+
+  it("renders missing latency stages in the report", () => {
+    const input = reportInput();
+    const report = buildDiagnosticReport({
+      ...input,
+      latency: {
+        ...input.latency,
+        stt: { sampleCount: 0 },
+      },
+    });
+
+    expect(report).toContain("## Latency");
+    expect(report).toContain("Samples: 2");
+    expect(report).toContain("| Speech input | — | — | 0 |");
+    expect(report).toContain("| Total | 855ms | 1.7s | 2 |");
   });
 
   it("does not copy sensitive application state into the report", () => {

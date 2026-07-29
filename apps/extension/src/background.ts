@@ -47,7 +47,9 @@ import {
   type PremiumTtsState,
 } from "./premium-tts.js";
 import {
+  ExchangeTimingBuffer,
   isExchangeTimings,
+  type LatencyStatistics,
   type ExchangeTimings,
 } from "./timings.js";
 import { createCommandReference } from "./command-reference.js";
@@ -122,6 +124,7 @@ let lastSpokenResponse: string | undefined;
 let pendingReminderConfirmationId: string | undefined;
 const dictationSession = new DictationTargetSession();
 const pipelineErrors = new PipelineErrorBuffer();
+const exchangeTimings = new ExchangeTimingBuffer();
 
 function actionContext(): ActionContext {
   return {
@@ -270,8 +273,27 @@ async function sendPanel(message: Record<string, unknown>): Promise<boolean> {
   ) {
     pipelineErrors.add(message.message);
   }
+  let latency: LatencyStatistics | undefined;
+  if (
+    message.type === "action-log" &&
+    isExchangeTimings(message.timings)
+  ) {
+    exchangeTimings.add(message.timings);
+    latency = exchangeTimings.statistics();
+  }
   try {
     await chrome.runtime.sendMessage({ target: "sidepanel", ...message });
+    if (latency !== undefined) {
+      try {
+        await chrome.runtime.sendMessage({
+          target: "sidepanel",
+          type: "latency-statistics",
+          statistics: latency,
+        });
+      } catch {
+        // The action log reached the panel. A later exchange can update latency.
+      }
+    }
     return true;
   } catch {
     // The panel is intentionally optional; hotkey voice commands still work.
@@ -342,6 +364,7 @@ async function createDiagnosticReport(): Promise<string> {
     volume: settings.volume,
     storageBytes,
     pipelineErrors: pipelineErrors.snapshot(),
+    latency: exchangeTimings.statistics(),
   };
   return buildDiagnosticReport(input);
 }
@@ -2046,6 +2069,8 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return setQuietMode(message.enabled);
     case "get-diagnostic-report":
       return createDiagnosticReport();
+    case "get-latency-statistics":
+      return exchangeTimings.statistics();
     case "get-speech-settings":
       return speechSettings.get();
     case "set-speech-settings": {

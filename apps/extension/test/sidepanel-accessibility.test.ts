@@ -30,6 +30,7 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("action-log-announcer")).toContain(
       'aria-live="polite"',
     );
+    expect(openingTag("latency-summary")).toContain('aria-live="polite"');
 
     expect(openingTag("listen-button")).toContain('aria-pressed="false"');
     expect(openingTag("listen-button")).toContain(

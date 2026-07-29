@@ -476,6 +476,25 @@
           <h2 class="section-index" id="log-heading">02 / DID</h2>
           <button class="link-button" id="clear-log" type="button">Clear</button>
         </div>
+        <details class="latency-readout" id="latency-readout" hidden>
+          <summary
+            id="latency-summary"
+            aria-live="polite"
+            aria-atomic="true"
+          ></summary>
+          <table>
+            <caption class="sr-only">Latency by stage</caption>
+            <thead>
+              <tr>
+                <th scope="col">Stage</th>
+                <th scope="col">p50</th>
+                <th scope="col">p95</th>
+                <th scope="col">n</th>
+              </tr>
+            </thead>
+            <tbody id="latency-details"></tbody>
+          </table>
+        </details>
         <ol class="action-log" id="action-log">
           <li class="empty-log">No commands yet.</li>
         </ol>

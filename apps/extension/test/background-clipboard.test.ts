@@ -1239,6 +1239,48 @@ describe("background screenshot clipboard injection", () => {
     expect(worker.speak).not.toHaveBeenCalled();
   });
 
+  it("keeps session latency and publishes each aggregate update", async () => {
+    const silentResult = {
+      spoken: "Done.",
+      silent: true,
+    } as const;
+    worker.route.mockResolvedValue(silentResult);
+    const harness = await installBackground({
+      id: 120,
+      url: "https://example.com/article",
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "first command",
+      command: { action: "page-control", operation: "scroll-down" },
+      timings: { input: "typed", parseMs: 100 },
+    });
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "second command",
+      command: { action: "page-control", operation: "scroll-down" },
+      timings: { input: "voice", sttMs: 50, parseMs: 200 },
+    });
+
+    await expect(
+      harness.workerMessage({ type: "get-latency-statistics" }),
+    ).resolves.toEqual({
+      ok: true,
+      value: expect.objectContaining({
+        sampleCount: 2,
+        stt: { sampleCount: 1, p50Ms: 50, p95Ms: 50 },
+        parse: { sampleCount: 2, p50Ms: 100, p95Ms: 200 },
+        total: expect.objectContaining({ sampleCount: 2 }),
+      }),
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "latency-statistics",
+      statistics: expect.objectContaining({ sampleCount: 2 }),
+    });
+  });
+
   it("keeps a read for playback controls and stops it for another command", async () => {
     let finishRead!: () => void;
     worker.speak.mockImplementation(

@@ -1352,6 +1352,41 @@ progress::-webkit-progress-value {
   padding-bottom: 32px;
 }
 
+.latency-readout {
+  margin-top: 10px;
+  color: var(--paper-dim);
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.latency-readout summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.latency-readout summary::marker {
+  color: var(--acid);
+}
+
+.latency-readout table {
+  width: 100%;
+  margin-top: 9px;
+  border-collapse: collapse;
+}
+
+.latency-readout th,
+.latency-readout td {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--rule);
+  text-align: right;
+}
+
+.latency-readout th:first-child,
+.latency-readout td:first-child {
+  text-align: left;
+}
+
 .commands-panel {
   padding: 22px 0 10px;
   border-top: 1px solid var(--rule);

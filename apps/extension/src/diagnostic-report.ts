@@ -7,6 +7,11 @@ import type {
   PremiumSttState,
 } from "./premium-stt.js";
 import type { PremiumTtsState } from "./premium-tts.js";
+import {
+  formatLatencyDuration,
+  type LatencyStageStatistics,
+  type LatencyStatistics,
+} from "./timings.js";
 
 export interface DiagnosticModel {
   readonly id: ModelId;
@@ -51,6 +56,7 @@ export interface DiagnosticReportInput extends DiagnosticOffscreenState {
   readonly volume: number;
   readonly storageBytes: number;
   readonly pipelineErrors: readonly DiagnosticPipelineError[];
+  readonly latency: LatencyStatistics;
 }
 
 const MAX_MODELS = 40;
@@ -122,6 +128,14 @@ function formatBytes(value: number | undefined): string {
     if (amount < 1_024 || nextUnit === units.at(-1)) break;
   }
   return `${amount.toFixed(amount >= 10 ? 1 : 2)} ${unit}`;
+}
+
+function formatLatencyValue(
+  stage: LatencyStageStatistics,
+  percentile: "p50Ms" | "p95Ms",
+): string {
+  const value = stage[percentile];
+  return value === undefined ? "—" : formatLatencyDuration(value);
 }
 
 export function sanitizePipelineErrorMessage(message: string): string {
@@ -201,6 +215,16 @@ export function buildDiagnosticReport(
     "",
     "## Permissions",
     `Microphone: ${input.micPermission}`,
+    "",
+    "## Latency",
+    `Samples: ${input.latency.sampleCount}`,
+    "| Stage | p50 | p95 | Samples |",
+    "| --- | ---: | ---: | ---: |",
+    `| Speech input | ${formatLatencyValue(input.latency.stt, "p50Ms")} | ${formatLatencyValue(input.latency.stt, "p95Ms")} | ${input.latency.stt.sampleCount} |`,
+    `| Parse | ${formatLatencyValue(input.latency.parse, "p50Ms")} | ${formatLatencyValue(input.latency.parse, "p95Ms")} | ${input.latency.parse.sampleCount} |`,
+    `| Act | ${formatLatencyValue(input.latency.act, "p50Ms")} | ${formatLatencyValue(input.latency.act, "p95Ms")} | ${input.latency.act.sampleCount} |`,
+    `| Voice | ${formatLatencyValue(input.latency.voice, "p50Ms")} | ${formatLatencyValue(input.latency.voice, "p95Ms")} | ${input.latency.voice.sampleCount} |`,
+    `| Total | ${formatLatencyValue(input.latency.total, "p50Ms")} | ${formatLatencyValue(input.latency.total, "p95Ms")} | ${input.latency.total.sampleCount} |`,
     "",
     "## Pipeline errors",
   );

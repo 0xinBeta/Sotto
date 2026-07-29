@@ -180,6 +180,9 @@ const elementIds = [
   "action-log",
   "action-log-announcer",
   "clear-log",
+  "latency-readout",
+  "latency-summary",
+  "latency-details",
   "nano-progress-card",
   "nano-progress",
   "nano-progress-value",
@@ -276,6 +279,7 @@ async function installSidepanel(options: {
   elements["clipboard-card"].hidden = true;
   elements["reading-text-output"].hidden = true;
   elements["reading-controls"].hidden = true;
+  elements["latency-readout"].hidden = true;
   const emptyLog = new FakeElement("li");
   emptyLog.className = "empty-log";
   emptyLog.textContent = "No commands yet.";
@@ -1502,6 +1506,34 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["action-log-announcer"].textUpdateCount).toBe(2);
     expect(elements["action-log-announcer"].textContent).toBe(
       "open calendar. Opened Calendar. Repeated 2 times.",
+    );
+  });
+
+  it("updates the compact and expanded latency readout", async () => {
+    const { elements, onMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "latency-statistics",
+      statistics: {
+        sampleCount: 2,
+        stt: { sampleCount: 1, p50Ms: 420, p95Ms: 420 },
+        parse: { sampleCount: 2, p50Ms: 310, p95Ms: 500 },
+        act: { sampleCount: 2, p50Ms: 45, p95Ms: 90 },
+        voice: { sampleCount: 1, p50Ms: 1_100, p95Ms: 1_100 },
+        total: { sampleCount: 2, p50Ms: 855, p95Ms: 1_690 },
+      },
+    });
+
+    expect(elements["latency-readout"].hidden).toBe(false);
+    expect(elements["latency-summary"].textContent).toBe(
+      "p50 855ms · p95 1.7s (n=2)",
+    );
+    expect(elements["latency-details"].textContent).toContain(
+      "Speech input420ms420ms1",
+    );
+    expect(elements["latency-details"].textContent).toContain(
+      "Voice1.1s1.1s1",
     );
   });
 
