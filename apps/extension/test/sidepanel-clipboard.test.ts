@@ -224,6 +224,12 @@ const elementIds = [
   "speech-volume",
   "speech-volume-value",
   "response-verbosity",
+  "blocked-site-form",
+  "blocked-site-input",
+  "add-blocked-site",
+  "block-current-site",
+  "blocked-sites-list",
+  "blocked-sites-status",
   "copy-diagnostic-report",
   "export-settings-backup",
   "choose-settings-backup",
@@ -298,6 +304,10 @@ async function installSidepanel(options: {
     readonly volume: number;
     readonly verbosity: "normal" | "brief";
   };
+  readonly blockedSites?: {
+    readonly hostnames: readonly string[];
+    readonly currentHostname?: string;
+  };
   readonly commands?: readonly {
     readonly name: string;
     readonly shortcut: string;
@@ -321,10 +331,15 @@ async function installSidepanel(options: {
   const documentListeners = new Map<string, Listener[]>();
   const requestPermission = vi.fn().mockResolvedValue(true);
   const clipboardWriteText = vi.fn().mockResolvedValue(undefined);
+  let blockedSites = options.blockedSites ?? {
+    hostnames: [] as readonly string[],
+    currentHostname: "example.com",
+  };
   const sendMessage = vi.fn().mockImplementation(
     async (message: {
       readonly type?: string;
       readonly enabled?: unknown;
+      readonly hostname?: unknown;
     }) => {
       if (message.type === "get-diagnostic-report") {
         return {
@@ -343,6 +358,40 @@ async function installSidepanel(options: {
           ok: true,
           value: options.quietMode ?? false,
         };
+      }
+      if (message.type === "get-blocked-sites") {
+        return { ok: true, value: blockedSites };
+      }
+      if (message.type === "add-blocked-site") {
+        blockedSites = {
+          ...blockedSites,
+          hostnames: [
+            ...blockedSites.hostnames,
+            message.hostname as string,
+          ],
+        };
+        return { ok: true, value: blockedSites };
+      }
+      if (message.type === "block-current-site") {
+        blockedSites = {
+          ...blockedSites,
+          hostnames: blockedSites.currentHostname === undefined
+            ? blockedSites.hostnames
+            : [
+                ...blockedSites.hostnames,
+                blockedSites.currentHostname,
+              ],
+        };
+        return { ok: true, value: blockedSites };
+      }
+      if (message.type === "remove-blocked-site") {
+        blockedSites = {
+          ...blockedSites,
+          hostnames: blockedSites.hostnames.filter(
+            (hostname) => hostname !== message.hostname,
+          ),
+        };
+        return { ok: true, value: blockedSites };
       }
       if (message.type === "preview-settings-import") {
         const preview = options.backupPreview ?? {
@@ -671,6 +720,44 @@ describe("side-panel screenshot clipboard fallback", () => {
         volume: 0,
         verbosity: "normal",
       })
+    );
+  });
+
+  it("shows the active hostname and quick-adds and removes it", async () => {
+    const { elements, sendMessage } = await installSidepanel({
+      blockedSites: {
+        hostnames: [],
+        currentHostname: "news.example.com",
+      },
+    });
+    await vi.waitFor(() =>
+      expect(elements["block-current-site"].textContent).toBe(
+        "Block this site: news.example.com",
+      )
+    );
+
+    await elements["block-current-site"].emit("click");
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "block-current-site",
+    });
+    expect(elements["blocked-sites-list"].textContent).toContain(
+      "news.example.com",
+    );
+    expect(elements["block-current-site"].disabled).toBe(true);
+
+    const remove =
+      elements["blocked-sites-list"].children[0]?.querySelector(".button");
+    await remove?.emit("click");
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "remove-blocked-site",
+      hostname: "news.example.com",
+    });
+    expect(elements["blocked-sites-list"].textContent).toBe(
+      "No sites are blocked.",
     );
   });
 

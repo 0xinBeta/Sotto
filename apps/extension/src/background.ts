@@ -73,6 +73,13 @@ import {
   type DiagnosticReportInput,
 } from "./diagnostic-report.js";
 import { SettingsBackupStore } from "./settings-backup.js";
+import {
+  BlockedSitesStore,
+  hostnameFromUrl,
+  hostnameMatchesBlocked,
+  isPageTouchingAction,
+  SITE_BLOCKED_RESPONSE,
+} from "./blocked-sites.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -98,6 +105,7 @@ interface WorkerMessage {
   readonly timings?: unknown;
   readonly operation?: unknown;
   readonly backup?: unknown;
+  readonly hostname?: unknown;
 }
 
 const actionRegistry = new ActionRegistry(actions);
@@ -121,6 +129,10 @@ const settingsBackup = new SettingsBackupStore({
     await chrome.storage.local.get(
       keys as string | string[] | null | undefined,
     ),
+  set: async (values) => await chrome.storage.local.set(values),
+});
+const blockedSites = new BlockedSitesStore({
+  get: async (key) => await chrome.storage.local.get(key),
   set: async (values) => await chrome.storage.local.set(values),
 });
 const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
@@ -153,6 +165,51 @@ function actionContext(): ActionContext {
     dictation: dictationActionServices,
     actionCatalog: actionRegistry,
   };
+}
+
+async function activeTabHostname(): Promise<string | undefined> {
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  return hostnameFromUrl(activeTab?.url);
+}
+
+async function blockedSitesState(
+  hostnames?: readonly string[],
+): Promise<{
+  readonly hostnames: readonly string[];
+  readonly currentHostname?: string;
+}> {
+  const [savedHostnames, currentHostname] = await Promise.all([
+    hostnames ?? blockedSites.get(),
+    activeTabHostname(),
+  ]);
+  return {
+    hostnames: savedHostnames,
+    ...(currentHostname === undefined ? {} : { currentHostname }),
+  };
+}
+
+async function routeAction(
+  command: ActionCommand,
+  confirmed = false,
+): Promise<ActionResult> {
+  if (isPageTouchingAction(command)) {
+    const [hostname, blockedHostnames] = await Promise.all([
+      activeTabHostname(),
+      blockedSites.get(),
+    ]);
+    if (
+      hostname !== undefined &&
+      hostnameMatchesBlocked(hostname, blockedHostnames)
+    ) {
+      return { spoken: SITE_BLOCKED_RESPONSE };
+    }
+  }
+  return confirmed
+    ? commandRouter.routeConfirmed(command, actionContext())
+    : commandRouter.route(command, actionContext());
 }
 
 async function speakResponse(
@@ -341,11 +398,13 @@ async function setQuietMode(enabled: boolean): Promise<boolean> {
 }
 
 async function createDiagnosticReport(): Promise<string> {
-  const [rawState, settings, storageBytes] = await Promise.all([
-    sendOffscreen({ type: "get-diagnostic-state" }),
-    speechSettings.get(),
-    chrome.storage.local.getBytesInUse(null),
-  ]);
+  const [rawState, settings, storageBytes, blockedHostnames] =
+    await Promise.all([
+      sendOffscreen({ type: "get-diagnostic-state" }),
+      speechSettings.get(),
+      chrome.storage.local.getBytesInUse(null),
+      blockedSites.get(),
+    ]);
   if (
     typeof rawState !== "object" ||
     rawState === null ||
@@ -379,6 +438,7 @@ async function createDiagnosticReport(): Promise<string> {
     micPermission: state.micPermission,
     rate: settings.rate,
     volume: settings.volume,
+    blockedSiteCount: blockedHostnames.length,
     storageBytes,
     pipelineErrors: pipelineErrors.snapshot(),
     latency: exchangeTimings.statistics(),
@@ -1904,10 +1964,7 @@ async function executeCommand(
           : undefined;
         pendingReminderConfirmationId = undefined;
         result = reminderId === undefined
-          ? await commandRouter.routeConfirmed(
-            confirmation.command,
-            actionContext(),
-          )
+          ? await routeAction(confirmation.command, true)
           : await cancelReminderResult(reminderId);
       } finally {
         completedTimings = {
@@ -1994,7 +2051,7 @@ async function executeCommand(
         if (request.pending) confirmationSession.request(validated);
         result = request.result;
       } else {
-        result = await commandRouter.route(validated, actionContext());
+        result = await routeAction(validated);
       }
     } finally {
       completedTimings = {
@@ -2056,7 +2113,7 @@ async function retryScreenshot(command: unknown): Promise<ActionResult> {
     validated.action === "ask-screen"
       ? beginCommandGeneration()
       : undefined;
-  const result = await commandRouter.route(validated, actionContext());
+  const result = await routeAction(validated);
   if (validated.action === "ask-screen") {
     if (generation === undefined || !commandIsCurrent(generation)) {
       return result;
@@ -2093,6 +2150,25 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return exchangeTimings.statistics();
     case "get-speech-settings":
       return speechSettings.get();
+    case "get-blocked-sites":
+      return blockedSitesState();
+    case "add-blocked-site":
+      if (typeof message.hostname !== "string") {
+        throw new TypeError("A valid site name is required.");
+      }
+      return blockedSitesState(await blockedSites.add(message.hostname));
+    case "block-current-site": {
+      const hostname = await activeTabHostname();
+      if (hostname === undefined) {
+        throw new TypeError("This tab has no site name.");
+      }
+      return blockedSitesState(await blockedSites.add(hostname));
+    }
+    case "remove-blocked-site":
+      if (typeof message.hostname !== "string") {
+        throw new TypeError("A valid site name is required.");
+      }
+      return blockedSitesState(await blockedSites.remove(message.hostname));
     case "set-speech-settings": {
       const update: {
         rate?: number;

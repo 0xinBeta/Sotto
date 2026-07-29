@@ -37,6 +37,7 @@ type ReportField =
   | "micPermission"
   | "rate"
   | "volume"
+  | "blockedSiteCount"
   | "storageBytes"
   | "pipelineErrors"
   | "latency";
@@ -88,6 +89,7 @@ function reportInput(): DiagnosticReportInput {
     micPermission: "granted",
     rate: 1.2,
     volume: 0.8,
+    blockedSiteCount: 2,
     storageBytes: 1_024,
     pipelineErrors: [
       {
@@ -146,6 +148,7 @@ describe("diagnostic report", () => {
         "Premium speech output backend: webgpu",
         "Rate: 1.2",
         "Volume: 80%",
+        "Blocked sites: 2",
         "",
         "## Chrome AI",
         "Gemini Nano: available",
@@ -169,6 +172,14 @@ describe("diagnostic report", () => {
       ].join("\n"),
     );
     expect(report.split("\n").length).toBeLessThanOrEqual(120);
+  });
+
+  it("shows only the blocked site count", () => {
+    const report = buildDiagnosticReport(reportInput());
+
+    expect(report).toContain("Blocked sites: 2");
+    expect(report).not.toContain("example.com");
+    expect(report).not.toContain("hostname");
   });
 
   it("renders missing latency stages in the report", () => {

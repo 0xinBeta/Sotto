@@ -15,6 +15,13 @@ const worker = vi.hoisted(() => ({
 
 vi.mock("@sotto/actions", () => ({
   default: [],
+  sanitizeHostname: (value: string) => {
+    const hostname = value.trim().toLowerCase();
+    return /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/
+        .test(hostname)
+      ? hostname
+      : undefined;
+  },
   findBestTabMatch: (
     candidates: readonly {
       readonly title?: string;
@@ -279,6 +286,96 @@ afterEach(() => {
 });
 
 describe("background screenshot clipboard injection", () => {
+  it.each([
+    ["screenshot", { action: "screenshot", destination: "copy" }],
+    ["screen question", { action: "ask-screen", question: "What is here?" }],
+    [
+      "summary",
+      { action: "summarize", mode: "summarize", scope: "page" },
+    ],
+    ["read", { action: "summarize", mode: "read", scope: "page" }],
+    [
+      "page question",
+      { action: "ask-page", question: "What is this?", scope: "page" },
+    ],
+    [
+      "translation",
+      { action: "translate", language: "French", scope: "page" },
+    ],
+    ["type", { action: "type", operation: "insert", text: "Local text" }],
+    ["dictation", { action: "dictation", operation: "start" }],
+    ["scroll", { action: "page-control", operation: "scroll-down" }],
+    ["zoom", { action: "page-control", operation: "zoom-in" }],
+  ])("refuses the %s page action on a blocked site", async (_name, command) => {
+    const harness = await installBackground(
+      { id: 2, url: "https://news.example.com/story" },
+      { blockedHostnames: ["example.com"] },
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "page command",
+        command,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Sotto is off on this site." },
+    });
+    expect(worker.route).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["tabs", { action: "tabs", operation: "list" }],
+    ["notes", { action: "notes", operation: "list" }],
+    [
+      "reminders",
+      { action: "notes", operation: "remind", text: "Check the oven" },
+    ],
+    ["help", { action: "help", mode: "show" }],
+    [
+      "navigate",
+      { action: "navigate", operation: "open", site: "example.org" },
+    ],
+    ["repeat", { action: "repeat" }],
+  ])("allows the %s non-page action on a blocked site", async (_name, command) => {
+    const result = { spoken: "Allowed." };
+    worker.route.mockResolvedValue(result);
+    const harness = await installBackground(
+      { id: 2, url: "https://news.example.com/story" },
+      { blockedHostnames: ["example.com"] },
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "local command",
+        command,
+      }),
+    ).resolves.toEqual({ ok: true, value: result });
+    expect(worker.route).toHaveBeenCalledWith(
+      command,
+      expect.objectContaining({ actionCatalog: expect.anything() }),
+    );
+  });
+
+  it("keeps settings available on a blocked site", async () => {
+    const harness = await installBackground(
+      { id: 2, url: "https://news.example.com/story" },
+      { blockedHostnames: ["example.com"] },
+    );
+
+    await expect(
+      harness.workerMessage({ type: "get-blocked-sites" }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        hostnames: ["example.com"],
+        currentHostname: "news.example.com",
+      },
+    });
+  });
+
   it("routes the read-page hotkey through the validated read action", async () => {
     const readResult = {
       spoken: "Reading the page.",

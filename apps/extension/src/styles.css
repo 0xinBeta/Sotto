@@ -936,6 +936,77 @@ h2 {
   appearance: none;
 }
 
+.blocked-sites {
+  margin-top: 20px;
+  border-top: 1px solid var(--rule);
+  padding-top: 18px;
+}
+
+.blocked-sites h3,
+.blocked-sites p {
+  margin: 0;
+}
+
+.blocked-sites h3 {
+  font-size: 14px;
+}
+
+.blocked-sites > p {
+  margin-top: 7px;
+  color: var(--paper-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.blocked-site-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.blocked-site-actions input {
+  min-width: 0;
+  border: 1px solid var(--switch-border);
+  border-radius: 0;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: var(--surface-card);
+  font: inherit;
+}
+
+.blocked-site-current {
+  margin-top: 8px;
+}
+
+.blocked-sites-list {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.blocked-site-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--paper-dim);
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 10px;
+}
+
+.blocked-site-row .button {
+  min-width: auto;
+  padding: 6px 8px;
+  font-size: 8px;
+}
+
+.blocked-sites-status:empty {
+  display: none;
+}
+
 .diagnostic-action {
   margin-top: 20px;
 }

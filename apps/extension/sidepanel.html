@@ -340,6 +340,49 @@
             <option value="brief" data-i18n="responseBrief"></option>
           </select>
         </div>
+        <div class="blocked-sites" aria-labelledby="blocked-sites-heading">
+          <h3 id="blocked-sites-heading" data-i18n="blockedSitesHeading"></h3>
+          <p data-i18n="blockedSitesCopy"></p>
+          <form id="blocked-site-form">
+            <label
+              class="sr-only"
+              for="blocked-site-input"
+              data-i18n="siteName"
+            ></label>
+            <div class="blocked-site-actions">
+              <input
+                id="blocked-site-input"
+                type="text"
+                maxlength="100"
+                autocomplete="off"
+                spellcheck="false"
+                data-i18n-placeholder="siteNamePlaceholder"
+              />
+              <button class="button" id="add-blocked-site" type="submit">
+                <span data-i18n="addSite"></span>
+              </button>
+            </div>
+          </form>
+          <button
+            class="button blocked-site-current"
+            id="block-current-site"
+            type="button"
+            data-i18n="blockThisSite"
+          ></button>
+          <ul
+            class="blocked-sites-list"
+            id="blocked-sites-list"
+            aria-live="polite"
+          >
+            <li data-i18n="noBlockedSites"></li>
+          </ul>
+          <p
+            class="blocked-sites-status"
+            id="blocked-sites-status"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </div>
         <button
           class="button diagnostic-action"
           id="copy-diagnostic-report"

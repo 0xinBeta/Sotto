@@ -30,6 +30,8 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("settings-backup-status")).toContain(
       'role="status"',
     );
+    expect(openingTag("blocked-sites-status")).toContain('role="status"');
+    expect(openingTag("blocked-sites-list")).toContain('aria-live="polite"');
     expect(openingTag("settings-backup-confirm")).toContain(
       'role="group"',
     );
@@ -112,6 +114,12 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("speech-volume")).toContain('min="0"');
     expect(openingTag("speech-volume")).toContain('max="1"');
     expect(openingTag("response-verbosity")).toMatch(/^<select\b/);
+    expect(panelMarkup).toContain(
+      'for="blocked-site-input"',
+    );
+    expect(openingTag("blocked-site-input")).toContain('maxlength="100"');
+    expect(openingTag("add-blocked-site")).toContain('type="submit"');
+    expect(openingTag("block-current-site")).toContain('type="button"');
     expect(panelMarkup).toContain(
       '<option value="normal" data-i18n="responseNormal"></option>',
     );

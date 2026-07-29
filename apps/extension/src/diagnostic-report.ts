@@ -54,6 +54,7 @@ export interface DiagnosticReportInput extends DiagnosticOffscreenState {
   readonly extensionVersion: string;
   readonly rate: number;
   readonly volume: number;
+  readonly blockedSiteCount: number;
   readonly storageBytes: number;
   readonly pipelineErrors: readonly DiagnosticPipelineError[];
   readonly latency: LatencyStatistics;
@@ -208,6 +209,7 @@ export function buildDiagnosticReport(
     `Premium speech output backend: ${input.premiumTtsBackend ?? "none"}`,
     `Rate: ${input.rate.toFixed(1)}`,
     `Volume: ${Math.round(input.volume * 100)}%`,
+    `Blocked sites: ${input.blockedSiteCount}`,
     "",
     "## Chrome AI",
     `Gemini Nano: ${input.nanoAvailability}`,

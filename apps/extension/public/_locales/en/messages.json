@@ -161,6 +161,42 @@
   "responseBrief": {
     "message": "Brief"
   },
+  "blockedSitesHeading": {
+    "message": "Sites where Sotto is off"
+  },
+  "blockedSitesCopy": {
+    "message": "Sotto does not use page commands on these sites. This list stays on this device."
+  },
+  "siteName": {
+    "message": "Site name"
+  },
+  "siteNamePlaceholder": {
+    "message": "example.com"
+  },
+  "addSite": {
+    "message": "Add site"
+  },
+  "blockThisSite": {
+    "message": "Block this site"
+  },
+  "blockThisSiteName": {
+    "message": "Block this site: $1"
+  },
+  "noBlockedSites": {
+    "message": "No sites are blocked."
+  },
+  "removeBlockedSite": {
+    "message": "Remove $1"
+  },
+  "invalidSiteName": {
+    "message": "Enter a valid site name."
+  },
+  "blockedSitesUnavailable": {
+    "message": "The blocked site list is unavailable."
+  },
+  "currentSiteUnavailable": {
+    "message": "This tab has no site name."
+  },
   "copyDiagnosticReport": {
     "message": "Copy diagnostic report"
   },

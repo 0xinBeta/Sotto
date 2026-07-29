@@ -8,6 +8,7 @@ import {
   MAX_NOTES,
   MAX_PENDING_REMINDERS,
 } from "@sotto/actions/notes/storage";
+import { sanitizeHostname } from "@sotto/actions";
 import { performClipboardWorkflow } from "@sotto/destinations";
 import type { TtsProgressEventType } from "@sotto/tts";
 import {
@@ -57,6 +58,7 @@ import {
   type RecoveryErrorClass,
 } from "./recovery-hint.js";
 import { localizePanel, t } from "./panel-i18n.js";
+import { hostnameMatchesBlocked } from "./blocked-sites.js";
 import "./styles.css";
 
 localizePanel();
@@ -110,6 +112,11 @@ interface PanelReminder {
   readonly id: string;
   readonly text: string;
   readonly dueAt: string;
+}
+
+interface BlockedSitesState {
+  readonly hostnames: readonly string[];
+  readonly currentHostname?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -721,6 +728,18 @@ const speechVolumeValue =
   requiredElement<HTMLOutputElement>("#speech-volume-value");
 const responseVerbosity =
   requiredElement<HTMLSelectElement>("#response-verbosity");
+const blockedSiteForm =
+  requiredElement<HTMLFormElement>("#blocked-site-form");
+const blockedSiteInput =
+  requiredElement<HTMLInputElement>("#blocked-site-input");
+const addBlockedSite =
+  requiredElement<HTMLButtonElement>("#add-blocked-site");
+const blockCurrentSite =
+  requiredElement<HTMLButtonElement>("#block-current-site");
+const blockedSitesList =
+  requiredElement<HTMLUListElement>("#blocked-sites-list");
+const blockedSitesStatus =
+  requiredElement<HTMLElement>("#blocked-sites-status");
 const copyDiagnosticReport =
   requiredElement<HTMLButtonElement>("#copy-diagnostic-report");
 const exportSettingsBackup =
@@ -814,6 +833,96 @@ function isSpeechSettings(value: unknown): value is SpeechSettings {
     Number.isFinite(value.volume) &&
     isResponseVerbosity(value.verbosity)
   );
+}
+
+function isBlockedSitesState(value: unknown): value is BlockedSitesState {
+  if (!isRecord(value) || !Array.isArray(value.hostnames)) return false;
+  const hostnames = value.hostnames;
+  if (
+    hostnames.length > 5_000 ||
+    !hostnames.every((hostname) =>
+      typeof hostname === "string" &&
+      sanitizeHostname(hostname) === hostname
+    ) ||
+    new Set(hostnames).size !== hostnames.length
+  ) {
+    return false;
+  }
+  return (
+    value.currentHostname === undefined ||
+    (
+      typeof value.currentHostname === "string" &&
+      sanitizeHostname(value.currentHostname) === value.currentHostname
+    )
+  );
+}
+
+function showBlockedSitesStatus(message: string): void {
+  blockedSitesStatus.textContent = message;
+}
+
+function showBlockedSites(state: BlockedSitesState): void {
+  const { currentHostname, hostnames } = state;
+  blockCurrentSite.textContent = currentHostname === undefined
+    ? t("blockThisSite")
+    : t("blockThisSiteName", currentHostname);
+  blockCurrentSite.disabled =
+    currentHostname === undefined ||
+    hostnameMatchesBlocked(currentHostname, hostnames);
+
+  blockedSitesList.replaceChildren();
+  if (hostnames.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = t("noBlockedSites");
+    blockedSitesList.append(empty);
+    return;
+  }
+
+  for (const hostname of hostnames) {
+    const row = document.createElement("li");
+    row.className = "blocked-site-row";
+    const label = document.createElement("span");
+    label.textContent = hostname;
+    const remove = document.createElement("button");
+    remove.className = "button";
+    remove.type = "button";
+    remove.textContent = t("delete");
+    remove.setAttribute("aria-label", t("removeBlockedSite", hostname));
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      showBlockedSitesStatus("");
+      try {
+        const next = await requestWorker<unknown>({
+          type: "remove-blocked-site",
+          hostname,
+        });
+        if (!isBlockedSitesState(next)) {
+          throw new TypeError("The blocked site list is invalid.");
+        }
+        showBlockedSites(next);
+      } catch {
+        showBlockedSitesStatus(t("blockedSitesUnavailable"));
+        remove.disabled = false;
+      }
+    });
+    row.append(label, remove);
+    blockedSitesList.append(row);
+  }
+}
+
+async function loadBlockedSites(): Promise<void> {
+  try {
+    const state = await requestWorker<unknown>({
+      type: "get-blocked-sites",
+    });
+    if (!isBlockedSitesState(state)) {
+      throw new TypeError("The blocked site list is invalid.");
+    }
+    showBlockedSites(state);
+  } catch {
+    showBlockedSitesStatus(t("blockedSitesUnavailable"));
+    blockCurrentSite.disabled = true;
+  }
 }
 
 function currentSpeechSettings(): SpeechSettings {
@@ -2541,6 +2650,49 @@ responseVerbosity.addEventListener("change", () => {
   void saveSpeechSettings();
 });
 
+blockedSiteForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const hostname = sanitizeHostname(blockedSiteInput.value);
+  if (hostname === undefined) {
+    showBlockedSitesStatus(t("invalidSiteName"));
+    return;
+  }
+  addBlockedSite.disabled = true;
+  showBlockedSitesStatus("");
+  try {
+    const state = await requestWorker<unknown>({
+      type: "add-blocked-site",
+      hostname,
+    });
+    if (!isBlockedSitesState(state)) {
+      throw new TypeError("The blocked site list is invalid.");
+    }
+    blockedSiteInput.value = "";
+    showBlockedSites(state);
+  } catch {
+    showBlockedSitesStatus(t("blockedSitesUnavailable"));
+  } finally {
+    addBlockedSite.disabled = false;
+  }
+});
+
+blockCurrentSite.addEventListener("click", async () => {
+  blockCurrentSite.disabled = true;
+  showBlockedSitesStatus("");
+  try {
+    const state = await requestWorker<unknown>({
+      type: "block-current-site",
+    });
+    if (!isBlockedSitesState(state)) {
+      throw new TypeError("The blocked site list is invalid.");
+    }
+    showBlockedSites(state);
+  } catch {
+    showBlockedSitesStatus(t("currentSiteUnavailable"));
+    blockCurrentSite.disabled = false;
+  }
+});
+
 async function preparePremiumSpeechModel(): Promise<void> {
   downloadPremiumStt.disabled = true;
   setupDownloadPremium.disabled = true;
@@ -3041,3 +3193,4 @@ void loadCommandReference().catch(() => undefined);
 void loadLatencyStatistics().catch(() => undefined);
 void loadSpeechSettings();
 void loadQuietMode();
+void loadBlockedSites();
