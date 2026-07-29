@@ -1603,6 +1603,16 @@ progress::-webkit-progress-value {
   margin-bottom: 28px;
 }
 
+.page-text-card[data-view="reader"] #page-text-title {
+  max-width: 20ch;
+  color: var(--paper);
+  font-family: "Iowan Old Style", Baskerville, serif;
+  font-size: 22px;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  text-transform: none;
+}
+
 .page-text-output {
   max-height: 340px;
   margin: 16px 0 14px;
@@ -1616,6 +1626,32 @@ progress::-webkit-progress-value {
 }
 
 .page-text-output:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 3px;
+}
+
+.reader-text-output {
+  max-height: min(52vh, 460px);
+  margin: 16px 0 14px;
+  padding-right: 8px;
+  overflow: auto;
+  color: var(--paper);
+  font-family: "Iowan Old Style", Baskerville, serif;
+  font-size: 17px;
+  line-height: 1.62;
+  overflow-wrap: anywhere;
+}
+
+.reader-text-output p {
+  margin: 0;
+  white-space: pre-line;
+}
+
+.reader-text-output p + p {
+  margin-top: 1em;
+}
+
+.reader-text-output:focus-visible {
   outline: 2px solid var(--acid);
   outline-offset: 3px;
 }
@@ -1639,16 +1675,19 @@ progress::-webkit-progress-value {
   -webkit-box-decoration-break: clone;
 }
 
+.reader-actions,
 .reading-controls {
   display: flex;
   gap: 8px;
   margin-top: 12px;
 }
 
+.reader-actions[hidden],
 .reading-controls[hidden] {
   display: none;
 }
 
+.reader-actions .button,
 .reading-controls .button {
   flex: 1;
 }

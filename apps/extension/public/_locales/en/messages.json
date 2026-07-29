@@ -386,8 +386,17 @@
   "page": {
     "message": "PAGE"
   },
+  "reader": {
+    "message": "READER"
+  },
   "close": {
     "message": "Close"
+  },
+  "readerText": {
+    "message": "Reader text"
+  },
+  "readAloud": {
+    "message": "Read aloud"
   },
   "textBeingRead": {
     "message": "Text being read"

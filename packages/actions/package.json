@@ -74,6 +74,10 @@
       "types": "./dist/playback/index.d.ts",
       "import": "./dist/playback/index.js"
     },
+    "./reader": {
+      "types": "./dist/reader/index.d.ts",
+      "import": "./dist/reader/index.js"
+    },
     "./repeat": {
       "types": "./dist/repeat/index.d.ts",
       "import": "./dist/repeat/index.js"

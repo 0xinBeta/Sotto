@@ -10,6 +10,7 @@ import notesAction from "./notes/index.js";
 import pageControlAction from "./page-control/index.js";
 import playbackAction from "./playback/index.js";
 import quietModeAction from "./quiet-mode/index.js";
+import readerAction from "./reader/index.js";
 import repeatAction from "./repeat/index.js";
 import screenshotAction from "./screenshot/index.js";
 import settingsAction from "./settings/index.js";
@@ -113,6 +114,11 @@ export type {
   QuietModeOperation,
 } from "./quiet-mode/index.js";
 export {
+  default as readerAction,
+  readerSchema,
+} from "./reader/index.js";
+export type { ReaderCommand } from "./reader/index.js";
+export {
   default as repeatAction,
   EMPTY_REPEAT_RESPONSE,
   repeatSchema,
@@ -206,6 +212,7 @@ export const actions = [
   pageControlAction,
   mediaAction,
   playbackAction,
+  readerAction,
   quietModeAction,
   settingsAction,
   repeatAction,

@@ -294,9 +294,12 @@ const elementIds = [
   "page-text-card",
   "page-text-title",
   "page-text-output",
+  "reader-text-output",
   "reading-text-output",
   "close-page-text",
   "reading-progress",
+  "reader-actions",
+  "read-reader",
   "reading-controls",
   "pause-reading",
   "skip-reading",
@@ -400,7 +403,9 @@ async function installSidepanel(options: {
   elements["setup-complete"].hidden = true;
   elements["guided-demo-chip"].hidden = true;
   elements["clipboard-card"].hidden = true;
+  elements["reader-text-output"].hidden = true;
   elements["reading-text-output"].hidden = true;
+  elements["reader-actions"].hidden = true;
   elements["reading-controls"].hidden = true;
   elements["latency-readout"].hidden = true;
   elements["settings-backup-confirm"].hidden = true;
@@ -1936,6 +1941,61 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(
       sentences.every((sentence) => !sentence.listeners.has("click")),
     ).toBe(true);
+  });
+
+  it("renders reader paragraphs and keeps them after Read aloud", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    const first = '<img src=x onerror="alert(1)"> First paragraph.';
+    const second = "Second paragraph.";
+
+    onMessage({
+      target: "sidepanel",
+      type: "reader-text",
+      title: "Local article",
+      text: `${first}\n\n${second}`,
+    });
+
+    const paragraphs = elements["reader-text-output"].children.filter(
+      (child): child is FakeElement => child instanceof FakeElement,
+    );
+    expect(elements["page-text-title"].textContent).toBe("Local article");
+    expect(paragraphs.map((paragraph) => paragraph.tagName)).toEqual([
+      "p",
+      "p",
+    ]);
+    expect(paragraphs.map((paragraph) => paragraph.textContent)).toEqual([
+      first,
+      second,
+    ]);
+    expect(elements["reader-actions"].hidden).toBe(false);
+
+    await elements["read-reader"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "read-reader",
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "reading-state",
+      active: true,
+      paused: false,
+    });
+    expect(elements["reader-text-output"].hidden).toBe(true);
+    expect(elements["reading-text-output"].hidden).toBe(false);
+
+    onMessage({
+      target: "sidepanel",
+      type: "reading-state",
+      active: false,
+      paused: false,
+    });
+    expect(elements["reader-text-output"].hidden).toBe(false);
+    expect(elements["reader-actions"].hidden).toBe(false);
+    expect(elements["page-text-card"].hidden).toBe(false);
+
+    onMessage({ target: "sidepanel", type: "reader-clear" });
+    expect(elements["page-text-card"].hidden).toBe(true);
   });
 
   it("filters notes by text without a worker request", async () => {

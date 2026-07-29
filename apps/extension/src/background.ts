@@ -194,6 +194,8 @@ let creatingOffscreen: Promise<void> | undefined;
 let commandGeneration = 0;
 let readingActive = false;
 let readingPaused = false;
+let activeReader: ActiveReader | undefined;
+let latestPageExtraction: PageExtraction | undefined;
 let lastSpokenResponse: string | undefined;
 let pendingReminderConfirmationId: string | undefined;
 let wakePlaybackSequence = 0;
@@ -369,6 +371,7 @@ async function notifyWakePlayback(
 
 function beginCommandGeneration(): number {
   commandGeneration += 1;
+  latestPageExtraction = undefined;
   const stoppedReading = readingActive;
   readingActive = false;
   readingPaused = false;
@@ -1098,6 +1101,20 @@ interface NavigationEpoch {
   readonly nonce: string;
 }
 
+interface PageExtraction {
+  readonly tabId: number;
+  readonly href: string;
+  readonly page: ExtractedPageText;
+}
+
+interface ActiveReader {
+  readonly tabId: number;
+  readonly href: string;
+  readonly text: string;
+  readonly title?: string;
+  readonly lang?: string;
+}
+
 function readLocationHref(): string {
   return location.href;
 }
@@ -1409,7 +1426,7 @@ async function extractActivePage(
           readonly error?: unknown;
         }
       | undefined;
-    await assertFreshNavigationEpoch(
+    const epoch = await assertFreshNavigationEpoch(
       activeTab.id,
       0,
       raw?.epoch,
@@ -1422,7 +1439,13 @@ async function extractActivePage(
           : "Sotto could not find readable text on this page.",
       );
     }
-    return parseExtractedPage(raw.value);
+    const page = parseExtractedPage(raw.value);
+    latestPageExtraction = {
+      tabId: activeTab.id,
+      href: epoch.href,
+      page,
+    };
+    return page;
   } catch (error) {
     const detail = errorMessage(error);
     if (
@@ -1512,6 +1535,38 @@ const pageActionServices: PageActionServices = {
   runModelTask: runPageModelTask,
   translate: runPageTranslation,
 };
+
+async function setActiveReader(
+  text: string,
+  title: string | undefined,
+  lang: string | undefined,
+): Promise<void> {
+  const extraction = latestPageExtraction;
+  const expectedTitle = extraction?.page.title || undefined;
+  const expectedLang = extraction?.page.language;
+  if (
+    extraction === undefined ||
+    extraction.page.text !== text ||
+    expectedTitle !== title ||
+    expectedLang !== lang ||
+    await readFrameHref(extraction.tabId, 0) !== extraction.href
+  ) {
+    throw new Error(PAGE_CHANGED_RESPONSE);
+  }
+  activeReader = {
+    tabId: extraction.tabId,
+    href: extraction.href,
+    text,
+    ...(title === undefined ? {} : { title }),
+    ...(lang === undefined ? {} : { lang }),
+  };
+}
+
+async function clearActiveReader(stopReading: boolean): Promise<void> {
+  if (stopReading && readingActive) beginCommandGeneration();
+  activeReader = undefined;
+  await sendPanel({ type: "reader-clear" });
+}
 
 async function runScreenQuestion(
   options: Parameters<ScreenQuestionServices["ask"]>[0],
@@ -2334,7 +2389,7 @@ async function publishActionResult(
     return;
   }
   const quiet = await quietMode.get();
-  const readAloud = isReadAloudCommand(command);
+  const readAloud = isReadAloudCommand(command, result);
   if (quiet && readAloud && !result.pageText) {
     lastSpokenResponse = result.spoken;
     if (result.workflow?.kind === "panel-command-reference") {
@@ -2383,7 +2438,7 @@ async function publishActionResult(
     return;
   }
   if (result.pageText) {
-    const { text, title, lang, speech } = result.pageText;
+    const { text, title, lang, speech, view } = result.pageText;
     if (
       typeof text !== "string" ||
       !text.trim() ||
@@ -2392,15 +2447,41 @@ async function publishActionResult(
         (typeof title !== "string" || title.length > 600)) ||
       (lang !== undefined &&
         (typeof lang !== "string" || lang.length > 35)) ||
-      (speech !== "short" && speech !== "long")
+      (
+        speech !== "none" &&
+        speech !== "short" &&
+        speech !== "long"
+      ) ||
+      (view !== undefined && view !== "reader") ||
+      (speech === "none" && view !== "reader") ||
+      (view === "reader" && command.action !== "reader")
     ) {
       throw new TypeError("Rejected invalid page-derived presentation text");
     }
-    await sendPanel({
-      type: "page-text",
-      text,
-      ...(title === undefined ? {} : { title }),
-    });
+    if (view === "reader") {
+      if (speech === "none") {
+        await setActiveReader(text, title, lang);
+      } else if (
+        activeReader === undefined ||
+        activeReader.text !== text ||
+        activeReader.title !== title ||
+        activeReader.lang !== lang
+      ) {
+        throw new TypeError("The reader text is no longer available");
+      }
+      await sendPanel({
+        type: "reader-text",
+        text,
+        ...(title === undefined ? {} : { title }),
+      });
+    } else {
+      activeReader = undefined;
+      await sendPanel({
+        type: "page-text",
+        text,
+        ...(title === undefined ? {} : { title }),
+      });
+    }
     if (!commandIsCurrent(generation)) return;
     if (quiet) {
       lastSpokenResponse = text;
@@ -2410,6 +2491,20 @@ async function publishActionResult(
         did: readAloud ? "Quiet mode is on." : result.spoken,
         timings,
       });
+      return;
+    }
+    if (speech === "none") {
+      await sendEarcon("complete");
+      await speakAndPublishActionLog(
+        transcript,
+        result.spoken,
+        timings,
+        (onFirstAudio) =>
+          speakResponse(result.spoken, {
+            lang: "en-US",
+            onFirstAudio,
+          }, true, false),
+      );
       return;
     }
     await sendEarcon("complete");
@@ -2512,10 +2607,14 @@ async function publishActionResult(
   });
 }
 
-function isReadAloudCommand(command: ActionCommand): boolean {
+function isReadAloudCommand(
+  command: ActionCommand,
+  result: ActionResult,
+): boolean {
   const operation = (command as { readonly operation?: unknown }).operation;
   const mode = (command as { readonly mode?: unknown }).mode;
   return (
+    result.pageText?.speech === "long" ||
     (command.action === "summarize" && mode === "read") ||
     (command.action === "notes" && operation === "read") ||
     (command.action === "help" && mode === "read")
@@ -2618,6 +2717,52 @@ async function executePlaybackCommand(
   });
   await publishPlaybackResult(transcript, spoken, timings);
   return { spoken };
+}
+
+async function readActiveReader(): Promise<ActionResult> {
+  const reader = activeReader;
+  if (reader === undefined) {
+    throw new Error("Open the reader first.");
+  }
+  const generation = beginCommandGeneration();
+  if (await readFrameHref(reader.tabId, 0) !== reader.href) {
+    await clearActiveReader(false);
+    throw new Error(PAGE_CHANGED_RESPONSE);
+  }
+  const hostname = hostnameFromUrl(reader.href);
+  if (
+    hostname !== undefined &&
+    hostnameMatchesBlocked(hostname, await blockedSites.get())
+  ) {
+    await clearActiveReader(false);
+    const blocked = { spoken: SITE_BLOCKED_RESPONSE };
+    await publishActionResult(
+      "read aloud",
+      { action: "reader" },
+      blocked,
+      generation,
+      { input: "typed" },
+    );
+    return blocked;
+  }
+  const result = {
+    spoken: "Reading the page.",
+    pageText: {
+      text: reader.text,
+      ...(reader.title === undefined ? {} : { title: reader.title }),
+      ...(reader.lang === undefined ? {} : { lang: reader.lang }),
+      speech: "long",
+      view: "reader",
+    },
+  } as const satisfies ActionResult;
+  await publishActionResult(
+    "read aloud",
+    { action: "reader" },
+    result,
+    generation,
+    { input: "typed" },
+  );
+  return result;
 }
 
 async function executeCommand(
@@ -3193,6 +3338,11 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
     case "stop-reading":
       beginCommandGeneration();
       return undefined;
+    case "read-reader":
+      return readActiveReader();
+    case "close-reader":
+      await clearActiveReader(true);
+      return undefined;
     case "playback-control": {
       if (!isPlaybackOperation(message.operation)) {
         throw new TypeError("A valid playback operation is required");
@@ -3565,6 +3715,26 @@ chrome.commands.onCommand.addListener((command, tab) => {
     "Sotto could not toggle listening",
     "I couldn't start listening. Open Sotto to check microphone access.",
   );
+});
+
+chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
+  const reader = activeReader;
+  if (
+    reader === undefined ||
+    reader.tabId !== tabId ||
+    (
+      changeInfo.status !== "loading" &&
+      (changeInfo.url === undefined || changeInfo.url === reader.href)
+    )
+  ) {
+    return;
+  }
+  void clearActiveReader(true);
+});
+
+chrome.tabs.onRemoved?.addListener((tabId) => {
+  if (activeReader?.tabId !== tabId) return;
+  void clearActiveReader(true);
 });
 
 chrome.runtime.onInstalled.addListener(() => {

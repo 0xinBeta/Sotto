@@ -425,6 +425,13 @@ type PanelMessage =
       text: string;
       title?: string;
     }
+  | {
+      target: "sidepanel";
+      type: "reader-text";
+      text: string;
+      title?: string;
+    }
+  | { target: "sidepanel"; type: "reader-clear" }
   | { target: "sidepanel"; type: "rewrite-fallback"; text: string }
   | {
       target: "sidepanel";
@@ -592,11 +599,14 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
       );
     }
     case "page-text":
+    case "reader-text":
       return (
         isBoundedString(message.text, 120_000, 1) &&
         (message.title === undefined ||
           isBoundedString(message.title, 600))
       );
+    case "reader-clear":
+      return Object.keys(message).length === 2;
     case "rewrite-fallback":
       return isBoundedString(message.text, 24_000, 1);
     case "reading-progress":
@@ -1048,10 +1058,14 @@ const cancelSettingsImport =
 const pageTextCard = requiredElement<HTMLElement>("#page-text-card");
 const pageTextTitle = requiredElement<HTMLElement>("#page-text-title");
 const pageTextOutput = requiredElement<HTMLElement>("#page-text-output");
+const readerTextOutput =
+  requiredElement<HTMLElement>("#reader-text-output");
 const readingTextOutput =
   requiredElement<HTMLElement>("#reading-text-output");
 const closePageText = requiredElement<HTMLButtonElement>("#close-page-text");
 const readingProgress = requiredElement<HTMLProgressElement>("#reading-progress");
+const readerActions = requiredElement<HTMLElement>("#reader-actions");
+const readReader = requiredElement<HTMLButtonElement>("#read-reader");
 const readingControls = requiredElement<HTMLElement>("#reading-controls");
 const pauseReading = requiredElement<HTMLButtonElement>("#pause-reading");
 const skipReading = requiredElement<HTMLButtonElement>("#skip-reading");
@@ -1082,6 +1096,8 @@ let currentWakeWordState: WakeWordPanelState = {
 };
 let isReading = false;
 let isReadingPaused = false;
+let currentPageText = "";
+let pageTextView: "page" | "reader" = "page";
 let readingView:
   | {
       readonly plan: ReadingPlan;
@@ -1870,6 +1886,8 @@ function startReadingView(text: string): void {
 
   readingView = { plan, elements, activeSentence: -1 };
   pageTextOutput.hidden = true;
+  readerTextOutput.hidden = true;
+  readerActions.hidden = true;
   readingTextOutput.hidden = false;
   pageTextCard.hidden = false;
   showActiveReadingSentence({ charIndex: 0 }, false);
@@ -1879,9 +1897,19 @@ function clearReadingView(): void {
   readingView = undefined;
   readingTextOutput.replaceChildren();
   readingTextOutput.hidden = true;
-  pageTextOutput.hidden = false;
-  pageTextOutput.textContent = "";
-  pageTextCard.hidden = true;
+  if (pageTextView === "reader" && currentPageText) {
+    pageTextOutput.hidden = true;
+    readerTextOutput.hidden = false;
+    readerActions.hidden = false;
+    pageTextCard.hidden = false;
+  } else {
+    currentPageText = "";
+    pageTextOutput.hidden = false;
+    pageTextOutput.textContent = "";
+    readerTextOutput.hidden = true;
+    readerActions.hidden = true;
+    pageTextCard.hidden = true;
+  }
 }
 
 function showReadingState(active: boolean, paused: boolean): void {
@@ -1889,7 +1917,7 @@ function showReadingState(active: boolean, paused: boolean): void {
   isReading = active;
   isReadingPaused = paused;
   if (active && !wasReading) {
-    startReadingView(pageTextOutput.textContent);
+    startReadingView(currentPageText);
   } else if (!active && readingView) {
     clearReadingView();
   }
@@ -2572,10 +2600,64 @@ function showPremiumSttState(
   renderSetupView();
 }
 
+function resetPageTextPresentation(): void {
+  isReading = false;
+  isReadingPaused = false;
+  readingView = undefined;
+  readingTextOutput.replaceChildren();
+  readingTextOutput.hidden = true;
+  readingControls.hidden = true;
+  readingProgress.hidden = true;
+}
+
 function showPageText(text: string, title: string): void {
+  resetPageTextPresentation();
+  currentPageText = text;
+  pageTextView = "page";
+  pageTextCard.dataset.view = "page";
   pageTextTitle.textContent = title;
   pageTextOutput.textContent = text;
+  pageTextOutput.hidden = false;
+  readerTextOutput.replaceChildren();
+  readerTextOutput.hidden = true;
+  readerActions.hidden = true;
   pageTextCard.hidden = false;
+}
+
+function showReaderText(text: string, title?: string): void {
+  resetPageTextPresentation();
+  currentPageText = text;
+  pageTextView = "reader";
+  pageTextCard.dataset.view = "reader";
+  pageTextTitle.textContent = title || t("reader");
+  pageTextOutput.textContent = "";
+  pageTextOutput.hidden = true;
+  const paragraphs = text
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((textContent) => {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = textContent;
+      return paragraph;
+    });
+  readerTextOutput.replaceChildren(...paragraphs);
+  readerTextOutput.hidden = false;
+  readerActions.hidden = false;
+  pageTextCard.hidden = false;
+}
+
+function clearPageText(): void {
+  resetPageTextPresentation();
+  currentPageText = "";
+  pageTextView = "page";
+  pageTextCard.dataset.view = "page";
+  pageTextOutput.textContent = "";
+  pageTextOutput.hidden = false;
+  readerTextOutput.replaceChildren();
+  readerTextOutput.hidden = true;
+  readerActions.hidden = true;
+  pageTextCard.hidden = true;
 }
 
 function renderStorageCount(
@@ -3199,12 +3281,18 @@ clearSessionHistory.addEventListener("click", async () => {
 });
 
 closePageText.addEventListener("click", () => {
+  const closeReader = pageTextView === "reader";
   const stopReading = isReading;
-  pageTextCard.hidden = true;
-  showReadingState(false, false);
-  if (stopReading) {
+  clearPageText();
+  if (closeReader) {
+    void send({ type: "close-reader" });
+  } else if (stopReading) {
     void send({ type: "playback-control", operation: "stop" });
   }
+});
+
+readReader.addEventListener("click", () => {
+  void send({ type: "read-reader" });
 });
 
 notesSearch.addEventListener("input", renderNoteList);
@@ -3923,6 +4011,12 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
     case "page-text":
       readingProgress.hidden = true;
       showPageText(message.text, message.title ?? t("page"));
+      break;
+    case "reader-text":
+      showReaderText(message.text, message.title);
+      break;
+    case "reader-clear":
+      clearPageText();
       break;
     case "rewrite-fallback":
       readingProgress.hidden = true;

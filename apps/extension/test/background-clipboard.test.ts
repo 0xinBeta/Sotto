@@ -90,6 +90,10 @@ interface ChromeHarness {
   readonly sessionValues: Record<string, unknown>;
   readonly tabSendMessage: ReturnType<typeof vi.fn>;
   readonly updateTab: ReturnType<typeof vi.fn>;
+  readonly tabUpdated: (
+    tabId: number,
+    changeInfo: { readonly status?: string; readonly url?: string },
+  ) => void;
   readonly command: (
     command: string,
     tab?: { readonly id?: number; readonly windowId?: number },
@@ -153,6 +157,12 @@ async function installBackground(
         tab?: { readonly id?: number; readonly windowId?: number },
       ) => void)
     | undefined;
+  let onTabUpdated:
+    | ((
+        tabId: number,
+        changeInfo: { readonly status?: string; readonly url?: string },
+      ) => void)
+    | undefined;
   const executeScript = vi.fn();
   const insertCSS = vi.fn().mockResolvedValue(undefined);
   const queryTabs = vi.fn().mockResolvedValue([activeTab]);
@@ -199,6 +209,14 @@ async function installBackground(
       create: createTab,
       update: updateTab,
       sendMessage: tabSendMessage,
+      onUpdated: {
+        addListener: vi.fn((listener) => {
+          onTabUpdated = listener;
+        }),
+      },
+      onRemoved: {
+        addListener: vi.fn(),
+      },
     },
     windows: {
       update: vi.fn(),
@@ -279,6 +297,7 @@ async function installBackground(
     sessionValues,
     tabSendMessage,
     updateTab,
+    tabUpdated: (tabId, changeInfo) => onTabUpdated?.(tabId, changeInfo),
     command: (command, tab = activeTab) => onCommand?.(command, tab),
     workerMessage: (message, sender = {}) =>
       new Promise((resolve) => {
@@ -608,6 +627,191 @@ describe("background navigation epochs", () => {
     );
   });
 
+  it("opens reader text and composes Read aloud with long-form progress", async () => {
+    const href = "https://example.test/article";
+    worker.speak.mockResolvedValue(undefined);
+    worker.route.mockImplementation(
+      async (
+        _command: unknown,
+        context: {
+          readonly page: {
+            extract(options: {
+              readonly preferSelection: boolean;
+            }): Promise<{
+              readonly text: string;
+              readonly title: string;
+              readonly language?: string;
+            }>;
+          };
+        },
+      ) => {
+        const page = await context.page.extract({ preferSelection: false });
+        return {
+          spoken: "Reader is open.",
+          pageText: {
+            text: page.text,
+            title: page.title,
+            lang: page.language,
+            speech: "none",
+            view: "reader",
+          },
+        };
+      },
+    );
+    const harness = await installBackground({ id: 32, url: href });
+    harness.executeScript.mockImplementation(
+      async (details: { readonly files?: readonly string[] }) =>
+        details.files
+          ? [{ frameId: 0 }]
+          : [{ frameId: 0, result: href }],
+    );
+    harness.tabSendMessage.mockImplementation(
+      async (
+        _tabId: number,
+        message: { readonly epochNonce: string },
+      ) => ({
+        ok: true,
+        epoch: { href, nonce: message.epochNonce },
+        value: {
+          text: "First paragraph.\n\nSecond paragraph.",
+          title: "Local article",
+          url: href,
+          language: "en",
+          source: "readability",
+          truncated: false,
+        },
+      }),
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "open the reader",
+      command: { action: "reader" },
+    });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reader-text",
+      text: "First paragraph.\n\nSecond paragraph.",
+      title: "Local article",
+    });
+
+    worker.speak.mockClear();
+    harness.sendMessage.mockClear();
+    await harness.workerMessage({ type: "read-reader" });
+
+    expect(worker.speak).toHaveBeenCalledWith(
+      "First paragraph.",
+      expect.objectContaining({ lang: "en" }),
+    );
+    expect(worker.speak).toHaveBeenCalledWith(
+      "Second paragraph.",
+      expect.objectContaining({ lang: "en" }),
+    );
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reading-state",
+      active: true,
+      paused: false,
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "reading-progress",
+        chunkIndex: 0,
+        chunkCount: 2,
+      }),
+    );
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reading-state",
+      active: false,
+      paused: false,
+    });
+  });
+
+  it("clears the reader when its navigation epoch changes", async () => {
+    const href = "https://example.test/article";
+    worker.speak.mockResolvedValue(undefined);
+    worker.route.mockImplementation(
+      async (
+        _command: unknown,
+        context: {
+          readonly page: {
+            extract(options: {
+              readonly preferSelection: boolean;
+            }): Promise<{
+              readonly text: string;
+              readonly title: string;
+            }>;
+          };
+        },
+      ) => {
+        const page = await context.page.extract({ preferSelection: false });
+        return {
+          spoken: "Reader is open.",
+          pageText: {
+            text: page.text,
+            title: page.title,
+            speech: "none",
+            view: "reader",
+          },
+        };
+      },
+    );
+    const harness = await installBackground({ id: 33, url: href });
+    harness.executeScript.mockImplementation(
+      async (details: { readonly files?: readonly string[] }) =>
+        details.files
+          ? [{ frameId: 0 }]
+          : [{ frameId: 0, result: href }],
+    );
+    harness.tabSendMessage.mockImplementation(
+      async (
+        _tabId: number,
+        message: { readonly epochNonce: string },
+      ) => ({
+        ok: true,
+        epoch: { href, nonce: message.epochNonce },
+        value: {
+          text: "Local article text.",
+          title: "Local article",
+          url: href,
+          source: "article",
+          truncated: false,
+        },
+      }),
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "show me this article",
+      command: { action: "reader" },
+    });
+    harness.sendMessage.mockClear();
+
+    harness.tabUpdated(33, {
+      status: "loading",
+      url: "https://example.test/next",
+    });
+
+    await vi.waitFor(() =>
+      expect(harness.sendMessage).toHaveBeenCalledWith({
+        target: "sidepanel",
+        type: "reader-clear",
+      })
+    );
+    await expect(
+      harness.workerMessage({ type: "read-reader" }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        name: "Error",
+        message: "Open the reader first.",
+      },
+    });
+  });
+
   it("pauses dictation when its content bridge reports navigation", async () => {
     worker.route.mockImplementation(
       async (
@@ -698,6 +902,7 @@ describe("background screenshot clipboard injection", () => {
       { action: "summarize", mode: "summarize", scope: "page" },
     ],
     ["read", { action: "summarize", mode: "read", scope: "page" }],
+    ["reader", { action: "reader" }],
     [
       "page question",
       { action: "ask-page", question: "What is this?", scope: "page" },

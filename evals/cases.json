@@ -2678,5 +2678,72 @@
     "transcript": "clear my browsing history",
     "negativeFor": "find",
     "expected": { "action": "unknown" }
+  },
+  {
+    "id": "reader-open-01",
+    "transcript": "show me this article",
+    "expected": { "action": "reader" }
+  },
+  {
+    "id": "reader-open-02",
+    "transcript": "open the reader",
+    "expected": { "action": "reader" }
+  },
+  {
+    "id": "reader-open-03",
+    "transcript": "open reader view",
+    "expected": { "action": "reader" }
+  },
+  {
+    "id": "reader-open-04",
+    "transcript": "show this page in reader view",
+    "expected": { "action": "reader" }
+  },
+  {
+    "id": "reader-open-05",
+    "transcript": "put this article in reader view",
+    "expected": { "action": "reader" }
+  },
+  {
+    "id": "reader-open-06",
+    "transcript": "let me read this article",
+    "expected": { "action": "reader" }
+  },
+  {
+    "id": "reader-open-07",
+    "transcript": "show a clean reader view of this page",
+    "expected": { "action": "reader" }
+  },
+  {
+    "id": "reader-open-08",
+    "transcript": "display this article for reading",
+    "expected": { "action": "reader" }
+  },
+  {
+    "id": "reader-negative-01",
+    "transcript": "please read this article out loud",
+    "negativeFor": "reader",
+    "confusable": true,
+    "expected": { "action": "summarize", "mode": "read", "scope": "page" }
+  },
+  {
+    "id": "reader-negative-02",
+    "transcript": "summarize this article",
+    "negativeFor": "reader",
+    "confusable": true,
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "page" }
+  },
+  {
+    "id": "reader-negative-03",
+    "transcript": "open my reading list",
+    "negativeFor": "reader",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "reader-negative-04",
+    "transcript": "search the web for reader mode extensions",
+    "negativeFor": "reader",
+    "confusable": true,
+    "expected": { "action": "navigate", "operation": "search", "query": "reader mode extensions" }
   }
 ]

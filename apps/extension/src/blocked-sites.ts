@@ -11,6 +11,7 @@ const PAGE_TOUCHING_ACTIONS = new Set([
   "find",
   "media",
   "page-control",
+  "reader",
   "screenshot",
   "summarize",
   "translate",

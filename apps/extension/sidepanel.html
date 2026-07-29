@@ -732,6 +732,14 @@
         </div>
         <p class="page-text-output" id="page-text-output"></p>
         <div
+          class="reader-text-output"
+          id="reader-text-output"
+          role="document"
+          data-i18n-aria-label="readerText"
+          tabindex="0"
+          hidden
+        ></div>
+        <div
           class="page-text-output"
           id="reading-text-output"
           role="region"
@@ -746,6 +754,11 @@
           data-i18n-aria-label="readingProgress"
           hidden
         ></progress>
+        <div class="reader-actions" id="reader-actions" hidden>
+          <button class="button primary" id="read-reader" type="button">
+            <span data-i18n="readAloud"></span>
+          </button>
+        </div>
         <div class="reading-controls" id="reading-controls" hidden>
           <button class="button" id="pause-reading" type="button">
             <span data-i18n="pause"></span>

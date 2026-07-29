@@ -80,11 +80,20 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("skip-reading")).toContain('type="button"');
     expect(openingTag("reading-text-output")).toContain('role="region"');
     expect(openingTag("reading-text-output")).toContain('tabindex="0"');
+    expect(openingTag("reader-text-output")).toContain('role="document"');
+    expect(openingTag("reader-text-output")).toContain('tabindex="0"');
+    expect(openingTag("read-reader")).toContain('type="button"');
   });
 
-  it("renders reading sentences through textContent only", () => {
+  it("renders reader paragraphs and reading sentences through textContent only", () => {
+    expect(panelSource).toContain(
+      "paragraph.textContent = textContent;",
+    );
     expect(panelSource).toContain(
       "sentenceElement.textContent = sentence.text;",
+    );
+    expect(panelSource).toContain(
+      'void send({ type: "read-reader" });',
     );
     expect(panelSource).not.toContain("innerHTML");
     expect(panelSource).not.toContain("insertAdjacentHTML");

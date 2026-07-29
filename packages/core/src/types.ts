@@ -116,7 +116,8 @@ export interface ActionResult {
     readonly text: string;
     readonly title?: string;
     readonly lang?: string;
-    readonly speech: "short" | "long";
+    readonly speech: "none" | "short" | "long";
+    readonly view?: "reader";
   };
 }
 
