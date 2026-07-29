@@ -174,6 +174,7 @@ const elementIds = [
   "mic-meter",
   "mic-meter-fill",
   "shortcut-label",
+  "read-page-shortcut-label",
   "grant-mic",
   "command-form",
   "command-input",
@@ -297,6 +298,10 @@ async function installSidepanel(options: {
     readonly volume: number;
     readonly verbosity: "normal" | "brief";
   };
+  readonly commands?: readonly {
+    readonly name: string;
+    readonly shortcut: string;
+  }[];
 } = {}) {
   const elements = Object.fromEntries(
     elementIds.map((id) => [id, new FakeElement()]),
@@ -438,9 +443,12 @@ async function installSidepanel(options: {
       request: requestPermission,
     },
     commands: {
-      getAll: vi.fn().mockResolvedValue([
-        { name: "toggle-sotto", shortcut: "Alt+S" },
-      ]),
+      getAll: vi.fn().mockResolvedValue(
+        options.commands ?? [
+          { name: "toggle-sotto", shortcut: "Alt+S" },
+          { name: "read-this-page", shortcut: "Alt+R" },
+        ],
+      ),
     },
   });
 
@@ -485,6 +493,28 @@ afterEach(() => {
 });
 
 describe("side-panel screenshot clipboard fallback", () => {
+  it("shows both hotkeys and flags an unassigned read hotkey", async () => {
+    const { elements } = await installSidepanel({
+      commands: [
+        { name: "toggle-sotto", shortcut: "Alt+S" },
+        { name: "read-this-page", shortcut: "" },
+      ],
+    });
+
+    await vi.waitFor(() =>
+      expect(elements["read-page-shortcut-label"].textContent).toBe(
+        "UNASSIGNED",
+      )
+    );
+    expect(elements["shortcut-label"].textContent).toBe("Alt+S");
+    expect(elements["action-log"].textContent).toContain(
+      "Assign Read this page in chrome://extensions/shortcuts.",
+    );
+    expect(elements["action-log"].textContent).not.toContain(
+      "Assign Listen",
+    );
+  });
+
   it("copies one diagnostic report and adds one confirmation line", async () => {
     const {
       clipboardWriteText,

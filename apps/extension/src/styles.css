@@ -179,6 +179,7 @@ a:focus-visible {
 .status-chip,
 .progress-copy,
 .command-form > p,
+.shortcut-help,
 .mic-help {
   font-family: "SFMono-Regular", "Cascadia Mono", monospace;
   letter-spacing: 0.08em;
@@ -1130,6 +1131,21 @@ progress::-webkit-progress-value {
 
 .listen-button[aria-pressed="true"] .listen-rings::after {
   animation: ring 1.5s 0.45s ease-out infinite;
+}
+
+.shortcut-help {
+  margin: 14px 0 0;
+  color: var(--paper-dim);
+  font-size: 8px;
+  letter-spacing: 0.03em;
+}
+
+.shortcut-help kbd {
+  margin-left: 5px;
+  padding: 2px 5px;
+  border: 1px solid var(--shortcut-border);
+  border-radius: 3px;
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
 }
 
 .mic-meter {

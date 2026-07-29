@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const worker = vi.hoisted(() => ({
+  parse: vi.fn((command: unknown) => command),
   route: vi.fn(),
   routeConfirmed: vi.fn(),
   requiresConfirmation: vi.fn(() => false),
@@ -33,7 +34,7 @@ vi.mock("@sotto/core", () => ({
   ActionRegistry: class ActionRegistry {},
   CommandRouter: class CommandRouter {
     parse(command: unknown) {
-      return command;
+      return worker.parse(command);
     }
 
     route(command: unknown, context: unknown) {
@@ -77,6 +78,10 @@ interface ChromeHarness {
   readonly storageValues: Record<string, unknown>;
   readonly tabSendMessage: ReturnType<typeof vi.fn>;
   readonly updateTab: ReturnType<typeof vi.fn>;
+  readonly command: (
+    command: string,
+    tab?: { readonly id?: number; readonly windowId?: number },
+  ) => void;
   readonly workerMessage: (
     message: Record<string, unknown>,
   ) => Promise<unknown>;
@@ -129,6 +134,12 @@ async function installBackground(
         respond: (response: unknown) => void,
       ) => boolean | void)
     | undefined;
+  let onCommand:
+    | ((
+        command: string,
+        tab?: { readonly id?: number; readonly windowId?: number },
+      ) => void)
+    | undefined;
   const executeScript = vi.fn();
   const queryTabs = vi.fn().mockResolvedValue([activeTab]);
   const createTab = vi.fn();
@@ -178,7 +189,9 @@ async function installBackground(
     },
     commands: {
       onCommand: {
-        addListener: vi.fn(),
+        addListener: vi.fn((listener) => {
+          onCommand = listener;
+        }),
       },
     },
     sidePanel: {
@@ -223,6 +236,9 @@ async function installBackground(
   if (!onMessage) {
     throw new Error("Worker message listener was not installed");
   }
+  if (!onCommand) {
+    throw new Error("Command listener was not installed");
+  }
 
   return {
     alarmCreate,
@@ -234,6 +250,7 @@ async function installBackground(
     storageValues,
     tabSendMessage,
     updateTab,
+    command: (command, tab = activeTab) => onCommand?.(command, tab),
     workerMessage: (message) =>
       new Promise((resolve) => {
         expect(
@@ -244,6 +261,8 @@ async function installBackground(
 }
 
 afterEach(() => {
+  worker.parse.mockReset();
+  worker.parse.mockImplementation((command: unknown) => command);
   worker.route.mockReset();
   worker.routeConfirmed.mockReset();
   worker.requiresConfirmation.mockReset();
@@ -260,6 +279,96 @@ afterEach(() => {
 });
 
 describe("background screenshot clipboard injection", () => {
+  it("routes the read-page hotkey through the validated read action", async () => {
+    const readResult = {
+      spoken: "Reading the page.",
+      pageText: {
+        text: "Local article text.",
+        title: "Local article",
+        speech: "long" as const,
+      },
+    };
+    worker.route.mockResolvedValue(readResult);
+    const harness = await installBackground({
+      id: 3,
+      url: "https://example.com/article",
+    });
+
+    harness.command("read-this-page");
+
+    await vi.waitFor(() =>
+      expect(worker.route).toHaveBeenCalledWith(
+        {
+          action: "summarize",
+          mode: "read",
+          scope: "page",
+        },
+        expect.objectContaining({
+          actionCatalog: expect.anything(),
+        }),
+      )
+    );
+    expect(worker.parse).toHaveBeenCalledWith({
+      action: "summarize",
+      mode: "read",
+      scope: "page",
+    });
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "parse-transcript",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(harness.sendMessage).toHaveBeenCalledWith({
+        target: "sidepanel",
+        type: "reading-state",
+        active: false,
+        paused: false,
+      })
+    );
+  });
+
+  it("stops an active read when the read-page hotkey runs again", async () => {
+    let finishRead!: () => void;
+    worker.speak.mockImplementation(
+      async () =>
+        await new Promise<void>((resolve) => {
+          finishRead = resolve;
+        }),
+    );
+    worker.stop.mockImplementation(() => {
+      finishRead?.();
+    });
+    worker.route.mockResolvedValue({
+      spoken: "Reading the page.",
+      pageText: {
+        text: "One. Two. Three.",
+        title: "Article",
+        speech: "long",
+      },
+    });
+    const harness = await installBackground({
+      id: 4,
+      url: "https://example.com/article",
+    });
+
+    harness.command("read-this-page");
+    await vi.waitFor(() => expect(worker.speak).toHaveBeenCalledOnce());
+    worker.stop.mockClear();
+
+    harness.command("read-this-page");
+
+    await vi.waitFor(() => expect(worker.stop).toHaveBeenCalledOnce());
+    expect(worker.route).toHaveBeenCalledOnce();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reading-state",
+      active: false,
+      paused: false,
+    });
+  });
+
   it("holds a confirm-tier command until yes executes it", async () => {
     const note = {
       id: "note-1",

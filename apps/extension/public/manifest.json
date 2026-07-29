@@ -53,6 +53,13 @@
         "mac": "Option+S"
       },
       "description": "Start or stop listening"
+    },
+    "read-this-page": {
+      "suggested_key": {
+        "default": "Alt+R",
+        "mac": "Option+R"
+      },
+      "description": "Read this page aloud"
     }
   },
   "content_security_policy": {

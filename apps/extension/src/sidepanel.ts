@@ -638,6 +638,8 @@ const listenLabel = requiredElement<HTMLElement>("#listen-label");
 const micMeter = requiredElement<HTMLElement>("#mic-meter");
 const micMeterFill = requiredElement<HTMLElement>("#mic-meter-fill");
 const shortcutLabel = requiredElement<HTMLElement>("#shortcut-label");
+const readPageShortcutLabel =
+  requiredElement<HTMLElement>("#read-page-shortcut-label");
 const grantMic = requiredElement<HTMLButtonElement>("#grant-mic");
 const commandForm = requiredElement<HTMLFormElement>("#command-form");
 const commandInput = requiredElement<HTMLInputElement>("#command-input");
@@ -2847,20 +2849,33 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
   }
 });
 
-async function showAssignedShortcut(): Promise<void> {
+async function showAssignedShortcuts(): Promise<void> {
   try {
     const commands = await chrome.commands.getAll();
-    const shortcut =
-      commands.find((command) => command.name === "toggle-sotto")?.shortcut ?? "";
-    shortcutLabel.textContent = shortcut || "UNASSIGNED";
-    if (!shortcut) {
-      appendLog(
-        "shortcut",
-        "Assign Toggle Sotto at chrome://extensions/shortcuts",
-      );
+    const shortcuts = [
+      {
+        command: "toggle-sotto",
+        label: shortcutLabel,
+        instruction: "Assign Listen in chrome://extensions/shortcuts.",
+      },
+      {
+        command: "read-this-page",
+        label: readPageShortcutLabel,
+        instruction:
+          "Assign Read this page in chrome://extensions/shortcuts.",
+      },
+    ] as const;
+    for (const item of shortcuts) {
+      const shortcut =
+        commands.find((command) => command.name === item.command)?.shortcut ??
+          "";
+      item.label.textContent = shortcut || "UNASSIGNED";
+      if (!shortcut) {
+        appendLog("shortcut", item.instruction);
+      }
     }
   } catch (error) {
-    console.warn("Sotto could not read its assigned shortcut", error);
+    console.warn("Sotto could not read its assigned shortcuts", error);
   }
 }
 
@@ -2943,7 +2958,7 @@ void requestWorker<readonly PanelReminder[]>({ type: "get-reminders" })
     );
   });
 void loadCapturePermissionState();
-void showAssignedShortcut();
+void showAssignedShortcuts();
 void showReminderFromLocation();
 void loadCommandReference().catch(() => undefined);
 void loadLatencyStatistics().catch(() => undefined);

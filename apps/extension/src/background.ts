@@ -4,6 +4,7 @@ import type {
   PlaybackCommand,
   PlaybackOperation,
 } from "@sotto/actions/playback";
+import type { SummarizeCommand } from "@sotto/actions/summarize";
 import {
   isReminderRecord,
   notesReminderStore,
@@ -136,6 +137,11 @@ let pendingReminderConfirmationId: string | undefined;
 const dictationSession = new DictationTargetSession();
 const pipelineErrors = new PipelineErrorBuffer();
 const exchangeTimings = new ExchangeTimingBuffer();
+const READ_THIS_PAGE_COMMAND = Object.freeze({
+  action: "summarize",
+  mode: "read",
+  scope: "page",
+}) satisfies SummarizeCommand;
 
 function actionContext(): ActionContext {
   return {
@@ -2525,6 +2531,21 @@ chrome.runtime.onMessage.addListener(
 );
 
 chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === "read-this-page") {
+    if (readingActive) {
+      beginCommandGeneration();
+      return;
+    }
+    runAndReport(
+      executeCommand(
+        READ_THIS_PAGE_COMMAND,
+        "read this page",
+        { input: "typed" },
+      ),
+      "Sotto could not read this page",
+    );
+    return;
+  }
   if (command !== "toggle-sotto") return;
   beginCommandGeneration();
   let panelOpening: Promise<void> = Promise.resolve();
