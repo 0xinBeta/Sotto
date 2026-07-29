@@ -2394,11 +2394,14 @@ async function startListening(
       onnxWASMBasePath: chrome.runtime.getURL("assets/ort-kokoro/"),
       startOnLoad: false,
       submitUserSpeechOnPause: true,
-      positiveSpeechThreshold: 0.3,
-      negativeSpeechThreshold: 0.25,
-      preSpeechPadMs: 256,
-      redemptionMs: 192,
-      minSpeechMs: 320,
+      // Natural speech pauses exceed 200ms; an aggressive redemption chops
+      // sentences into fragments that decode as single tokens. These match
+      // the library defaults that shipped in the user-verified v0.3 build.
+      positiveSpeechThreshold: 0.5,
+      negativeSpeechThreshold: 0.35,
+      preSpeechPadMs: 300,
+      redemptionMs: 800,
+      minSpeechMs: 250,
       getStream: async () => stream,
       ortConfig(ort) {
         ort.env.wasm.numThreads = 1;

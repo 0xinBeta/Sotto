@@ -1072,7 +1072,7 @@ describe("offscreen fail-soft status", () => {
     );
   });
 
-  it("hands STT explicit 256 ms pre-roll, 192 ms post-roll, and 320 ms voiced gating", async () => {
+  it("hands STT natural-speech VAD gating (300 ms pad, 800 ms redemption, 250 ms voiced)", async () => {
     const harness = await installPremiumOffscreen();
 
     await expect(
@@ -1084,9 +1084,9 @@ describe("offscreen fail-soft status", () => {
         model: "v5",
         positiveSpeechThreshold: 0.3,
         negativeSpeechThreshold: 0.25,
-        preSpeechPadMs: 256,
-        redemptionMs: 192,
-        minSpeechMs: 320,
+        preSpeechPadMs: 300,
+        redemptionMs: 800,
+        minSpeechMs: 250,
       }),
     );
   });

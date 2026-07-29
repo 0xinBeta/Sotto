@@ -573,6 +573,30 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     emitProgress({ status: "ready", progress: 1 });
   }
 
+  /**
+   * Rebuilds the model session after the ONNX runtime backend was destroyed
+   * out from under it. Model files come from cache, so this is fast. Runs
+   * inside #queueInference, so it must not re-enter the queue.
+   */
+  async #rebuildAfterRuntimeLoss(): Promise<void> {
+    const dead = this.#tts;
+    this.#tts = undefined;
+    if (dead) {
+      try {
+        await dead.model.dispose();
+      } catch {
+        // The backend is already gone; disposal failure is expected.
+      }
+    }
+    this.#tts = await this.#runtime.load({
+      modelId: KOKORO_MODEL_ID,
+      revision: KOKORO_MODEL_REVISION,
+      device: this.#backend ?? "wasm",
+      dtype: this.#dtype ?? "q8",
+      onProgress: () => {},
+    });
+  }
+
   async #speakChunks(
     text: string,
     options: KokoroLongSpeakOptions,
@@ -707,15 +731,31 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
       for (const [chunkIndex, chunk] of chunks.entries()) {
         throwIfAborted(operation.controller.signal);
         await this.#waitForLookahead(operation.controller.signal);
+        const synthesize = () =>
+          this.#tts!.generate(chunk, {
+            voice: options.voice ?? this.#voice,
+            // kokoro-js 1.2.1 supports synthesis-time speed, so playbackRate
+            // pitch shifting is not required.
+            speed: options.rate ?? 1,
+          });
         const audio = await abortable(
-          this.#queueInference(() =>
-            this.#tts!.generate(chunk, {
-              voice: options.voice ?? this.#voice,
-              // kokoro-js 1.2.1 supports synthesis-time speed, so playbackRate
-              // pitch shifting is not required.
-              speed: options.rate ?? 1,
-            })
-          ),
+          this.#queueInference(async () => {
+            try {
+              return await synthesize();
+            } catch (error) {
+              // A destroyed ONNX runtime backend surfaces as a TypeError on
+              // internal state ("reading 'dc'" / null backend). The model
+              // files stay cached, so rebuilding the session self-heals.
+              if (
+                error instanceof TypeError &&
+                /reading|null|undefined/i.test(error.message)
+              ) {
+                await this.#rebuildAfterRuntimeLoss();
+                return await synthesize();
+              }
+              throw error;
+            }
+          }),
           operation.controller.signal,
         );
         throwIfAborted(operation.controller.signal);
