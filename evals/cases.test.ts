@@ -58,6 +58,21 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps at least ten navigate cases and three hostile negatives", () => {
+    expect(
+      cases.filter((testCase) => testCase.expected.action === "navigate")
+        .length,
+    ).toBeGreaterThanOrEqual(10);
+
+    const hostile = cases.filter((testCase) =>
+      testCase.id.startsWith("unknown-navigate-hostile-")
+    );
+    expect(hostile).toHaveLength(3);
+    expect(
+      hostile.every((testCase) => testCase.expected.action === "unknown"),
+    ).toBe(true);
+  });
+
   it("keeps at least eight follow-up cases, including no-context negatives", () => {
     const followUps = cases.filter((testCase) =>
       testCase.id.startsWith("followup-")

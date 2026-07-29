@@ -1,5 +1,6 @@
 import askPageAction from "./ask-page/index.js";
 import helpAction from "./help/index.js";
+import navigateAction from "./navigate/index.js";
 import notesAction from "./notes/index.js";
 import pageControlAction from "./page-control/index.js";
 import playbackAction from "./playback/index.js";
@@ -26,6 +27,12 @@ export {
   notesSchema,
 } from "./notes/index.js";
 export type { NotesCommand } from "./notes/index.js";
+export {
+  default as navigateAction,
+  navigateSchema,
+  sanitizeHostname,
+} from "./navigate/index.js";
+export type { NavigateCommand } from "./navigate/index.js";
 export {
   calculateZoomLevel,
   default as pageControlAction,
@@ -80,6 +87,7 @@ export const actions = [
   tabsAction,
   summarizeAction,
   askPageAction,
+  navigateAction,
   notesAction,
   pageControlAction,
   playbackAction,

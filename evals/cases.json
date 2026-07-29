@@ -386,6 +386,72 @@
   },
 
   {
+    "id": "navigate-open-01",
+    "transcript": "open github.com",
+    "expected": { "action": "navigate", "operation": "open", "site": "github.com" }
+  },
+  {
+    "id": "navigate-open-02",
+    "transcript": "go to wikipedia.org",
+    "expected": { "action": "navigate", "operation": "open", "site": "wikipedia.org" }
+  },
+  {
+    "id": "navigate-open-03",
+    "transcript": "take me to developer.mozilla.org",
+    "expected": { "action": "navigate", "operation": "open", "site": "developer.mozilla.org" }
+  },
+  {
+    "id": "navigate-open-04",
+    "transcript": "visit docs.python.org",
+    "expected": { "action": "navigate", "operation": "open", "site": "docs.python.org" }
+  },
+  {
+    "id": "navigate-open-05",
+    "transcript": "open news.ycombinator.com",
+    "expected": { "action": "navigate", "operation": "open", "site": "news.ycombinator.com" }
+  },
+  {
+    "id": "navigate-search-01",
+    "transcript": "search the web for chrome extensions",
+    "expected": { "action": "navigate", "operation": "search", "query": "chrome extensions" }
+  },
+  {
+    "id": "navigate-search-02",
+    "transcript": "search the web for local voice assistants",
+    "expected": { "action": "navigate", "operation": "search", "query": "local voice assistants" }
+  },
+  {
+    "id": "navigate-search-03",
+    "transcript": "google privacy browser extensions",
+    "expected": { "action": "navigate", "operation": "search", "query": "privacy browser extensions" }
+  },
+  {
+    "id": "navigate-search-04",
+    "transcript": "look up Chrome MV3 service workers",
+    "expected": { "action": "navigate", "operation": "search", "query": "Chrome MV3 service workers" }
+  },
+  {
+    "id": "navigate-search-05",
+    "transcript": "web search for secure hostname validation",
+    "expected": { "action": "navigate", "operation": "search", "query": "secure hostname validation" }
+  },
+  {
+    "id": "unknown-navigate-hostile-01",
+    "transcript": "open javascript colon alert",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-navigate-hostile-02",
+    "transcript": "open 192.168.0.1",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "unknown-navigate-hostile-03",
+    "transcript": "open file slash slash etc",
+    "expected": { "action": "unknown" }
+  },
+
+  {
     "id": "tabs-new-01",
     "transcript": "new tab",
     "expected": { "action": "tabs", "operation": "new" }

@@ -42,6 +42,10 @@
       "types": "./dist/notes/markdown.d.ts",
       "import": "./dist/notes/markdown.js"
     },
+    "./navigate": {
+      "types": "./dist/navigate/index.d.ts",
+      "import": "./dist/navigate/index.js"
+    },
     "./playback": {
       "types": "./dist/playback/index.d.ts",
       "import": "./dist/playback/index.js"
