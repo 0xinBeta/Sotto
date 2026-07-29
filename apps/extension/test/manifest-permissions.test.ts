@@ -75,6 +75,7 @@ const sourceManifest = readManifest(sourceManifestUrl);
  * sessions: Reopen a recently closed tab.
  * sidePanel: Show Sotto's main interface.
  * storage: Save local settings, notes, and model state.
+ * tabGroups: Create, name, remove, collapse, and expand tab groups.
  * tabs: List, switch, close, and mute tabs.
  * tts: Speak responses with a local system voice.
  * https://huggingface.co/*: Download pinned model files.
@@ -95,6 +96,7 @@ const expectedTrustSurface = {
     "sessions",
     "sidePanel",
     "storage",
+    "tabGroups",
     "tabs",
     "tts",
   ],

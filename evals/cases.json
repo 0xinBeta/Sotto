@@ -1230,6 +1230,93 @@
   },
 
   {
+    "id": "tab-groups-group-01",
+    "transcript": "group these tabs as research",
+    "expected": { "action": "tab-groups", "operation": "group", "title": "research" }
+  },
+  {
+    "id": "tab-groups-group-02",
+    "transcript": "put these tabs in a group called client work",
+    "expected": { "action": "tab-groups", "operation": "group", "title": "client work" }
+  },
+  {
+    "id": "tab-groups-group-03",
+    "transcript": "make a tab group named trip planning",
+    "expected": { "action": "tab-groups", "operation": "group", "title": "trip planning" }
+  },
+  {
+    "id": "tab-groups-group-04",
+    "transcript": "group the highlighted tabs as reading",
+    "expected": { "action": "tab-groups", "operation": "group", "title": "reading" }
+  },
+  {
+    "id": "tab-groups-ungroup-current-01",
+    "transcript": "ungroup this tab",
+    "expected": { "action": "tab-groups", "operation": "ungroup", "scope": "current" }
+  },
+  {
+    "id": "tab-groups-ungroup-current-02",
+    "transcript": "remove this tab from its group",
+    "expected": { "action": "tab-groups", "operation": "ungroup", "scope": "current" }
+  },
+  {
+    "id": "tab-groups-ungroup-highlighted-01",
+    "transcript": "ungroup these tabs",
+    "expected": { "action": "tab-groups", "operation": "ungroup", "scope": "highlighted" }
+  },
+  {
+    "id": "tab-groups-ungroup-highlighted-02",
+    "transcript": "remove these tabs from their groups",
+    "expected": { "action": "tab-groups", "operation": "ungroup", "scope": "highlighted" }
+  },
+  {
+    "id": "tab-groups-collapse-01",
+    "transcript": "collapse my groups",
+    "expected": { "action": "tab-groups", "operation": "collapse" }
+  },
+  {
+    "id": "tab-groups-collapse-02",
+    "transcript": "collapse all my tab groups",
+    "expected": { "action": "tab-groups", "operation": "collapse" }
+  },
+  {
+    "id": "tab-groups-expand-01",
+    "transcript": "expand my groups",
+    "expected": { "action": "tab-groups", "operation": "expand" }
+  },
+  {
+    "id": "tab-groups-expand-02",
+    "transcript": "expand all my tab groups",
+    "expected": { "action": "tab-groups", "operation": "expand" }
+  },
+  {
+    "id": "tab-groups-negative-01",
+    "transcript": "open a new tab for research",
+    "negativeFor": "tab-groups",
+    "confusable": true,
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "tab-groups-negative-02",
+    "transcript": "close every tab in this group",
+    "negativeFor": "tab-groups",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "tab-groups-negative-03",
+    "transcript": "bookmark the current research tab",
+    "negativeFor": "tab-groups",
+    "confusable": true,
+    "expected": { "action": "bookmarks", "operation": "create" }
+  },
+  {
+    "id": "tab-groups-negative-04",
+    "transcript": "collapse this page to one paragraph",
+    "negativeFor": "tab-groups",
+    "expected": { "action": "unknown" }
+  },
+
+  {
     "id": "help-show-01",
     "transcript": "what can I say",
     "expected": { "action": "help", "mode": "show" }

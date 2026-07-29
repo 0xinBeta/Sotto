@@ -14,6 +14,7 @@ import repeatAction from "./repeat/index.js";
 import screenshotAction from "./screenshot/index.js";
 import settingsAction from "./settings/index.js";
 import summarizeAction from "./summarize/index.js";
+import tabGroupsAction from "./tab-groups/index.js";
 import tabsAction from "./tabs/index.js";
 import translateAction from "./translate/index.js";
 import typeAction from "./type/index.js";
@@ -140,6 +141,16 @@ export type {
 } from "./screenshot/index.js";
 export * from "./tabs/index.js";
 export {
+  default as tabGroupsAction,
+  MAX_TAB_GROUP_TITLE_LENGTH,
+  tabGroupsSchema,
+} from "./tab-groups/index.js";
+export type {
+  TabGroupOperation,
+  TabGroupScope,
+  TabGroupsCommand,
+} from "./tab-groups/index.js";
+export {
   default as typeAction,
   typeActionSchema,
 } from "./type/index.js";
@@ -174,6 +185,7 @@ export { default as tabsAction } from "./tabs/index.js";
 export const actions = [
   screenshotAction,
   tabsAction,
+  tabGroupsAction,
   bookmarksAction,
   translateAction,
   summarizeAction,

@@ -203,6 +203,25 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps tab group cases for each operation and ungroup scope", () => {
+    const tabGroupCases = cases.filter(
+      (testCase) => testCase.expected.action === "tab-groups",
+    );
+    const ungroupScopes = tabGroupCases
+      .filter((testCase) => testCase.expected.operation === "ungroup")
+      .map((testCase) =>
+        "scope" in testCase.expected ? testCase.expected.scope : undefined
+      );
+
+    expect(tabGroupCases.length).toBeGreaterThanOrEqual(8);
+    expect(
+      new Set(tabGroupCases.map((testCase) => testCase.expected.operation)),
+    ).toEqual(new Set(["group", "ungroup", "collapse", "expand"]));
+    expect(new Set(ungroupScopes)).toEqual(
+      new Set(["current", "highlighted"]),
+    );
+  });
+
   it("keeps eight translate cases and an unsupported-language negative", () => {
     expect(
       cases.filter((testCase) => testCase.expected.action === "translate")

@@ -11,6 +11,11 @@ export const SPOKEN_LINE_KEYS = [
   "tab-opened",
   "tab-closed",
   "tab-reopened",
+  "tab-grouped",
+  "tab-ungrouped",
+  "tabs-ungrouped",
+  "tab-groups-collapsed",
+  "tab-groups-expanded",
   "typed",
   "rewritten",
   "searching",
@@ -67,6 +72,26 @@ const SPOKEN_LINES: Record<SpokenLineKey, SpokenLineVariants> = {
     normal: "Reopened the last closed tab.",
     brief: "Opened.",
   },
+  "tab-grouped": {
+    normal: "Grouped.",
+    brief: "Grouped.",
+  },
+  "tab-ungrouped": {
+    normal: "Ungrouped the tab.",
+    brief: "Ungrouped.",
+  },
+  "tabs-ungrouped": {
+    normal: "Ungrouped the tabs.",
+    brief: "Ungrouped.",
+  },
+  "tab-groups-collapsed": {
+    normal: "Collapsed your groups.",
+    brief: "Collapsed.",
+  },
+  "tab-groups-expanded": {
+    normal: "Expanded your groups.",
+    brief: "Expanded.",
+  },
   typed: {
     normal: "Typed it.",
     brief: "Done.",
@@ -96,6 +121,7 @@ const SPOKEN_LINES: Record<SpokenLineKey, SpokenLineVariants> = {
 const SPOKEN_LINE_KEY_BY_NORMAL = new Map(
   SPOKEN_LINE_KEYS.map((key) => [SPOKEN_LINES[key].normal, key]),
 );
+const GROUPED_AS_LINE = /^Grouped as [\s\S]{1,40}\.$/u;
 
 export interface SelectedSpokenLine {
   readonly text: string;
@@ -114,7 +140,16 @@ export function selectSpokenLine(
   verbosity: ResponseVerbosity,
 ): SelectedSpokenLine {
   const key = SPOKEN_LINE_KEY_BY_NORMAL.get(text);
-  return key === undefined
-    ? { text }
-    : { text: spokenLine(key, verbosity), key };
+  if (key !== undefined) {
+    return { text: spokenLine(key, verbosity), key };
+  }
+  if (GROUPED_AS_LINE.test(text)) {
+    return {
+      text: verbosity === "brief"
+        ? spokenLine("tab-grouped", verbosity)
+        : text,
+      key: "tab-grouped",
+    };
+  }
+  return { text };
 }

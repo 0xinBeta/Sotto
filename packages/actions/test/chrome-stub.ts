@@ -6,11 +6,17 @@ export function installChromeStub() {
       query: vi.fn(),
       get: vi.fn(),
       create: vi.fn(),
+      group: vi.fn(),
       remove: vi.fn(),
+      ungroup: vi.fn(),
       update: vi.fn(),
       captureVisibleTab: vi.fn(),
       getZoom: vi.fn(),
       setZoom: vi.fn(),
+    },
+    tabGroups: {
+      query: vi.fn(),
+      update: vi.fn(),
     },
     bookmarks: {
       create: vi.fn(),

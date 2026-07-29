@@ -18,6 +18,11 @@ const KNOWN_KEYS: readonly SpokenLineKey[] = [
   "tab-opened",
   "tab-closed",
   "tab-reopened",
+  "tab-grouped",
+  "tab-ungrouped",
+  "tabs-ungrouped",
+  "tab-groups-collapsed",
+  "tab-groups-expanded",
   "typed",
   "rewritten",
   "searching",
@@ -54,5 +59,16 @@ describe("spoken confirmation lines", () => {
     ]) {
       expect(selectSpokenLine(text, "brief")).toEqual({ text });
     }
+  });
+
+  it("keeps the group title in normal mode and shortens brief mode", () => {
+    expect(selectSpokenLine("Grouped as research.", "normal")).toEqual({
+      text: "Grouped as research.",
+      key: "tab-grouped",
+    });
+    expect(selectSpokenLine("Grouped as research.", "brief")).toEqual({
+      text: "Grouped.",
+      key: "tab-grouped",
+    });
   });
 });
