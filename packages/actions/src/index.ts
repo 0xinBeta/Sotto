@@ -5,6 +5,7 @@ import navigateAction from "./navigate/index.js";
 import notesAction from "./notes/index.js";
 import pageControlAction from "./page-control/index.js";
 import playbackAction from "./playback/index.js";
+import quietModeAction from "./quiet-mode/index.js";
 import repeatAction from "./repeat/index.js";
 import screenshotAction from "./screenshot/index.js";
 import summarizeAction from "./summarize/index.js";
@@ -66,6 +67,14 @@ export type {
   PlaybackOperation,
 } from "./playback/index.js";
 export {
+  default as quietModeAction,
+  quietModeSchema,
+} from "./quiet-mode/index.js";
+export type {
+  QuietModeCommand,
+  QuietModeOperation,
+} from "./quiet-mode/index.js";
+export {
   default as repeatAction,
   EMPTY_REPEAT_RESPONSE,
   repeatSchema,
@@ -107,6 +116,7 @@ export const actions = [
   notesAction,
   pageControlAction,
   playbackAction,
+  quietModeAction,
   repeatAction,
   typeAction,
   dictationAction,

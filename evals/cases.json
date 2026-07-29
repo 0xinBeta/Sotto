@@ -1200,5 +1200,35 @@
     "id": "unknown-notes-near-02",
     "transcript": "remind me in ten seconds",
     "expected": { "action": "unknown" }
+  },
+  {
+    "id": "quiet-mode-on-01",
+    "transcript": "do not disturb on",
+    "expected": { "action": "quiet-mode", "operation": "on" }
+  },
+  {
+    "id": "quiet-mode-on-02",
+    "transcript": "mute yourself",
+    "expected": { "action": "quiet-mode", "operation": "on" }
+  },
+  {
+    "id": "quiet-mode-on-03",
+    "transcript": "turn quiet mode on",
+    "expected": { "action": "quiet-mode", "operation": "on" }
+  },
+  {
+    "id": "quiet-mode-off-01",
+    "transcript": "do not disturb off",
+    "expected": { "action": "quiet-mode", "operation": "off" }
+  },
+  {
+    "id": "quiet-mode-off-02",
+    "transcript": "unmute yourself",
+    "expected": { "action": "quiet-mode", "operation": "off" }
+  },
+  {
+    "id": "quiet-mode-off-03",
+    "transcript": "turn quiet mode off",
+    "expected": { "action": "quiet-mode", "operation": "off" }
   }
 ]

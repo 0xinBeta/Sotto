@@ -50,6 +50,14 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps at least four quiet mode cases", () => {
+    expect(
+      cases.filter((testCase) =>
+        testCase.expected.action === "quiet-mode"
+      ).length,
+    ).toBeGreaterThanOrEqual(4);
+  });
+
   it("keeps notes management and confirmation phrase cases", () => {
     const management = cases.filter((testCase) =>
       testCase.id.startsWith("notes-read-") ||

@@ -31,6 +31,10 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("listen-button")).toContain(
       'aria-labelledby="listen-label"',
     );
+    expect(openingTag("quiet-mode")).toContain('role="switch"');
+    expect(openingTag("quiet-mode")).toContain(
+      'aria-labelledby="quiet-mode-label"',
+    );
     expect(openingTag("mic-meter")).toContain('role="meter"');
     expect(openingTag("mic-meter")).toContain('aria-valuemin="0"');
     expect(openingTag("mic-meter")).toContain('aria-valuemax="100"');
@@ -51,6 +55,9 @@ describe("side-panel accessibility structure", () => {
     );
     expect(panelMarkup).toMatch(
       /<label class="voice-switch" for="premium-stt-enabled">/,
+    );
+    expect(panelMarkup).toMatch(
+      /class="quiet-switch"[\s\S]*for="quiet-mode"/,
     );
     expect(panelMarkup).toContain('<label for="speech-rate">Rate</label>');
     expect(panelMarkup).toContain(

@@ -177,6 +177,7 @@ type PanelMessage =
       error?: string;
     }
   | { target: "sidepanel"; type: "listening-state"; listening: boolean }
+  | { target: "sidepanel"; type: "quiet-mode-state"; enabled: boolean }
   | { target: "sidepanel"; type: "speech-start" }
   | { target: "sidepanel"; type: "speech-end" }
   | { target: "sidepanel"; type: "mic-level"; level: number }
@@ -292,6 +293,8 @@ type PanelMessage =
 
 function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
   switch (message.type) {
+    case "quiet-mode-state":
+      return typeof message.enabled === "boolean";
     case "action-log":
       return (
         isBoundedString(message.heard, 2_000, 1) &&
@@ -494,6 +497,12 @@ function requiredElement<T extends Element>(selector: string): T {
 
 const statusChip = requiredElement<HTMLElement>("#status-chip");
 const statusLabel = requiredElement<HTMLElement>("#status-label");
+const quietModeControl =
+  requiredElement<HTMLElement>("#quiet-mode-control");
+const quietModeToggle =
+  requiredElement<HTMLInputElement>("#quiet-mode");
+const quietModeLabel =
+  requiredElement<HTMLElement>("#quiet-mode-label");
 const pipelineError = requiredElement<HTMLElement>("#pipeline-error");
 const captureSetup = requiredElement<HTMLElement>("#capture-setup");
 const enableCapture = requiredElement<HTMLButtonElement>("#enable-capture");
@@ -602,6 +611,7 @@ const commandReferenceList =
   requiredElement<HTMLElement>("#command-reference-list");
 
 let isListening = false;
+let isQuietMode = false;
 let isReading = false;
 let isReadingPaused = false;
 let isDictating = false;
@@ -668,6 +678,26 @@ function showSpeechSettings(settings: SpeechSettings): void {
     "aria-valuetext",
     `${volumePercent} percent`,
   );
+}
+
+function showQuietMode(enabled: boolean): void {
+  isQuietMode = enabled;
+  quietModeToggle.checked = enabled;
+  quietModeControl.dataset.state = enabled ? "on" : "off";
+  quietModeLabel.textContent =
+    enabled ? "Quiet mode on" : "Quiet mode off";
+}
+
+async function loadQuietMode(): Promise<void> {
+  try {
+    const enabled = await requestWorker<unknown>({
+      type: "get-quiet-mode",
+    });
+    showQuietMode(enabled === true);
+  } catch {
+    showQuietMode(false);
+    appendLog("quiet mode", "Quiet mode is unavailable.");
+  }
 }
 
 async function saveSpeechSettings(): Promise<void> {
@@ -991,6 +1021,7 @@ async function loadCapturePermissionState(): Promise<void> {
 }
 
 async function playEarcon(kind: "listen" | "complete"): Promise<void> {
+  if (isQuietMode) return;
   try {
     earconContext ??= new AudioContext();
     if (earconContext.state === "suspended") await earconContext.resume();
@@ -1897,6 +1928,26 @@ premiumSttEnabled.addEventListener("change", async () => {
   premiumSttEnabled.disabled = false;
 });
 
+quietModeToggle.addEventListener("change", async () => {
+  const requested = quietModeToggle.checked;
+  quietModeToggle.disabled = true;
+  try {
+    const saved = await requestWorker<unknown>({
+      type: "set-quiet-mode",
+      enabled: requested,
+    });
+    if (typeof saved !== "boolean") {
+      throw new Error("Quiet mode returned an invalid state.");
+    }
+    showQuietMode(saved);
+  } catch {
+    showQuietMode(!requested);
+    appendLog("quiet mode", "Quiet mode could not be saved.");
+  } finally {
+    quietModeToggle.disabled = false;
+  }
+});
+
 enableCapture.addEventListener("click", async () => {
   enableCapture.disabled = true;
   try {
@@ -2033,6 +2084,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       break;
     case "listening-state":
       setListening(message.listening);
+      break;
+    case "quiet-mode-state":
+      showQuietMode(message.enabled);
       break;
     case "speech-start":
       listeningMark.textContent = isDictating ? "DICTATION" : "SPEECH";
@@ -2223,3 +2277,4 @@ void showAssignedShortcut();
 void showReminderFromLocation();
 void loadCommandReference().catch(() => undefined);
 void loadSpeechSettings();
+void loadQuietMode();

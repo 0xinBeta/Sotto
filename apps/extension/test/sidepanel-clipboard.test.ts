@@ -133,6 +133,9 @@ class FakeText {
 const elementIds = [
   "status-chip",
   "status-label",
+  "quiet-mode-control",
+  "quiet-mode",
+  "quiet-mode-label",
   "pipeline-error",
   "capture-setup",
   "enable-capture",
@@ -241,6 +244,7 @@ const completion = {
 
 async function installSidepanel(options: {
   readonly capturePermissionGranted?: boolean;
+  readonly quietMode?: boolean;
   readonly retryWorkflow?: typeof workflow;
   readonly speechSettings?: {
     readonly rate: number;
@@ -263,7 +267,10 @@ async function installSidepanel(options: {
   const requestPermission = vi.fn().mockResolvedValue(true);
   const clipboardWriteText = vi.fn().mockResolvedValue(undefined);
   const sendMessage = vi.fn().mockImplementation(
-    async (message: { readonly type?: string }) => {
+    async (message: {
+      readonly type?: string;
+      readonly enabled?: unknown;
+    }) => {
       if (message.type === "get-diagnostic-report") {
         return {
           ok: true,
@@ -274,6 +281,18 @@ async function installSidepanel(options: {
         return {
           ok: true,
           value: options.speechSettings,
+        };
+      }
+      if (message.type === "get-quiet-mode") {
+        return {
+          ok: true,
+          value: options.quietMode ?? false,
+        };
+      }
+      if (message.type === "set-quiet-mode") {
+        return {
+          ok: true,
+          value: message.enabled,
         };
       }
       if (message.type === "retry-screenshot") {
@@ -517,6 +536,28 @@ describe("side-panel screenshot clipboard fallback", () => {
       })
     );
     expect(elements["speech-volume-value"].textContent).toBe("0%");
+  });
+
+  it("shows and saves quiet mode in the header", async () => {
+    const { elements, sendMessage } = await installSidepanel({
+      quietMode: true,
+    });
+    await vi.waitFor(() =>
+      expect(elements["quiet-mode-label"].textContent).toBe("Quiet mode on")
+    );
+    expect(elements["quiet-mode"].checked).toBe(true);
+    expect(elements["quiet-mode-control"].dataset.state).toBe("on");
+
+    elements["quiet-mode"].checked = false;
+    await elements["quiet-mode"].emit("change");
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "set-quiet-mode",
+      enabled: false,
+    });
+    expect(elements["quiet-mode-label"].textContent).toBe("Quiet mode off");
+    expect(elements["quiet-mode-control"].dataset.state).toBe("off");
   });
 
   it("shows OS fallback while absent and enables the default-on premium toggle when ready", async () => {

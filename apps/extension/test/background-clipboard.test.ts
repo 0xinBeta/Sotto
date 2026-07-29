@@ -568,6 +568,83 @@ describe("background screenshot clipboard injection", () => {
     );
   });
 
+  it("suppresses speech and keeps the spoken line in the log", async () => {
+    const harness = await installBackground(
+      { id: 60, url: "https://example.com/current" },
+      { quietMode: true },
+    );
+
+    await harness.workerMessage({
+      type: "speak",
+      text: "The local task is complete.",
+      heard: "finish the local task",
+      did: "The local task is complete.",
+      timings: { input: "voice" },
+    });
+
+    expect(worker.speak).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "action-log",
+      heard: "finish the local task",
+      did: "The local task is complete.",
+      timings: { input: "voice" },
+    });
+  });
+
+  it("uses the on confirmation as the last utterance", async () => {
+    worker.speak.mockResolvedValue(undefined);
+    const harness = await installBackground({
+      id: 601,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "mute yourself",
+        command: { action: "quiet-mode", operation: "on" },
+        timings: { input: "voice" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Quiet mode on." },
+    });
+
+    expect(worker.speak).toHaveBeenCalledTimes(1);
+    expect(worker.speak).toHaveBeenCalledWith("Quiet mode on.", {
+      lang: "en-US",
+      rate: 1,
+      volume: 1,
+    });
+    expect(harness.storageValues.quietMode).toBe(true);
+
+    await harness.workerMessage({
+      type: "speak",
+      text: "This line stays silent.",
+    });
+    expect(worker.speak).toHaveBeenCalledTimes(1);
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "unmute yourself",
+        command: { action: "quiet-mode", operation: "off" },
+        timings: { input: "voice" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Quiet mode off." },
+    });
+    expect(worker.speak).toHaveBeenLastCalledWith("Quiet mode off.", {
+      lang: "en-US",
+      rate: 1,
+      volume: 1,
+    });
+    expect(harness.storageValues.quietMode).toBe(false);
+    expect(worker.route).not.toHaveBeenCalled();
+  });
+
   it("stores only the last successful final speech in worker memory", async () => {
     worker.route.mockImplementation(repeatResult);
     const harness = await installBackground({
@@ -824,6 +901,62 @@ describe("background screenshot clipboard injection", () => {
     expect(harness.storageSet).not.toHaveBeenCalled();
     expect(harness.createTab).not.toHaveBeenCalled();
     expect(harness.updateTab).not.toHaveBeenCalled();
+  });
+
+  it("shows read-aloud text and one quiet-mode log without audio", async () => {
+    const pageText = "This text stays visible while quiet mode is on.";
+    worker.route.mockResolvedValue({
+      spoken: "Reading the page.",
+      pageText: {
+        text: pageText,
+        title: "Local page",
+        speech: "long",
+      },
+    });
+    const harness = await installBackground(
+      { id: 111, url: "https://example.com/article" },
+      { quietMode: true },
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "read this page",
+      command: {
+        action: "summarize",
+        mode: "read",
+        scope: "page",
+      },
+      timings: { input: "voice" },
+    });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "page-text",
+      text: pageText,
+      title: "Local page",
+    });
+    const quietLogs = harness.sendMessage.mock.calls.filter(
+      ([message]) =>
+        message.target === "sidepanel" &&
+        message.type === "action-log" &&
+        message.heard === "read this page",
+    );
+    expect(quietLogs).toEqual([[
+      {
+        target: "sidepanel",
+        type: "action-log",
+        heard: "read this page",
+        did: "Quiet mode is on.",
+        timings: { input: "voice", actionMs: expect.any(Number) },
+      },
+    ]]);
+    expect(worker.speak).not.toHaveBeenCalled();
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "earcon",
+      }),
+    );
   });
 
   it("does not publish a stale page result after barge-in", async () => {

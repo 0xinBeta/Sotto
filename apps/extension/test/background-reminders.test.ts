@@ -327,6 +327,43 @@ describe("background reminder recovery", () => {
     );
   });
 
+  it("shows a silent notification and skips the spoken ping in quiet mode", async () => {
+    const future = reminder("quiet", "2099-01-01T00:00:00.000Z");
+    const harness = await installBackground({
+      values: {
+        schemaVersion: 1,
+        quietMode: true,
+        "reminder:quiet": future,
+      },
+      existingAlarms: ["reminder:quiet"],
+    });
+    harness.values["reminder:quiet"] = reminder(
+      "quiet",
+      "2000-01-01T00:00:00.000Z",
+    );
+    worker.speak.mockResolvedValue(undefined);
+
+    harness.alarmListener({ name: "reminder:quiet" });
+    await vi.waitFor(() =>
+      expect(harness.notificationCreate).toHaveBeenCalledWith(
+        "reminder:quiet",
+        expect.objectContaining({
+          type: "basic",
+          message: "Reminder quiet",
+          silent: true,
+        }),
+      ),
+    );
+
+    expect(worker.speak).not.toHaveBeenCalled();
+    expect(harness.panelSend).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "action-log",
+      heard: "quiet mode",
+      did: "Reminder: Reminder quiet",
+    });
+  });
+
   it("keeps a denied reminder scheduled when every fallback fails", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const future = reminder("retry", "2099-01-01T00:00:00.000Z");

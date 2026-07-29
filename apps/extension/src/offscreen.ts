@@ -285,6 +285,12 @@ interface PageTaskInput {
 
 async function sendPanel(message: Record<string, unknown>): Promise<void> {
   try {
+    if (
+      message.type === "earcon" &&
+      await askWorker<boolean>({ type: "get-quiet-mode" })
+    ) {
+      return;
+    }
     await chrome.runtime.sendMessage({ target: "sidepanel", ...message });
   } catch {
     // A panel is not required for hotkey-only use.

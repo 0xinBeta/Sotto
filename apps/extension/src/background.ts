@@ -54,6 +54,7 @@ import {
   SpeechSettingsStore,
   SpeechSettingsTtsEngine,
 } from "./speech-settings.js";
+import { QuietModeStore } from "./quiet-mode.js";
 import {
   DictationTargetSession,
   type DictationTarget,
@@ -103,6 +104,10 @@ const speechSettings = new SpeechSettingsStore({
   get: async (keys) => await chrome.storage.local.get([...keys]),
   set: async (values) => await chrome.storage.local.set(values),
 });
+const quietMode = new QuietModeStore({
+  get: async (key) => await chrome.storage.local.get(key),
+  set: async (values) => await chrome.storage.local.set(values),
+});
 const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
 const confirmationSession = new ConfirmationSession();
 const reminderSelectionSession =
@@ -132,7 +137,19 @@ async function speakResponse(
   text: string,
   options: TtsSpeakOptions = {},
   remember = true,
+  logSuppressed = true,
 ): Promise<void> {
+  if (await quietMode.get()) {
+    if (remember) lastSpokenResponse = text;
+    if (logSuppressed) {
+      await sendPanel({
+        type: "action-log",
+        heard: "quiet mode",
+        did: text,
+      });
+    }
+    return;
+  }
   await tts.speak(text, options);
   if (remember) lastSpokenResponse = text;
 }
@@ -140,7 +157,19 @@ async function speakResponse(
 async function speakLongResponse(
   text: string,
   options: TtsLongSpeakOptions = {},
+  logSuppressed = true,
 ): Promise<void> {
+  if (await quietMode.get()) {
+    lastSpokenResponse = text;
+    if (logSuppressed) {
+      await sendPanel({
+        type: "action-log",
+        heard: "quiet mode",
+        did: text,
+      });
+    }
+    return;
+  }
   await tts.speakLong(text, options);
   lastSpokenResponse = text;
 }
@@ -246,6 +275,28 @@ async function sendPanel(message: Record<string, unknown>): Promise<boolean> {
     // The panel is intentionally optional; hotkey voice commands still work.
     return false;
   }
+}
+
+async function sendEarcon(
+  kind: "listen" | "complete",
+): Promise<boolean> {
+  if (await quietMode.get()) return true;
+  return sendPanel({ type: "earcon", kind });
+}
+
+async function publishQuietMode(enabled?: boolean): Promise<void> {
+  const current = enabled ?? await quietMode.get();
+  await sendPanel({
+    type: "quiet-mode-state",
+    enabled: current,
+  });
+}
+
+async function setQuietMode(enabled: boolean): Promise<boolean> {
+  if (enabled) tts.stop();
+  const saved = await quietMode.update(enabled);
+  await publishQuietMode(saved);
+  return saved;
 }
 
 async function createDiagnosticReport(): Promise<string> {
@@ -464,7 +515,10 @@ async function confirmationResult(
 
 async function deliverReminder(reminder: ReminderRecord): Promise<void> {
   const notificationId = reminderNotificationId(reminder);
-  const permission = await chrome.notifications.getPermissionLevel();
+  const [permission, quiet] = await Promise.all([
+    chrome.notifications.getPermissionLevel(),
+    quietMode.get(),
+  ]);
   let notificationDelivered = false;
   if (permission === "granted") {
     await chrome.notifications.create(notificationId, {
@@ -473,6 +527,7 @@ async function deliverReminder(reminder: ReminderRecord): Promise<void> {
       title: "Sotto reminder",
       message: reminder.text,
       eventTime: Date.parse(reminder.dueAt),
+      silent: quiet,
     });
     notificationDelivered = true;
   }
@@ -1347,12 +1402,35 @@ async function publishActionResult(
     });
     return;
   }
+  const quiet = await quietMode.get();
+  const readAloud = isReadAloudCommand(command);
+  if (quiet && readAloud && !result.pageText) {
+    if (result.workflow?.kind === "panel-command-reference") {
+      await sendPanel({ type: "show-command-reference" });
+    }
+    await sendPanel({
+      type: "action-log",
+      heard: transcript,
+      did: "Quiet mode is on.",
+      timings,
+    });
+    return;
+  }
   if (result.replayLastSpoken === true) {
     if (command.action !== "repeat") {
       throw new TypeError("Only repeat can replay worker speech");
     }
     const spoken = lastSpokenResponse ?? result.spoken;
-    await sendPanel({ type: "earcon", kind: "complete" });
+    if (quiet) {
+      await sendPanel({
+        type: "action-log",
+        heard: transcript,
+        did: spoken,
+        timings,
+      });
+      return;
+    }
+    await sendEarcon("complete");
     await speakAndPublishActionLog(
       transcript,
       lastSpokenResponse === undefined
@@ -1366,6 +1444,7 @@ async function publishActionResult(
             lang: "en-US",
             onFirstAudio,
           },
+          false,
           false,
         ),
     );
@@ -1391,7 +1470,16 @@ async function publishActionResult(
       ...(title === undefined ? {} : { title }),
     });
     if (!commandIsCurrent(generation)) return;
-    await sendPanel({ type: "earcon", kind: "complete" });
+    if (quiet) {
+      await sendPanel({
+        type: "action-log",
+        heard: transcript,
+        did: readAloud ? "Quiet mode is on." : result.spoken,
+        timings,
+      });
+      return;
+    }
+    await sendEarcon("complete");
     if (!commandIsCurrent(generation)) return;
     const speechLanguage = safeTtsLanguage(lang);
     if (speech === "long") {
@@ -1419,7 +1507,7 @@ async function publishActionResult(
                   total: progress.totalChars,
                 });
               },
-            }),
+            }, false),
         );
       } finally {
         if (commandIsCurrent(generation)) {
@@ -1441,7 +1529,7 @@ async function publishActionResult(
           speakResponse(text, {
             lang: speechLanguage,
             onFirstAudio,
-          }),
+          }, true, false),
       );
     }
     return;
@@ -1454,7 +1542,7 @@ async function publishActionResult(
   }
   if (result.workflow?.kind === "panel-command-reference") {
     await sendPanel({ type: "show-command-reference" });
-    await sendPanel({ type: "earcon", kind: "complete" });
+    await sendEarcon("complete");
   }
   if (
     result.workflow?.kind === "clipboard-write"
@@ -1467,6 +1555,15 @@ async function publishActionResult(
       return;
     }
   }
+  if (quiet) {
+    await sendPanel({
+      type: "action-log",
+      heard: transcript,
+      did: result.spoken,
+      timings,
+    });
+    return;
+  }
   await sendOffscreen({
     type: "action-result",
     transcript,
@@ -1476,6 +1573,16 @@ async function publishActionResult(
   });
 }
 
+function isReadAloudCommand(command: ActionCommand): boolean {
+  const operation = (command as { readonly operation?: unknown }).operation;
+  const mode = (command as { readonly mode?: unknown }).mode;
+  return (
+    (command.action === "summarize" && mode === "read") ||
+    (command.action === "notes" && operation === "read") ||
+    (command.action === "help" && mode === "read")
+  );
+}
+
 function isPlaybackOperation(value: unknown): value is PlaybackOperation {
   return (
     value === "pause" ||
@@ -1483,6 +1590,30 @@ function isPlaybackOperation(value: unknown): value is PlaybackOperation {
     value === "stop" ||
     value === "skip"
   );
+}
+
+function isQuietModeOperation(value: unknown): value is "on" | "off" {
+  return value === "on" || value === "off";
+}
+
+async function changeQuietModeByVoice(
+  operation: "on" | "off",
+): Promise<ActionResult> {
+  const enabled = operation === "on";
+  const spoken = enabled ? "Quiet mode on." : "Quiet mode off.";
+  const current = await quietMode.get();
+
+  if (enabled && current) {
+    return { spoken };
+  }
+  if (enabled) {
+    await speakResponse(spoken, { lang: "en-US" }, true, false);
+    await setQuietMode(true);
+  } else {
+    await setQuietMode(false);
+    await speakResponse(spoken, { lang: "en-US" }, true, false);
+  }
+  return { spoken };
 }
 
 async function publishPlaybackResult(
@@ -1514,7 +1645,7 @@ async function executePlaybackCommand(
         speakResponse(spoken, {
           lang: "en-US",
           onFirstAudio,
-        }),
+        }, true, false),
     );
     return { spoken };
   }
@@ -1642,6 +1773,28 @@ async function executeCommand(
         timings,
       );
     }
+    if (validated.action === "quiet-mode") {
+      const operation = (validated as { readonly operation?: unknown })
+        .operation;
+      if (!isQuietModeOperation(operation)) {
+        throw new CommandValidationError("Invalid quiet mode operation");
+      }
+      generation = beginCommandGeneration();
+      generationStarted = true;
+      const actionStartedAt = performance.now();
+      const result = await changeQuietModeByVoice(operation);
+      completedTimings = {
+        ...timings,
+        actionMs: Math.max(0, performance.now() - actionStartedAt),
+      };
+      await sendPanel({
+        type: "action-log",
+        heard: transcript,
+        did: result.spoken,
+        timings: completedTimings,
+      });
+      return result;
+    }
     generation = beginCommandGeneration();
     generationStarted = true;
     const actionStartedAt = performance.now();
@@ -1721,6 +1874,13 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
   switch (message.type) {
     case "get-status":
       return sendOffscreen({ type: "get-status" });
+    case "get-quiet-mode":
+      return quietMode.get();
+    case "set-quiet-mode":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError("A quiet mode setting is required");
+      }
+      return setQuietMode(message.enabled);
     case "get-diagnostic-report":
       return createDiagnosticReport();
     case "get-speech-settings":
@@ -1876,19 +2036,36 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
           const heard = safeTranscript(message.heard);
           const did = safeTranscript(message.did);
           if (heard && did && isExchangeTimings(message.timings)) {
-            await speakAndPublishActionLog(
-              heard,
-              did,
-              message.timings,
-              (onFirstAudio) =>
-                speakResponse(
-                  text,
-                  {
-                    lang: "en-US",
-                    onFirstAudio,
-                  },
-                ),
-            );
+            if (await quietMode.get()) {
+              await speakResponse(
+                text,
+                { lang: "en-US" },
+                true,
+                false,
+              );
+              await sendPanel({
+                type: "action-log",
+                heard,
+                did: text,
+                timings: message.timings,
+              });
+            } else {
+              await speakAndPublishActionLog(
+                heard,
+                did,
+                message.timings,
+                (onFirstAudio) =>
+                  speakResponse(
+                    text,
+                    {
+                      lang: "en-US",
+                      onFirstAudio,
+                    },
+                    true,
+                    false,
+                  ),
+              );
+            }
           } else {
             await speakResponse(text, { lang: "en-US" });
           }
@@ -1937,12 +2114,21 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
             voice: nextVoice,
           });
         },
-        speak: async (text, previewVoice) =>
+        speak: async (text, previewVoice) => {
+          if (await quietMode.get()) {
+            await sendPanel({
+              type: "action-log",
+              heard: "quiet mode",
+              did: text,
+            });
+            return;
+          }
           await ttsRouter.preview(
             text,
             previewVoice,
             await speechSettings.get(),
-          ),
+          );
+        },
       });
       return undefined;
     }

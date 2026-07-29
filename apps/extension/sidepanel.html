@@ -29,15 +29,42 @@
             <h1>Sotto<span aria-hidden="true">.</span></h1>
           </div>
         </div>
-        <div
-          class="status-chip"
-          id="status-chip"
-          data-state="booting"
-          role="status"
-          aria-atomic="true"
-        >
-          <span class="status-dot" aria-hidden="true"></span>
-          <span id="status-label">Checking hardware</span>
+        <div class="masthead-actions">
+          <div
+            class="status-chip"
+            id="status-chip"
+            data-state="booting"
+            role="status"
+            aria-atomic="true"
+          >
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="status-label">Checking hardware</span>
+          </div>
+          <label
+            class="quiet-switch"
+            id="quiet-mode-control"
+            for="quiet-mode"
+            data-state="off"
+          >
+            <svg
+              class="quiet-icon"
+              viewBox="0 0 20 20"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M3 8h3l4-3v10l-4-3H3z" />
+              <path d="M13 7c1.5 1.5 1.5 4.5 0 6" />
+              <path class="quiet-icon-slash" d="M4 4l12 12" />
+            </svg>
+            <span id="quiet-mode-label">Quiet mode off</span>
+            <input
+              id="quiet-mode"
+              type="checkbox"
+              role="switch"
+              aria-labelledby="quiet-mode-label"
+            />
+            <span class="quiet-switch-track" aria-hidden="true"></span>
+          </label>
         </div>
       </header>
       <p class="sr-only" id="pipeline-error" role="alert" aria-atomic="true"></p>
