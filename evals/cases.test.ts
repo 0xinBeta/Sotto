@@ -129,6 +129,21 @@ describe("intent eval schema drift", () => {
     ).toBe(true);
   });
 
+  it("keeps note tag cases and leaves untagged notes without tags", () => {
+    const tagCases = cases.filter((testCase) =>
+      testCase.id.startsWith("notes-tags-")
+    );
+    const untagged = tagCases.filter((testCase) =>
+      testCase.id.startsWith("notes-tags-untagged-")
+    );
+
+    expect(tagCases.length).toBeGreaterThanOrEqual(8);
+    expect(untagged.length).toBeGreaterThanOrEqual(3);
+    expect(
+      untagged.every((testCase) => !("tag" in testCase.expected)),
+    ).toBe(true);
+  });
+
   it("keeps at least six reminder list and cancel cases", () => {
     const reminderCases = cases.filter((testCase) =>
       testCase.id.startsWith("notes-list-reminders-") ||

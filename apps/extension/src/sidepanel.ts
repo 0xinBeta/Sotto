@@ -9,6 +9,7 @@ import {
   MAX_NOTES,
   MAX_PENDING_REMINDERS,
 } from "@sotto/actions/notes/storage";
+import { MAX_NOTE_TAG_LENGTH } from "@sotto/actions/notes/tags";
 import { sanitizeHostname } from "@sotto/actions";
 import { performClipboardWorkflow } from "@sotto/destinations";
 import type { TtsProgressEventType } from "@sotto/tts";
@@ -87,6 +88,10 @@ import {
   type WakeWordRuntimeState,
 } from "./wake-word-settings.js";
 import { speechLanguageControl } from "./stt-language.js";
+import {
+  deriveNoteTagChips,
+  filterPanelNotes,
+} from "./note-filters.js";
 import "./styles.css";
 
 localizePanel();
@@ -134,6 +139,7 @@ interface PanelModelRow {
 interface PanelNote {
   readonly id: string;
   readonly body: string;
+  readonly tag?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -291,6 +297,10 @@ function isPanelNote(value: unknown): value is PanelNote {
   return (
     isBoundedString(value.id, 128, 1) &&
     isBoundedString(value.body, MAX_NOTE_BODY_LENGTH, 1) &&
+    (
+      value.tag === undefined ||
+      isBoundedString(value.tag, MAX_NOTE_TAG_LENGTH, 1)
+    ) &&
     isBoundedString(value.createdAt, 35, 1) &&
     isBoundedString(value.updatedAt, 35, 1) &&
     Number.isFinite(Date.parse(value.createdAt)) &&
@@ -1071,6 +1081,8 @@ const pauseReading = requiredElement<HTMLButtonElement>("#pause-reading");
 const skipReading = requiredElement<HTMLButtonElement>("#skip-reading");
 const notesList = requiredElement<HTMLUListElement>("#notes-list");
 const notesSearch = requiredElement<HTMLInputElement>("#notes-search");
+const noteTagFilters =
+  requiredElement<HTMLElement>("#note-tag-filters");
 const exportNotes = requiredElement<HTMLButtonElement>("#export-notes");
 const notesCount = requiredElement<HTMLElement>("#notes-count");
 const remindersList =
@@ -1108,6 +1120,7 @@ let readingView:
 let isDictating = false;
 let isDictationPaused = false;
 let panelNotes: readonly PanelNote[] = [];
+let selectedNoteTag: string | undefined;
 let panelReminders: readonly PanelReminder[] = [];
 let pendingScreenshot: ClipboardWorkflow | undefined;
 let pendingScreenshotPermission: ScreenshotPermissionWorkflow | undefined;
@@ -2672,12 +2685,11 @@ function renderStorageCount(
 function renderNoteList(): void {
   renderStorageCount(notesCount, panelNotes.length, MAX_NOTES);
   notesList.replaceChildren();
-  const query = notesSearch.value.trim().toLocaleLowerCase();
-  const notes = query
-    ? panelNotes.filter((note) =>
-        note.body.toLocaleLowerCase().includes(query)
-      )
-    : panelNotes;
+  const notes = filterPanelNotes(
+    panelNotes,
+    notesSearch.value,
+    selectedNoteTag,
+  );
   if (notes.length === 0) {
     const empty = document.createElement("li");
     empty.className = "empty-notes";
@@ -2720,6 +2732,7 @@ function renderNoteList(): void {
         });
         if (deleted) {
           panelNotes = panelNotes.filter((item) => item.id !== note.id);
+          renderNoteTagFilters();
           renderNoteList();
         }
       } catch (error) {
@@ -2736,8 +2749,41 @@ function renderNoteList(): void {
   }
 }
 
+function renderNoteTagFilters(): void {
+  const chips = deriveNoteTagChips(panelNotes);
+  if (
+    selectedNoteTag !== undefined &&
+    !chips.some((chip) =>
+      chip.tag.toLocaleLowerCase("en-US") ===
+        selectedNoteTag?.toLocaleLowerCase("en-US")
+    )
+  ) {
+    selectedNoteTag = undefined;
+  }
+  noteTagFilters.replaceChildren();
+  noteTagFilters.hidden = chips.length === 0;
+  for (const chip of chips) {
+    const button = document.createElement("button");
+    const selected = selectedNoteTag !== undefined &&
+      chip.tag.toLocaleLowerCase("en-US") ===
+        selectedNoteTag.toLocaleLowerCase("en-US");
+    button.className = "note-tag-filter";
+    button.type = "button";
+    button.textContent = chip.tag;
+    button.setAttribute("aria-pressed", String(selected));
+    button.setAttribute("aria-label", t("filterNotesByTagName", chip.tag));
+    button.addEventListener("click", () => {
+      selectedNoteTag = selected ? undefined : chip.tag;
+      renderNoteTagFilters();
+      renderNoteList();
+    });
+    noteTagFilters.append(button);
+  }
+}
+
 function renderNotes(notes: readonly PanelNote[]): void {
   panelNotes = notes;
+  renderNoteTagFilters();
   renderNoteList();
 }
 

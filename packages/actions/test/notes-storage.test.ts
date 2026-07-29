@@ -76,6 +76,25 @@ describe("notes storage", () => {
     await expect(store.listNotes()).resolves.toHaveLength(1);
   });
 
+  it("normalizes and bounds an optional note tag", async () => {
+    const accepted = makeStore();
+    await expect(
+      accepted.store.createNote({
+        body: "Benchmark the build",
+        tag: "  project   apollo  ",
+      }),
+    ).resolves.toMatchObject({ tag: "project apollo" });
+
+    const rejected = makeStore();
+    await expect(
+      rejected.store.createNote({
+        body: "Do not save",
+        tag: "x".repeat(41),
+      }),
+    ).rejects.toThrow("Note tag must contain at most 40 characters");
+    expect(rejected.storage.set).not.toHaveBeenCalled();
+  });
+
   it("serializes concurrent mutations and rereads before allocating ids", async () => {
     const { store, storage } = makeStore(
       undefined,

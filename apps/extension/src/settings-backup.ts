@@ -7,6 +7,7 @@ import {
   NOTE_KEY_PREFIX,
   type NoteRecord,
 } from "@sotto/actions/notes/storage";
+import { MAX_NOTE_TAG_LENGTH } from "@sotto/actions/notes/tags";
 import {
   validateSchema,
   type JsonSchema,
@@ -146,6 +147,11 @@ const noteSchema: JsonSchema = {
       type: "string",
       minLength: 1,
       maxLength: MAX_NOTE_BODY_LENGTH,
+    },
+    tag: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_NOTE_TAG_LENGTH,
     },
     createdAt: {
       type: "string",
@@ -442,7 +448,9 @@ function importPlan(
   );
   const existing = storedNotes(stored);
   const ids = new Set(existing.map((note) => note.id));
-  const bodies = new Set(existing.map((note) => note.body));
+  const noteSignatures = new Set(
+    existing.map((note) => JSON.stringify([note.tag ?? "", note.body])),
+  );
   const additions: NoteRecord[] = [];
   const available = Math.max(0, MAX_NOTES - existing.length);
 
@@ -450,12 +458,12 @@ function importPlan(
     if (
       additions.length >= available ||
       ids.has(note.id) ||
-      bodies.has(note.body)
+      noteSignatures.has(JSON.stringify([note.tag ?? "", note.body]))
     ) {
       continue;
     }
     ids.add(note.id);
-    bodies.add(note.body);
+    noteSignatures.add(JSON.stringify([note.tag ?? "", note.body]));
     additions.push(note);
   }
 

@@ -305,6 +305,7 @@ const elementIds = [
   "skip-reading",
   "notes-list",
   "notes-search",
+  "note-tag-filters",
   "export-notes",
   "notes-count",
   "reminders-list",
@@ -1911,6 +1912,7 @@ describe("side-panel screenshot clipboard fallback", () => {
         {
           id: "note-1",
           body: untrusted,
+          tag: untrusted.slice(0, 40),
           createdAt: "2026-07-28T12:00:00.000Z",
           updatedAt: "2026-07-28T12:00:00.000Z",
         },
@@ -1921,6 +1923,9 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["page-text-card"].hidden).toBe(false);
     expect(elements["notes-list"].firstElementChild?.textContent).toContain(
       untrusted,
+    );
+    expect(elements["note-tag-filters"].textContent).toBe(
+      untrusted.slice(0, 40),
     );
 
     onMessage({
@@ -2034,6 +2039,61 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["notes-list"].textContent).toBe(
       "No notes match your search.",
     );
+  });
+
+  it("combines tag chips with note text search", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "notes-updated",
+      notes: [
+        {
+          id: "note-1",
+          body: "Check the Apollo build",
+          tag: "project apollo",
+          createdAt: "2026-07-28T12:00:00.000Z",
+          updatedAt: "2026-07-28T12:00:00.000Z",
+        },
+        {
+          id: "note-2",
+          body: "Call the Apollo team",
+          tag: "project apollo",
+          createdAt: "2026-07-28T11:00:00.000Z",
+          updatedAt: "2026-07-28T11:00:00.000Z",
+        },
+        {
+          id: "note-3",
+          body: "Check the home alarm",
+          tag: "home",
+          createdAt: "2026-07-28T10:00:00.000Z",
+          updatedAt: "2026-07-28T10:00:00.000Z",
+        },
+      ],
+    });
+    sendMessage.mockClear();
+
+    const apollo = elements["note-tag-filters"].firstElementChild;
+    expect(apollo?.tagName).toBe("button");
+    expect(apollo?.attributes["aria-pressed"]).toBe("false");
+    await apollo?.emit("click");
+    expect(
+      elements["note-tag-filters"].firstElementChild?.attributes[
+        "aria-pressed"
+      ],
+    ).toBe("true");
+    expect(elements["notes-list"].textContent).not.toContain(
+      "Check the home alarm",
+    );
+
+    elements["notes-search"].value = "call";
+    await elements["notes-search"].emit("input");
+    expect(elements["notes-list"].textContent).toContain(
+      "Call the Apollo team",
+    );
+    expect(elements["notes-list"].textContent).not.toContain(
+      "Check the Apollo build",
+    );
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("shows storage counters only above eighty percent", async () => {
@@ -2209,7 +2269,15 @@ describe("side-panel screenshot clipboard fallback", () => {
     onMessage({
       target: "sidepanel",
       type: "notes-updated",
-      notes: "not-an-array",
+      notes: [
+        {
+          id: "bad",
+          body: "Bad",
+          tag: "x".repeat(41),
+          createdAt: "2026-07-28T12:00:00.000Z",
+          updatedAt: "2026-07-28T12:00:00.000Z",
+        },
+      ],
     });
     onMessage({
       target: "sidepanel",

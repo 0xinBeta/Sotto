@@ -186,4 +186,8 @@ const tabsAction = defineAction<TabsCommand>({
 });
 
 export default tabsAction;
-export { findBestTabMatch, scoreTabMatch } from "./match.js";
+export {
+  findBestTabMatch,
+  scoreFuzzyMatch,
+  scoreTabMatch,
+} from "./match.js";

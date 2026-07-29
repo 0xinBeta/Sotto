@@ -39,6 +39,17 @@ describe("notes Markdown export", () => {
     expect(markdown).toContain("URL: https://example.test/a_(b)");
   });
 
+  it("includes optional note tags as plain metadata", () => {
+    const tagged = {
+      ...note("tagged", "Build note", "2026-07-28T12:00:00.000Z"),
+      tag: "project apollo",
+    };
+
+    expect(serializeNotesMarkdown([tagged])).toContain(
+      "Tag: project apollo\n\nBuild note",
+    );
+  });
+
   it("creates a bounded worker-safe data URL without calling downloads", () => {
     const result = createNotesMarkdownExport(
       [note("one", "A note", "2026-07-28T12:00:00.000Z")],

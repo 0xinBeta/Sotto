@@ -1723,6 +1723,35 @@ progress::-webkit-progress-value {
   color: var(--input-placeholder);
 }
 
+.note-tag-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.note-tag-filters[hidden] {
+  display: none;
+}
+
+.note-tag-filter {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--paper-dim);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.note-tag-filter:hover,
+.note-tag-filter[aria-pressed="true"] {
+  border-color: var(--acid);
+  color: var(--acid);
+}
+
 .notes-list {
   display: grid;
   gap: 0;

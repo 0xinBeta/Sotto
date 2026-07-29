@@ -8,12 +8,17 @@ import {
   NotesStorageUserError,
   notesReminderStore,
 } from "./storage.js";
+import {
+  filterNotesByTag,
+  MAX_NOTE_TAG_LENGTH,
+} from "./tags.js";
 
 export type NotesCommand =
   | {
       readonly action: "notes";
       readonly operation: "create";
       readonly body: string;
+      readonly tag?: string;
     }
   | {
       readonly action: "notes";
@@ -22,6 +27,7 @@ export type NotesCommand =
   | {
       readonly action: "notes";
       readonly operation: "read";
+      readonly tag?: string;
     }
   | {
       readonly action: "notes";
@@ -56,6 +62,12 @@ export const notesSchema = {
           maxLength: MAX_NOTE_BODY_LENGTH,
           description: "The note text copied only from the transcript",
         },
+        tag: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_NOTE_TAG_LENGTH,
+          description: "The note tag copied only from the current transcript",
+        },
       },
       required: ["action", "operation", "body"],
       additionalProperties: false,
@@ -74,6 +86,13 @@ export const notesSchema = {
       properties: {
         action: { const: "notes" },
         operation: { const: "read" },
+        tag: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_NOTE_TAG_LENGTH,
+          description:
+            "The note tag target copied only from the current transcript",
+        },
       },
       required: ["action", "operation"],
       additionalProperties: false,
@@ -180,6 +199,15 @@ const notesAction = defineAction<NotesCommand>({
       },
     },
     {
+      say: "note under project apollo: benchmark the build",
+      emit: {
+        action: "notes",
+        operation: "create",
+        body: "Benchmark the build",
+        tag: "project apollo",
+      },
+    },
+    {
       say: "make a note to compare local speech models",
       emit: {
         action: "notes",
@@ -194,6 +222,10 @@ const notesAction = defineAction<NotesCommand>({
     {
       say: "read my notes",
       emit: { action: "notes", operation: "read" },
+    },
+    {
+      say: "read my apollo notes",
+      emit: { action: "notes", operation: "read", tag: "apollo" },
     },
     {
       say: "delete my last note",
@@ -260,6 +292,7 @@ const notesAction = defineAction<NotesCommand>({
         case "create": {
           const note = await notesReminderStore.createNote({
             body: command.body,
+            ...(command.tag === undefined ? {} : { tag: command.tag }),
           });
           return {
             spoken: "Saved your note.",
@@ -267,6 +300,7 @@ const notesAction = defineAction<NotesCommand>({
               note: {
                 id: note.id,
                 body: note.body,
+                ...(note.tag === undefined ? {} : { tag: note.tag }),
                 createdAt: note.createdAt,
                 updatedAt: note.updatedAt,
               },
@@ -284,6 +318,7 @@ const notesAction = defineAction<NotesCommand>({
               notes: notes.map((note) => ({
                 id: note.id,
                 body: note.body,
+                ...(note.tag === undefined ? {} : { tag: note.tag }),
                 createdAt: note.createdAt,
                 updatedAt: note.updatedAt,
                 ...(note.source ? { source: { ...note.source } } : {}),
@@ -292,9 +327,16 @@ const notesAction = defineAction<NotesCommand>({
           };
         }
         case "read": {
-          const notes = await notesReminderStore.listNotes();
+          const allNotes = await notesReminderStore.listNotes();
+          const notes = command.tag === undefined
+            ? allNotes
+            : filterNotesByTag(allNotes, command.tag);
           if (notes.length === 0) {
-            return { spoken: "You have no notes." };
+            return {
+              spoken: command.tag === undefined
+                ? "You have no notes."
+                : `No notes match ${command.tag}.`,
+            };
           }
           return {
             spoken: "Reading your notes.",
@@ -384,3 +426,4 @@ const notesAction = defineAction<NotesCommand>({
 export default notesAction;
 export * from "./markdown.js";
 export * from "./storage.js";
+export * from "./tags.js";

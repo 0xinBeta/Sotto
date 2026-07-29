@@ -110,6 +110,7 @@ describe("settings and notes backup", () => {
   it("round-trips settings and notes to identical backup state", async () => {
     const firstNote = {
       ...note("first", "First note", "2026-07-28T10:00:00.000Z"),
+      tag: "project apollo",
       source: {
         title: "Source title",
         url: "https://example.test/note",
@@ -437,6 +438,26 @@ describe("settings and notes backup", () => {
     expect(storage.values["note:new-one"]).toEqual(imported[2]);
     expect(storage.values["note:new-two"]).toBeUndefined();
     expect(storage.values["note:new-same-body"]).toBeUndefined();
+  });
+
+  it("keeps equal note text under different tags", async () => {
+    const existing = { ...note("existing", "Shared text"), tag: "home" };
+    const imported = {
+      ...note("imported", "Shared text"),
+      tag: "project apollo",
+    };
+    const storage = new MemoryStorage({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      "note:existing": existing,
+    });
+
+    const result = await new SettingsBackupStore(
+      storage,
+      validateAliasCommand,
+    ).import(JSON.stringify(validBackup([imported])));
+
+    expect(result.addedNoteCount).toBe(1);
+    expect(storage.values["note:imported"]).toEqual(imported);
   });
 
   it("does not write any data after validation fails", async () => {

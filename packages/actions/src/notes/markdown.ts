@@ -49,10 +49,12 @@ export function serializeNotesMarkdown(
     const source = note.source
       ? `\n\nSource: ${wellFormed(note.source.title)}\n\nURL: ${wellFormed(note.source.url)}`
       : "";
+    const tag = note.tag ? `Tag: ${wellFormed(note.tag)}` : "";
     return [
       `## Note ${index + 1}`,
       `Created: ${note.createdAt}`,
       `Updated: ${note.updatedAt}`,
+      ...(tag ? [tag] : []),
       "",
       wellFormed(note.body),
       source,
@@ -88,4 +90,3 @@ export function createNotesMarkdownExport(
     dataUrl: `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`,
   };
 }
-

@@ -506,6 +506,46 @@
     "expected": { "action": "notes", "operation": "create", "body": "Staging uses the new key" }
   },
   {
+    "id": "notes-tags-create-01",
+    "transcript": "note under project apollo: benchmark the build",
+    "expected": { "action": "notes", "operation": "create", "body": "Benchmark the build", "tag": "project apollo" }
+  },
+  {
+    "id": "notes-tags-create-02",
+    "transcript": "make a note under launch plan: call the design team",
+    "expected": { "action": "notes", "operation": "create", "body": "Call the design team", "tag": "launch plan" }
+  },
+  {
+    "id": "notes-tags-create-03",
+    "transcript": "save a note under home: buy oat milk",
+    "expected": { "action": "notes", "operation": "create", "body": "Buy oat milk", "tag": "home" }
+  },
+  {
+    "id": "notes-tags-recall-01",
+    "transcript": "read my apollo notes",
+    "expected": { "action": "notes", "operation": "read", "tag": "apollo" }
+  },
+  {
+    "id": "notes-tags-recall-02",
+    "transcript": "read my project apolo notes",
+    "expected": { "action": "notes", "operation": "read", "tag": "project apolo" }
+  },
+  {
+    "id": "notes-tags-untagged-01",
+    "transcript": "jot down: verify the package size",
+    "expected": { "action": "notes", "operation": "create", "body": "Verify the package size" }
+  },
+  {
+    "id": "notes-tags-untagged-02",
+    "transcript": "take a note: call Alex tomorrow",
+    "expected": { "action": "notes", "operation": "create", "body": "Call Alex tomorrow" }
+  },
+  {
+    "id": "notes-tags-untagged-03",
+    "transcript": "save this note: the release starts Friday",
+    "expected": { "action": "notes", "operation": "create", "body": "The release starts Friday" }
+  },
+  {
     "id": "notes-list-01",
     "transcript": "show my notes",
     "expected": { "action": "notes", "operation": "list" }

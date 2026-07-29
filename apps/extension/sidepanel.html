@@ -803,8 +803,15 @@
           data-i18n-placeholder="searchNotes"
           autocomplete="off"
         />
+        <div
+          class="note-tag-filters"
+          id="note-tag-filters"
+          role="group"
+          data-i18n-aria-label="filterNotesByTag"
+          hidden
+        ></div>
         <p class="reminder-banner" id="reminder-banner" hidden></p>
-        <ul class="notes-list" id="notes-list">
+        <ul class="notes-list" id="notes-list" aria-live="polite">
           <li class="empty-notes" data-i18n="noNotesYet"></li>
         </ul>
       </section>

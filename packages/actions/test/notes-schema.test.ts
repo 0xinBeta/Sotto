@@ -14,9 +14,10 @@ describe("notes action schema", () => {
       action: "notes",
       operation: "create",
       body: "Save the local benchmark",
+      tag: "project apollo",
     },
     { action: "notes", operation: "list" },
-    { action: "notes", operation: "read" },
+    { action: "notes", operation: "read", tag: "apollo" },
     { action: "notes", operation: "delete-last" },
     {
       action: "notes",
@@ -61,6 +62,17 @@ describe("notes action schema", () => {
       action: "notes",
       operation: "snooze",
       delayMinutes: 15,
+    },
+    {
+      action: "notes",
+      operation: "create",
+      body: "Okay",
+      tag: "",
+    },
+    {
+      action: "notes",
+      operation: "read",
+      tag: "x".repeat(41),
     },
   ])("rejects out-of-contract command data", (command) => {
     expect(validateSchema(notesSchema, command).valid).toBe(false);
@@ -192,6 +204,58 @@ describe("notes action schema", () => {
           speech: "long",
         },
       });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("reads only fuzzy tag matches and reports no matches", async () => {
+    const apollo = {
+      id: "apollo",
+      body: "Benchmark the build",
+      tag: "project apollo",
+      createdAt: "2026-07-28T11:00:00.000Z",
+      updatedAt: "2026-07-28T11:00:00.000Z",
+    };
+    const home = {
+      id: "home",
+      body: "Buy oat milk",
+      tag: "home",
+      createdAt: "2026-07-28T10:00:00.000Z",
+      updatedAt: "2026-07-28T10:00:00.000Z",
+    };
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({
+            schemaVersion: 1,
+            "note:apollo": apollo,
+            "note:home": home,
+          })),
+        },
+      },
+    });
+
+    try {
+      await expect(
+        notesAction.execute(
+          { action: "notes", operation: "read", tag: "project apolo" },
+          {},
+        ),
+      ).resolves.toEqual({
+        spoken: "Reading your notes.",
+        pageText: {
+          text: "Note 1. Benchmark the build",
+          title: "NOTES",
+          speech: "long",
+        },
+      });
+      await expect(
+        notesAction.execute(
+          { action: "notes", operation: "read", tag: "zeus" },
+          {},
+        ),
+      ).resolves.toEqual({ spoken: "No notes match zeus." });
     } finally {
       vi.unstubAllGlobals();
     }

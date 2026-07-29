@@ -83,6 +83,11 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("reader-text-output")).toContain('role="document"');
     expect(openingTag("reader-text-output")).toContain('tabindex="0"');
     expect(openingTag("read-reader")).toContain('type="button"');
+    expect(openingTag("note-tag-filters")).toContain('role="group"');
+    expect(openingTag("note-tag-filters")).toContain(
+      'data-i18n-aria-label="filterNotesByTag"',
+    );
+    expect(openingTag("notes-list")).toContain('aria-live="polite"');
   });
 
   it("renders reader paragraphs and reading sentences through textContent only", () => {

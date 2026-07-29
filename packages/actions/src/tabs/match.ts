@@ -37,30 +37,33 @@ function editDistance(left: string, right: string): number {
   return previous[right.length]!;
 }
 
-export function scoreTabMatch(tab: MatchableTab, target: string): number {
+export function scoreFuzzyMatch(candidate: string, target: string): number {
   const query = normalize(target);
-  if (!query) return 0;
+  const normalizedCandidate = normalize(candidate);
+  if (!query || !normalizedCandidate) return 0;
 
-  const title = normalize(tab.title ?? "");
-  const url = normalize(tab.url ?? "");
-  const candidates = [title, url].filter(Boolean);
   let best = 0;
+  if (normalizedCandidate === query) best = 1;
+  if (normalizedCandidate.startsWith(query)) best = Math.max(best, 0.94);
+  if (normalizedCandidate.includes(query)) best = Math.max(best, 0.9);
 
-  for (const candidate of candidates) {
-    if (candidate === query) best = Math.max(best, 1);
-    if (candidate.startsWith(query)) best = Math.max(best, 0.94);
-    if (candidate.includes(query)) best = Math.max(best, 0.9);
+  const words = query.split(" ");
+  const wordCoverage =
+    words.filter((word) => normalizedCandidate.includes(word)).length /
+    words.length;
+  best = Math.max(best, wordCoverage * 0.84);
 
-    const words = query.split(" ");
-    const wordCoverage =
-      words.filter((word) => candidate.includes(word)).length / words.length;
-    best = Math.max(best, wordCoverage * 0.84);
+  const distance = editDistance(query, normalizedCandidate);
+  const similarity =
+    1 - distance / Math.max(query.length, normalizedCandidate.length);
+  return Math.max(best, similarity * 0.78);
+}
 
-    const distance = editDistance(query, candidate);
-    const similarity = 1 - distance / Math.max(query.length, candidate.length);
-    best = Math.max(best, similarity * 0.78);
-  }
-  return best;
+export function scoreTabMatch(tab: MatchableTab, target: string): number {
+  return Math.max(
+    scoreFuzzyMatch(tab.title ?? "", target),
+    scoreFuzzyMatch(tab.url ?? "", target),
+  );
 }
 
 export function findBestTabMatch<TTab extends MatchableTab>(

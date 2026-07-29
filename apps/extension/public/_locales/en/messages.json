@@ -425,6 +425,12 @@
   "searchNotes": {
     "message": "Search notes"
   },
+  "filterNotesByTag": {
+    "message": "Filter notes by tag"
+  },
+  "filterNotesByTagName": {
+    "message": "Filter notes by $1"
+  },
   "noNotesYet": {
     "message": "No notes yet."
   },

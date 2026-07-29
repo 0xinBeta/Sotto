@@ -1,3 +1,8 @@
+import {
+  MAX_NOTE_TAG_LENGTH,
+  normalizeNoteTag,
+} from "./tags.js";
+
 export const NOTES_SCHEMA_VERSION = 1;
 export const NOTES_SCHEMA_VERSION_KEY = "schemaVersion";
 export const NOTE_KEY_PREFIX = "note:";
@@ -32,6 +37,7 @@ export interface NoteSource {
 export interface NoteRecord {
   readonly id: string;
   readonly body: string;
+  readonly tag?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly source?: NoteSource;
@@ -52,6 +58,7 @@ export interface ReminderRecord {
 
 export interface CreateNoteInput {
   readonly body: string;
+  readonly tag?: string;
   readonly source?: NoteSource;
 }
 
@@ -107,7 +114,14 @@ export interface ReminderReconciliation {
 }
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-const NOTE_KEYS = ["id", "body", "createdAt", "updatedAt", "source"] as const;
+const NOTE_KEYS = [
+  "id",
+  "body",
+  "tag",
+  "createdAt",
+  "updatedAt",
+  "source",
+] as const;
 const SOURCE_KEYS = ["title", "url"] as const;
 const REMINDER_KEYS = [
   "id",
@@ -186,6 +200,15 @@ export function isNoteRecord(value: unknown): value is NoteRecord {
     typeof value.body !== "string" ||
     value.body.length < 1 ||
     value.body.length > MAX_NOTE_BODY_LENGTH ||
+    (
+      value.tag !== undefined &&
+      (
+        typeof value.tag !== "string" ||
+        value.tag.length < 1 ||
+        value.tag.length > MAX_NOTE_TAG_LENGTH ||
+        value.tag !== normalizeNoteTag(value.tag)
+      )
+    ) ||
     !isCanonicalIsoDate(value.createdAt) ||
     !isCanonicalIsoDate(value.updatedAt)
   ) {
@@ -420,24 +443,38 @@ export class NotesReminderStore {
         "Note body",
         MAX_NOTE_BODY_LENGTH,
       );
+      const tag = input.tag === undefined
+        ? undefined
+        : normalizeNoteTag(input.tag);
+      if (tag !== undefined && tag.length === 0) {
+        throw new TypeError("Note tag must not be empty");
+      }
+      if (tag !== undefined && tag.length > MAX_NOTE_TAG_LENGTH) {
+        throw new TypeError(
+          `Note tag must contain at most ${MAX_NOTE_TAG_LENGTH} characters`,
+        );
+      }
       const notes = readNotes(await this.#storage.get(null));
       if (notes.length >= MAX_NOTES) {
         throw new NotesStorageUserError(NOTES_CAP_MESSAGE);
       }
       const id = await this.#unusedId(NOTE_KEY_PREFIX);
       const timestamp = this.#now().toISOString();
-      const note: NoteRecord = input.source
-        ? {
-            id,
-            body,
-            createdAt: timestamp,
-            updatedAt: timestamp,
+      const note: NoteRecord = {
+        id,
+        body,
+        ...(tag === undefined ? {} : { tag }),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        ...(input.source === undefined
+          ? {}
+          : {
             source: {
               title: input.source.title,
               url: input.source.url,
             },
-          }
-        : { id, body, createdAt: timestamp, updatedAt: timestamp };
+          }),
+      };
 
       await this.#createRecord(`${NOTE_KEY_PREFIX}${id}`, note);
       return note;

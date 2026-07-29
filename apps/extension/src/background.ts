@@ -1,6 +1,7 @@
 import actions, { findActiveTabBookmark } from "@sotto/actions";
 import { isSpeechLanguage } from "@sotto/stt/languages";
 import { createNotesMarkdownExport } from "@sotto/actions/notes/markdown";
+import { withTranscriptNoteTag } from "@sotto/actions/notes/tags";
 import type {
   PlaybackCommand,
   PlaybackOperation,
@@ -787,6 +788,7 @@ function panelNote(note: NoteRecord): Record<string, unknown> {
   return {
     id: note.id,
     body: note.body,
+    ...(note.tag === undefined ? {} : { tag: note.tag }),
     createdAt: note.createdAt,
     updatedAt: note.updatedAt,
     ...(note.source === undefined
@@ -2854,7 +2856,9 @@ async function executeCommand(
       return result;
     }
 
-    const validated = commandRouter.parse(command);
+    const validated = commandRouter.parse(
+      withTranscriptNoteTag(command, fromAlias ? "" : transcript),
+    );
     if (isSnoozeReminderCommand(validated)) {
       generation = beginCommandGeneration();
       generationStarted = true;
