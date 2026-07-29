@@ -1082,8 +1082,8 @@ describe("offscreen fail-soft status", () => {
     expect(vad.create).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "v5",
-        positiveSpeechThreshold: 0.3,
-        negativeSpeechThreshold: 0.25,
+        positiveSpeechThreshold: 0.5,
+        negativeSpeechThreshold: 0.35,
         preSpeechPadMs: 300,
         redemptionMs: 800,
         minSpeechMs: 250,
