@@ -34,8 +34,8 @@ export class ModelResidencyLru {
   constructor(options: ModelLruOptions = {}) {
     this.#idleMs = options.idleMs ?? MODEL_IDLE_RELEASE_MS;
     this.#now = options.now ?? Date.now;
-    this.#setTimer = options.setTimer ?? setTimeout;
-    this.#clearTimer = options.clearTimer ?? clearTimeout;
+    this.#setTimer = options.setTimer ?? setTimeout.bind(globalThis);
+    this.#clearTimer = options.clearTimer ?? clearTimeout.bind(globalThis);
     this.#onError = options.onError ??
       ((key, error) => console.warn(`${key} idle release failed`, error));
   }

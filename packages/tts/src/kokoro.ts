@@ -58,7 +58,7 @@ export interface KokoroPrewarmOptions {
 }
 
 interface RawKokoroAudio {
-  readonly data: Float32Array;
+  readonly audio: Float32Array;
   readonly sampling_rate: number;
 }
 
@@ -720,14 +720,14 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
         );
         throwIfAborted(operation.controller.signal);
         if (
-          !(audio.data instanceof Float32Array) ||
-          audio.data.length === 0 ||
+          !(audio.audio instanceof Float32Array) ||
+          audio.audio.length === 0 ||
           audio.sampling_rate !== KOKORO_SAMPLE_RATE
         ) {
           throw new Error("Kokoro returned invalid 24 kHz mono PCM");
         }
         const scheduled = await this.#prepareAudio(
-          audio.data,
+          audio.audio,
           options.volume,
           operation.controller.signal,
         );

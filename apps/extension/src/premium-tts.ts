@@ -16,6 +16,7 @@ export const PREMIUM_TTS_ENABLED_KEY = "premiumTtsEnabled";
 export const PREMIUM_TTS_DOWNLOADED_KEY = "premiumTtsDownloaded";
 export const PREMIUM_TTS_VOICE_KEY = "premiumTtsVoice";
 export const PREMIUM_FIRST_AUDIO_TIMEOUT_MS = 750;
+export const PREVIEW_FIRST_AUDIO_TIMEOUT_MS = 15_000;
 export const PREMIUM_TTS_PREVIEW_TEXT = "This is my Sotto voice.";
 
 const IDLE_RETRY_DELAY_MS = 5_000;
@@ -125,8 +126,8 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     this.#request = options.request;
     this.#timeoutMs = options.timeoutMs ?? PREMIUM_FIRST_AUDIO_TIMEOUT_MS;
     this.#retryDelayMs = options.retryDelayMs ?? IDLE_RETRY_DELAY_MS;
-    this.#setTimer = options.setTimer ?? setTimeout;
-    this.#clearTimer = options.clearTimer ?? clearTimeout;
+    this.#setTimer = options.setTimer ?? setTimeout.bind(globalThis);
+    this.#clearTimer = options.clearTimer ?? clearTimeout.bind(globalThis);
   }
 
   get state(): PremiumTtsState {
@@ -424,7 +425,14 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
 
     let timeout!: ReturnType<typeof setTimeout>;
     const timedOut = new Promise<"timeout">((resolve) => {
-      timeout = this.#setTimer(() => resolve("timeout"), this.#timeoutMs);
+      // The first-audio deadline exists to trigger the system-voice
+      // fallback. A premium-only request (voice preview) has no fallback
+      // and may lazily download the voice file first, so it gets a
+      // generous deadline instead of a manufactured failure.
+      const deadline = premiumOnly
+        ? PREVIEW_FIRST_AUDIO_TIMEOUT_MS
+        : this.#timeoutMs;
+      timeout = this.#setTimer(() => resolve("timeout"), deadline);
     });
     const premium = this.#request({
       type: "premium-speak",
@@ -474,8 +482,20 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
         .catch(() => undefined);
       if (generation !== this.#generation) return;
       if (premiumOnly) {
-        void premium.catch(() => undefined);
-        throw new Error("Voice preview failed");
+        const detail = await Promise.race([
+          premium.then(
+            () => "no first audio before the deadline",
+            (error: unknown) =>
+              error instanceof Error ? error.message : String(error),
+          ),
+          new Promise<string>((resolve) => {
+            this.#setTimer(
+              () => resolve("no first audio before the deadline"),
+              250,
+            );
+          }),
+        ]);
+        throw new Error(`Voice preview failed: ${detail}`);
       }
       this.#premiumFailed();
       void premium.catch(() => undefined);

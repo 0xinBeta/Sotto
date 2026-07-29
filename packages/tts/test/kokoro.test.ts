@@ -103,7 +103,7 @@ function audio(): {
   readonly sampling_rate: number;
 } {
   return {
-    data: new Float32Array(KOKORO_SAMPLE_RATE / 100),
+    audio: new Float32Array(KOKORO_SAMPLE_RATE / 100),
     sampling_rate: KOKORO_SAMPLE_RATE,
   };
 }
