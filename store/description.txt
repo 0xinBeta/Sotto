@@ -1,0 +1,21 @@
+Sotto is a local-only voice assistant for Chrome. It runs speech recognition and AI inference on your device.
+
+Speak to control your browser. Sotto can open, switch, close, and mute tabs. It can reopen a recently closed tab.
+
+Ask Sotto to read, summarize, translate, or answer questions about the current page. Page content stays on your device.
+
+Use voice dictation in an editable field. Save local notes and set local reminders. Copy text or save requested files.
+
+Sotto can speak with a system voice. You can also download an optional local Kokoro voice.
+
+Sotto includes local Moonshine speech recognition. You can choose optional Moonshine Base or Parakeet speech recognition.
+
+Sotto downloads fixed model files from pinned Hugging Face revisions. After download, model inference stays on your device.
+
+Sotto has no accounts, telemetry, or analytics. It does not retain audio. It does not transmit page content.
+
+Sotto stores settings, notes, and reminders in Chrome extension storage. Optional session history uses Chrome session storage.
+
+Screen commands need an optional one-time <all_urls> grant. Sotto requests this grant only when you start a screen command.
+
+Sotto needs Chrome 138 or later.

@@ -1,0 +1,47 @@
+Permission: activeTab
+Sotto uses the active tab only after a user command. It reads, changes, or captures that tab for the requested task.
+
+Permission: alarms
+Sotto starts local alarms for reminders that the user creates.
+
+Permission: clipboardWrite
+Sotto writes requested text or screenshots to the clipboard after a user command.
+
+Permission: downloads
+Sotto saves a file to Downloads only when the user requests a file output.
+
+Permission: notifications
+Sotto shows a local notification when a reminder is due.
+
+Permission: offscreen
+Sotto uses an offscreen document for microphone access, speech work, and local model inference.
+
+Permission: scripting
+Sotto reads or changes the active page only after a user command.
+
+Permission: sessions
+Sotto reopens a recently closed tab only after a user command.
+
+Permission: sidePanel
+Sotto shows its main voice interface in the Chrome side panel.
+
+Permission: storage
+Sotto stores settings, notes, reminders, model state, and optional session history in Chrome extension storage.
+
+Permission: tabs
+Sotto lists, opens, switches, closes, and mutes tabs after user commands.
+
+Permission: tts
+Sotto speaks responses with a local system voice.
+
+Permission: https://huggingface.co/*
+Sotto downloads pinned model files from the main Hugging Face host.
+
+Permission: https://*.huggingface.co/*
+Sotto downloads pinned model files from Hugging Face subdomains.
+
+Permission: https://*.hf.co/*
+Sotto downloads pinned model files from the Hugging Face content service.
+
+Permission: <all_urls>
+Sotto requests this optional one-time grant when a user starts a screen command. Chrome needs it to capture the visible tab.

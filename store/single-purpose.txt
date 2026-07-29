@@ -1,0 +1,1 @@
+Sotto gives users a voice interface for Chrome. It runs local models to control browsing and complete requested page tasks. It speaks results on the device.

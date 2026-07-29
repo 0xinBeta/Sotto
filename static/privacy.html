@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Sotto Privacy Policy</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --background: #f7f7f5;
+        --surface: #ffffff;
+        --text: #20201e;
+        --muted: #61615c;
+        --border: #d9d9d3;
+        --link: #1259a7;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #181816;
+          --surface: #222220;
+          --text: #f0f0eb;
+          --muted: #b6b6ae;
+          --border: #41413c;
+          --link: #83b9f4;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--background);
+        color: var(--text);
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        font-size: 1rem;
+        line-height: 1.65;
+      }
+
+      main {
+        width: min(46rem, calc(100% - 2rem));
+        margin: 2rem auto;
+        padding: clamp(1.25rem, 4vw, 3rem);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+      }
+
+      h1,
+      h2 {
+        line-height: 1.2;
+      }
+
+      h1 {
+        margin-top: 0;
+      }
+
+      h2 {
+        margin-top: 2.25rem;
+      }
+
+      p,
+      li {
+        max-width: 68ch;
+      }
+
+      ul {
+        padding-left: 1.4rem;
+      }
+
+      li + li {
+        margin-top: 0.65rem;
+      }
+
+      code {
+        padding: 0.1em 0.3em;
+        border: 1px solid var(--border);
+        border-radius: 0.25rem;
+        font-size: 0.9em;
+        overflow-wrap: anywhere;
+      }
+
+      a {
+        color: var(--link);
+      }
+
+      .updated {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sotto Privacy Policy</h1>
+      <p class="updated">Last updated: July 29, 2026</p>
+
+      <h2>Local processing</h2>
+      <p>Sotto is a voice assistant for Chrome. Sotto does all inference on your device.</p>
+      <p>
+        Local inference includes speech recognition, command selection,
+        page tasks, translation, summaries, and optional neural speech.
+      </p>
+      <p>Sotto does not send your voice, page content, or results to a server.</p>
+
+      <h2>Network access</h2>
+      <p>
+        Sotto sends network requests only to download fixed model files
+        from Hugging Face.
+      </p>
+      <p>
+        Each model uses the revision shown below. Sotto caches the files
+        before local inference.
+      </p>
+      <ul>
+        <li>
+          <code>onnx-community/moonshine-tiny-ONNX</code><br>
+          Revision:
+          <code>a6da1241cd305dcd64eab1edbd615f2bb9aabb95</code>
+        </li>
+        <li>
+          <code>onnx-community/moonshine-base-ONNX</code><br>
+          Revision:
+          <code>b1e9b6aae3c3c7298f10c3798393fdf38e8fbbad</code>
+        </li>
+        <li>
+          <code>efederici/parakeet-tdt-0.6b-v3-onnx-int4</code><br>
+          Revision:
+          <code>9828da0021d81df726b3d5ddb2d6d04354942749</code>
+        </li>
+        <li>
+          <code>onnx-community/Kokoro-82M-v1.0-ONNX</code><br>
+          Revision:
+          <code>1939ad2a8e416c0acfeecc08a694d14ef25f2231</code>
+        </li>
+      </ul>
+      <p>Kokoro voice files use the same repository and revision.</p>
+      <p>Sotto does not make other network requests.</p>
+
+      <h2>Local storage</h2>
+      <p>
+        Sotto stores settings, notes, and reminder records in
+        <code>chrome.storage.local</code>.
+      </p>
+      <p>
+        Settings include speech choices, feature choices, blocked sites,
+        and model state.
+      </p>
+      <p>
+        Website pages cannot read this extension storage.
+      </p>
+      <p>
+        You can enable session history. Sotto stores this history in
+        <code>chrome.storage.session</code>.
+      </p>
+      <p>
+        Session history can contain transcripts, action names, and short
+        result text. Chrome clears it after the browser session.
+      </p>
+      <p>
+        Sotto stores downloaded models in the browser Cache Storage.
+        You can delete optional models in Sotto.
+      </p>
+      <p>
+        Audio stays in memory only during the current speech request.
+        Sotto does not keep audio recordings.
+      </p>
+
+      <h2>Data that Sotto never collects</h2>
+      <ul>
+        <li>Sotto does not use telemetry or analytics.</li>
+        <li>Sotto does not have accounts.</li>
+        <li>Sotto does not keep audio recordings.</li>
+        <li>Sotto does not transmit page content.</li>
+        <li>Sotto does not sell or share personal data.</li>
+      </ul>
+
+      <h2>Permissions</h2>
+      <ul>
+        <li>
+          <code>activeTab</code>: Sotto works on the active tab after
+          your command.
+        </li>
+        <li>
+          <code>alarms</code>: Sotto starts local reminder alarms.
+        </li>
+        <li>
+          <code>clipboardWrite</code>: Sotto copies requested text or
+          screenshots.
+        </li>
+        <li>
+          <code>downloads</code>: Sotto saves a file when you request it.
+        </li>
+        <li>
+          <code>notifications</code>: Sotto shows local reminder
+          notifications.
+        </li>
+        <li>
+          <code>offscreen</code>: Sotto uses a hidden extension document
+          for microphone, speech, and local model work.
+        </li>
+        <li>
+          <code>scripting</code>: Sotto reads or changes a page after
+          your command.
+        </li>
+        <li>
+          <code>sessions</code>: Sotto reopens a recently closed tab
+          after your command.
+        </li>
+        <li>
+          <code>sidePanel</code>: Sotto shows its main interface in the
+          Chrome side panel.
+        </li>
+        <li>
+          <code>storage</code>: Sotto keeps local settings, notes,
+          reminders, model state, and optional session history.
+        </li>
+        <li>
+          <code>tabs</code>: Sotto lists, opens, switches, closes, and
+          mutes tabs after your commands.
+        </li>
+        <li>
+          <code>tts</code>: Sotto speaks results with a local system
+          voice.
+        </li>
+        <li>
+          <code>https://huggingface.co/*</code>: Sotto downloads pinned
+          model files from Hugging Face.
+        </li>
+        <li>
+          <code>https://*.huggingface.co/*</code>: Sotto downloads pinned
+          model files from Hugging Face subdomains.
+        </li>
+        <li>
+          <code>https://*.hf.co/*</code>: Sotto downloads pinned model
+          files from the Hugging Face content service.
+        </li>
+        <li>
+          <code>&lt;all_urls&gt;</code>: Sotto requests this optional
+          grant when you start a screen command.
+          Chrome requires this grant to capture the visible tab.
+        </li>
+      </ul>
+
+      <h2>Contact</h2>
+      <p>
+        Report a privacy question or problem in
+        <a href="https://github.com/0xinBeta/Sotto/issues">Sotto GitHub issues</a>.
+      </p>
+    </main>
+  </body>
+</html>

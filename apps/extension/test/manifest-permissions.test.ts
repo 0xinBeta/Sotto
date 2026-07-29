@@ -27,11 +27,37 @@ function trustSurface(manifest: ExtensionManifest) {
   };
 }
 
+function declaredPermissions(manifest: ExtensionManifest): string[] {
+  return [
+    ...manifest.permissions,
+    ...manifest.host_permissions,
+    ...manifest.optional_host_permissions,
+  ].sort();
+}
+
+function documentedPermissions(url: URL): string[] {
+  const blocks = readFileSync(url, "utf8").trim().split(/\r?\n\r?\n/u);
+  return blocks.map((block) => {
+    const lines = block.split(/\r?\n/u);
+    const match = /^Permission: (.+)$/u.exec(lines[0] ?? "");
+    if (!match || lines.length !== 2 || !lines[1]?.trim()) {
+      throw new Error(
+        "Each permission needs a heading and one justification paragraph",
+      );
+    }
+    return match[1];
+  }).sort();
+}
+
 const sourceManifestUrl = new URL(
   "../public/manifest.json",
   import.meta.url,
 );
 const distManifestUrl = new URL("../dist/manifest.json", import.meta.url);
+const permissionJustificationsUrl = new URL(
+  "../../../store/permissions-justifications.txt",
+  import.meta.url,
+);
 const sourceManifest = readManifest(sourceManifestUrl);
 
 /*
@@ -88,6 +114,12 @@ const expectedTrustSurface = {
 describe("manifest trust surface", () => {
   it("matches the reviewed source manifest values", () => {
     expect(trustSurface(sourceManifest)).toEqual(expectedTrustSurface);
+  });
+
+  it("documents every declared permission in the store listing", () => {
+    expect(documentedPermissions(permissionJustificationsUrl)).toEqual(
+      declaredPermissions(sourceManifest),
+    );
   });
 
   it.skipIf(!existsSync(distManifestUrl))(
