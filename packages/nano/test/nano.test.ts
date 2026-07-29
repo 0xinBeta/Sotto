@@ -490,6 +490,30 @@ describe("Nano Prompt API lifecycle", () => {
     }
   });
 
+  it("uses the same image capability options for availability and creation", async () => {
+    const model = {
+      prompt: vi.fn().mockResolvedValue("screen"),
+      destroy: vi.fn(),
+    };
+    const api = {
+      availability: vi.fn().mockResolvedValue("available"),
+      create: vi.fn().mockResolvedValue(model),
+    };
+    vi.stubGlobal("LanguageModel", api);
+    const expectedInputs: LanguageModelExpected[] = [{ type: "image" }];
+
+    const result = await createNanoSession({ expectedInputs });
+
+    expect(api.availability).toHaveBeenCalledWith({ expectedInputs });
+    expect(api.create).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedInputs }),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      availability: "available",
+    });
+  });
+
   it("destroys an owned model exactly once and rejects later prompts", async () => {
     const model = {
       prompt: vi.fn().mockResolvedValue("ok"),

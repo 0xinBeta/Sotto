@@ -11,6 +11,7 @@ import {
 } from "@sotto/core";
 import {
   askPageWithPrompt,
+  askScreenWithPrompt,
   createParserSession,
   createResponderSession,
   createTranslatorSession,
@@ -289,6 +290,11 @@ interface PageTaskInput {
   readonly language?: string;
 }
 
+interface ScreenTaskInput {
+  imageDataUrl: string;
+  readonly question?: string;
+}
+
 interface TranslationTaskInput {
   readonly pageText: string;
   readonly pageLanguage?: string;
@@ -298,6 +304,8 @@ interface TranslationTaskInput {
 const TRANSLATE_LANGUAGES = new Set<TranslateLanguage>(
   TRANSLATE_LANGUAGE_CODES,
 );
+
+const MAX_SCREEN_IMAGE_DATA_URL_CHARACTERS = 64 * 1024 * 1024;
 
 async function sendPanel(message: Record<string, unknown>): Promise<void> {
   try {
@@ -1374,6 +1382,72 @@ function parsePageTask(value: unknown): PageTaskInput {
   };
 }
 
+function parseScreenTask(value: unknown): ScreenTaskInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("A screen task object is required");
+  }
+  const candidate = value as {
+    imageDataUrl?: unknown;
+    question?: unknown;
+  };
+  if (
+    typeof candidate.imageDataUrl !== "string" ||
+    !candidate.imageDataUrl.startsWith("data:image/png;base64,") ||
+    candidate.imageDataUrl.length > MAX_SCREEN_IMAGE_DATA_URL_CHARACTERS
+  ) {
+    throw new TypeError("A bounded PNG screen image is required");
+  }
+  if (
+    candidate.question !== undefined &&
+    (
+      typeof candidate.question !== "string" ||
+      !candidate.question.trim() ||
+      candidate.question.length > 1_000
+    )
+  ) {
+    throw new TypeError("A screen question must be a bounded string");
+  }
+  return candidate as ScreenTaskInput;
+}
+
+function pngDataUrlToBlob(dataUrl: string): Blob {
+  const encoded = dataUrl.slice("data:image/png;base64,".length);
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  try {
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: "image/png" });
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+async function runScreenTask(
+  value: unknown,
+  signal: AbortSignal,
+) {
+  const task = parseScreenTask(value);
+  let image: Blob | undefined;
+  try {
+    image = pngDataUrlToBlob(task.imageDataUrl);
+    const result = await askScreenWithPrompt(
+      image,
+      task.question,
+      { signal },
+    );
+    if (result.availability === "unavailable") return result;
+    return {
+      availability: result.availability,
+      text: boundedModelOutput(result.text),
+    };
+  } finally {
+    image = undefined;
+    task.imageDataUrl = "";
+  }
+}
+
 function parseTranslationTask(value: unknown): TranslationTaskInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError("A translation task object is required");
@@ -2120,7 +2194,9 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
   const spoken =
     command.action === "unknown"
       ? "Sorry, say that again?"
-      : command.action === "help" || command.action === "page-control"
+      : command.action === "help" ||
+          command.action === "page-control" ||
+          command.action === "ask-screen"
         ? result.spoken
         : await inferenceMutex.run(async () =>
             await respondOneSentence({
@@ -2314,6 +2390,10 @@ async function handleOffscreenMessage(
     case "page-task":
       return withModelTask((signal) =>
         inferenceMutex.run(() => runPageTask(message.task, signal))
+      );
+    case "screen-task":
+      return withModelTask((signal) =>
+        inferenceMutex.run(() => runScreenTask(message.task, signal))
       );
     case "translation-task":
       return withModelTask((signal) =>

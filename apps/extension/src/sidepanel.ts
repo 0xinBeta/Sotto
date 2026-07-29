@@ -318,6 +318,15 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         return false;
       }
       const command = workflow.pendingCommand;
+      if (command.action === "ask-screen") {
+        return (
+          Object.keys(command).every((key) =>
+            key === "action" || key === "question"
+          ) &&
+          (command.question === undefined ||
+            isBoundedString(command.question, 1_000, 1))
+        );
+      }
       return (
         Object.keys(command).length === 2 &&
         command.action === "screenshot" &&
@@ -2014,8 +2023,12 @@ copyScreenshot.addEventListener("click", async () => {
     if (permissionWorkflow) {
       const granted = await requestCapturePermission();
       if (!granted) {
-        const spoken = "Screenshot needs screen capture permission.";
-        appendLog("screenshot", spoken);
+        const screenQuestion =
+          permissionWorkflow.pendingCommand.action === "ask-screen";
+        const spoken = screenQuestion
+          ? "Screen questions need screen capture permission."
+          : "Screenshot needs screen capture permission.";
+        appendLog(screenQuestion ? "screen question" : "screenshot", spoken);
         await send({ type: "speak", text: spoken });
         return;
       }
@@ -2024,6 +2037,11 @@ copyScreenshot.addEventListener("click", async () => {
         type: "retry-screenshot",
         command: permissionWorkflow.pendingCommand,
       });
+      if (permissionWorkflow.pendingCommand.action === "ask-screen") {
+        pendingScreenshotPermission = undefined;
+        clipboardCard.hidden = true;
+        return;
+      }
       if (result?.workflow?.kind !== "clipboard-write") {
         throw new Error("Screenshot was not ready to copy");
       }

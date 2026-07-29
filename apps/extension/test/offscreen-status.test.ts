@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const nano = vi.hoisted(() => ({
   askPageWithPrompt: vi.fn(),
+  askScreenWithPrompt: vi.fn(),
   createParserSession: vi.fn(),
   createTranslatorSession: vi.fn(),
   detectSourceLanguage: vi.fn(),
@@ -63,6 +64,7 @@ vi.mock("@sotto/core", () => ({
 }));
 vi.mock("@sotto/nano", () => ({
   askPageWithPrompt: nano.askPageWithPrompt,
+  askScreenWithPrompt: nano.askScreenWithPrompt,
   createParserSession: nano.createParserSession,
   createResponderSession: vi.fn(),
   createTranslatorSession: nano.createTranslatorSession,
@@ -218,6 +220,7 @@ async function installPremiumOffscreen(options: {
 afterEach(() => {
   vi.useRealTimers();
   nano.askPageWithPrompt.mockReset();
+  nano.askScreenWithPrompt.mockReset();
   nano.createParserSession.mockReset();
   nano.createTranslatorSession.mockReset();
   nano.detectSourceLanguage.mockReset();
@@ -247,6 +250,83 @@ afterEach(() => {
 });
 
 describe("offscreen fail-soft status", () => {
+  it("serializes screen inference and releases each transported image", async () => {
+    const resolvers: Array<
+      (value: {
+        availability: "available";
+        text: string;
+      }) => void
+    > = [];
+    const received: Array<{
+      readonly image: Blob;
+      readonly question: string | undefined;
+    }> = [];
+    nano.askScreenWithPrompt.mockImplementation(
+      async (image: Blob, question: string | undefined) => {
+        received.push({ image, question });
+        return await new Promise((resolve) => {
+          resolvers.push(resolve);
+        });
+      },
+    );
+    const harness = await installPremiumOffscreen();
+    const firstTask = {
+      imageDataUrl: "data:image/png;base64,Zmlyc3Q=",
+      question: "What is first?",
+    };
+    const secondTask = {
+      imageDataUrl: "data:image/png;base64,c2Vjb25k",
+      question: "What is second?",
+    };
+
+    const first = harness.message({
+      type: "screen-task",
+      task: firstTask,
+    });
+    await vi.waitFor(() =>
+      expect(nano.askScreenWithPrompt).toHaveBeenCalledTimes(1)
+    );
+    const second = harness.message({
+      type: "screen-task",
+      task: secondTask,
+    });
+    await Promise.resolve();
+    expect(nano.askScreenWithPrompt).toHaveBeenCalledTimes(1);
+
+    resolvers[0]?.({
+      availability: "available",
+      text: "First screen.",
+    });
+    await expect(first).resolves.toEqual({
+      ok: true,
+      value: {
+        availability: "available",
+        text: "First screen.",
+      },
+    });
+    expect(firstTask.imageDataUrl).toBe("");
+    await vi.waitFor(() =>
+      expect(nano.askScreenWithPrompt).toHaveBeenCalledTimes(2)
+    );
+    resolvers[1]?.({
+      availability: "available",
+      text: "Second screen.",
+    });
+    await expect(second).resolves.toEqual({
+      ok: true,
+      value: {
+        availability: "available",
+        text: "Second screen.",
+      },
+    });
+    expect(secondTask.imageDataUrl).toBe("");
+    expect(received.map(({ question }) => question)).toEqual([
+      "What is first?",
+      "What is second?",
+    ]);
+    expect(received.every(({ image }) => image.type === "image/png")).toBe(true);
+  });
+
   it("runs translation in the offscreen document and publishes download progress", async () => {
     const translate = vi.fn().mockResolvedValue("Hola");
     const destroy = vi.fn();
@@ -1176,6 +1256,33 @@ describe("offscreen fail-soft status", () => {
       text: "Zoom one hundred forty percent.",
       heard: "zoom in",
       did: "Zoom one hundred forty percent.",
+      timings: { input: "voice" },
+    });
+  });
+
+  it("speaks the exact screen-model fallback without responder changes", async () => {
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockClear();
+    nano.respondOneSentence.mockReset();
+
+    await expect(
+      harness.message({
+        type: "action-result",
+        transcript: "what is on my screen",
+        command: { action: "ask-screen" },
+        result: {
+          spoken: "Screen questions need a newer Chrome AI model.",
+        },
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(nano.respondOneSentence).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "speak",
+      text: "Screen questions need a newer Chrome AI model.",
+      heard: "what is on my screen",
+      did: "Screen questions need a newer Chrome AI model.",
       timings: { input: "voice" },
     });
   });

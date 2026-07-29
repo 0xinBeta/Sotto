@@ -57,6 +57,13 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(6);
   });
 
+  it("keeps at least six screen question cases", () => {
+    expect(
+      cases.filter((testCase) => testCase.expected.action === "ask-screen")
+        .length,
+    ).toBeGreaterThanOrEqual(6);
+  });
+
   it("keeps at least five save screenshot cases", () => {
     expect(
       cases.filter(
@@ -244,6 +251,21 @@ describe("intent eval schema drift", () => {
         question: "What is this?",
         scope: "page",
         answer: "page-derived model text",
+      },
+    ],
+    [
+      "ask-screen cannot carry model output",
+      {
+        action: "ask-screen",
+        question: "What is this?",
+        answer: "screen-derived model text",
+      },
+    ],
+    [
+      "ask-screen cannot carry image data",
+      {
+        action: "ask-screen",
+        imageDataUrl: "data:image/png;base64,c2NyZWVu",
       },
     ],
     [

@@ -1,4 +1,5 @@
 import askPageAction from "./ask-page/index.js";
+import askScreenAction from "./ask-screen/index.js";
 import dictationAction from "./dictation/index.js";
 import helpAction from "./help/index.js";
 import navigateAction from "./navigate/index.js";
@@ -15,6 +16,11 @@ import typeAction from "./type/index.js";
 
 export { default as askPageAction } from "./ask-page/index.js";
 export type { AskPageCommand } from "./ask-page/index.js";
+export {
+  askScreenSchema,
+  default as askScreenAction,
+} from "./ask-screen/index.js";
+export type { AskScreenCommand } from "./ask-screen/index.js";
 export {
   default as dictationAction,
   dictationSchema,
@@ -125,6 +131,7 @@ export const actions = [
   translateAction,
   summarizeAction,
   askPageAction,
+  askScreenAction,
   navigateAction,
   notesAction,
   pageControlAction,

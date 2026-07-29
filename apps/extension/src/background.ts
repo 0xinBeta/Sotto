@@ -26,6 +26,7 @@ import {
   type ExtractedPageText,
   type PageActionServices,
   type PageModelTask,
+  type ScreenQuestionServices,
 } from "@sotto/core";
 import destinations, {
   executeDestinationFollowUp,
@@ -127,6 +128,7 @@ function actionContext(): ActionContext {
     dispatchDestination: (id, input) =>
       destinationRegistry.dispatch(id, input),
     page: pageActionServices,
+    screen: screenQuestionServices,
     type: editableActionServices,
     dictation: dictationActionServices,
     actionCatalog: actionRegistry,
@@ -819,6 +821,69 @@ const pageActionServices: PageActionServices = {
   extract: extractActivePage,
   runModelTask: runPageModelTask,
   translate: runPageTranslation,
+};
+
+async function runScreenQuestion(
+  options: Parameters<ScreenQuestionServices["ask"]>[0],
+): ReturnType<ScreenQuestionServices["ask"]> {
+  let imageDataUrl = options.imageDataUrl;
+  try {
+    const value = await sendOffscreen({
+      type: "screen-task",
+      task: {
+        imageDataUrl,
+        ...(options.question === undefined
+          ? {}
+          : { question: options.question }),
+      },
+    });
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      Array.isArray(value)
+    ) {
+      throw new Error("The on-device screen model returned invalid data");
+    }
+    const candidate = value as {
+      availability?: unknown;
+      text?: unknown;
+    };
+    if (candidate.availability === "unavailable") {
+      if (Object.keys(candidate).length !== 1) {
+        throw new Error(
+          "The unavailable screen model result contains extra data",
+        );
+      }
+      return { availability: "unavailable" };
+    }
+    if (
+      candidate.availability !== "downloadable" &&
+      candidate.availability !== "downloading" &&
+      candidate.availability !== "available"
+    ) {
+      throw new Error("The screen model returned invalid availability");
+    }
+    if (
+      typeof candidate.text !== "string" ||
+      !candidate.text.trim() ||
+      candidate.text.length > 24_000 ||
+      Object.keys(candidate).some(
+        (key) => key !== "availability" && key !== "text",
+      )
+    ) {
+      throw new Error("The on-device screen model returned invalid text");
+    }
+    return {
+      availability: candidate.availability,
+      text: candidate.text,
+    };
+  } finally {
+    imageDataUrl = "";
+  }
+}
+
+const screenQuestionServices: ScreenQuestionServices = {
+  ask: runScreenQuestion,
 };
 
 interface EditorBridgeLocation {
@@ -1934,13 +1999,30 @@ async function executeCommand(
 
 async function retryScreenshot(command: unknown): Promise<ActionResult> {
   const validated = commandRouter.parse(command);
-  if (validated.action !== "screenshot") {
-    throw new TypeError("Only a pending screenshot can be retried");
+  if (
+    validated.action !== "screenshot" &&
+    validated.action !== "ask-screen"
+  ) {
+    throw new TypeError("Only a pending screen capture can be retried");
   }
-  const result = await commandRouter.route(validated, {
-    dispatchDestination: (id, input) =>
-      destinationRegistry.dispatch(id, input),
-  });
+  const generation =
+    validated.action === "ask-screen"
+      ? beginCommandGeneration()
+      : undefined;
+  const result = await commandRouter.route(validated, actionContext());
+  if (validated.action === "ask-screen") {
+    if (generation === undefined || !commandIsCurrent(generation)) {
+      return result;
+    }
+    await publishActionResult(
+      "screen question",
+      validated,
+      result,
+      generation,
+      { input: "typed" },
+    );
+    return result;
+  }
   if (result.workflow?.kind === "clipboard-write") {
     registerClipboardWorkflow(result.workflow);
   }

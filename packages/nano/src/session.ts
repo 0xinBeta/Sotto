@@ -13,6 +13,22 @@ function languageModelGlobal(): typeof LanguageModel | undefined {
   return candidate;
 }
 
+function capabilityOptions(
+  options: Pick<
+    NanoSessionOptions,
+    "expectedInputs" | "expectedOutputs"
+  >,
+): LanguageModelCreateCoreOptions {
+  return {
+    ...(options.expectedInputs === undefined
+      ? {}
+      : { expectedInputs: options.expectedInputs }),
+    ...(options.expectedOutputs === undefined
+      ? {}
+      : { expectedOutputs: options.expectedOutputs }),
+  };
+}
+
 export function toNanoError(error: unknown): NanoError {
   if (error instanceof Error || error instanceof DOMException) {
     return {
@@ -33,12 +49,20 @@ export function toNanoError(error: unknown): NanoError {
  * Checks Prompt API support without throwing. An absent API, policy denial,
  * unsupported hardware, and failed capability check all degrade to unavailable.
  */
-export async function getNanoAvailability(): Promise<NanoAvailability> {
+export async function getNanoAvailability(
+  options: Pick<
+    NanoSessionOptions,
+    "expectedInputs" | "expectedOutputs"
+  > = {},
+): Promise<NanoAvailability> {
   const api = languageModelGlobal();
   if (!api) return "unavailable";
 
   try {
-    return await api.availability();
+    const capabilities = capabilityOptions(options);
+    return Object.keys(capabilities).length === 0
+      ? await api.availability()
+      : await api.availability(capabilities);
   } catch {
     return "unavailable";
   }
@@ -65,7 +89,10 @@ export async function createNanoSession(
 
   let availability: NanoAvailability;
   try {
-    availability = await api.availability();
+    const capabilities = capabilityOptions(options);
+    availability = Object.keys(capabilities).length === 0
+      ? await api.availability()
+      : await api.availability(capabilities);
   } catch (error) {
     return {
       ok: false,
@@ -83,6 +110,12 @@ export async function createNanoSession(
       ...(options.initialPrompts === undefined
         ? {}
         : { initialPrompts: options.initialPrompts }),
+      ...(options.expectedInputs === undefined
+        ? {}
+        : { expectedInputs: options.expectedInputs }),
+      ...(options.expectedOutputs === undefined
+        ? {}
+        : { expectedOutputs: options.expectedOutputs }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       monitor(monitor) {
         monitor.addEventListener("downloadprogress", (event) => {
@@ -102,7 +135,7 @@ export async function createNanoSession(
   } catch (error) {
     return {
       ok: false,
-      availability: await getNanoAvailability(),
+      availability: await getNanoAvailability(options),
       error: toNanoError(error),
     };
   }

@@ -23,6 +23,8 @@ export interface NanoSessionOptions {
   readonly initialPrompts?: NonNullable<
     LanguageModelCreateOptions["initialPrompts"]
   >;
+  readonly expectedInputs?: LanguageModelCreateCoreOptions["expectedInputs"];
+  readonly expectedOutputs?: LanguageModelCreateCoreOptions["expectedOutputs"];
   readonly signal?: AbortSignal;
   readonly onDownloadProgress?: (progress: NanoDownloadProgress) => void;
 }

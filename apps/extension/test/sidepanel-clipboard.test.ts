@@ -1324,4 +1324,40 @@ describe("side-panel screenshot clipboard fallback", () => {
     });
     expect(elements["clipboard-card"].hidden).toBe(true);
   });
+
+  it("reuses the capture permission retry for a screen question", async () => {
+    const {
+      elements,
+      onMessage,
+      requestPermission,
+      sendMessage,
+    } = await installSidepanel();
+    const pendingCommand = {
+      action: "ask-screen",
+      question: "What is this chart?",
+    };
+
+    onMessage({
+      target: "sidepanel",
+      type: "screenshot-permission-needed",
+      workflow: {
+        kind: "screenshot-permission",
+        originPattern: "<all_urls>",
+        host: "example.test",
+        pendingCommand,
+      },
+    });
+    await elements["copy-screenshot"].emit("click");
+
+    expect(requestPermission).toHaveBeenCalledWith({
+      origins: ["<all_urls>"],
+    });
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "retry-screenshot",
+      command: pendingCommand,
+    });
+    expect(clipboard.perform).not.toHaveBeenCalled();
+    expect(elements["clipboard-card"].hidden).toBe(true);
+  });
 });

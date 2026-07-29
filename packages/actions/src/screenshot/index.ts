@@ -1,5 +1,6 @@
 import { defineAction } from "@sotto/core";
 import type { ActionCommand, JsonSchema } from "@sotto/core";
+import { captureVisiblePng } from "./capture.js";
 
 export type ScreenshotDestination =
   | "copy"
@@ -25,23 +26,6 @@ const schema = {
   required: ["action", "destination"],
   additionalProperties: false,
 } as const satisfies JsonSchema;
-
-function captureOrigin(
-  url: string | undefined,
-): { host: string } | undefined {
-  if (!url) return undefined;
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return undefined;
-    }
-    return {
-      host: parsed.host,
-    };
-  } catch {
-    return undefined;
-  }
-}
 
 const screenshot = defineAction<ScreenshotCommand>({
   id: "screenshot",
@@ -82,41 +66,12 @@ const screenshot = defineAction<ScreenshotCommand>({
       );
     }
 
-    const [activeTab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    if (!activeTab || activeTab.windowId === undefined) {
-      throw new Error("No active tab is available to capture");
-    }
-
-    const captureSite = captureOrigin(activeTab.url);
-    if (!captureSite) {
-      return { spoken: "I can't capture this page." };
-    }
-
-    const hasPermission = await chrome.permissions.contains({
-      origins: ["<all_urls>"],
-    });
-    if (!hasPermission) {
-      return {
-        spoken: `Screenshot access is needed for ${captureSite.host}.`,
-        workflow: {
-          kind: "screenshot-permission",
-          originPattern: "<all_urls>",
-          host: captureSite.host,
-          pendingCommand: command,
-        },
-      };
-    }
-
-    const dataUrl = await chrome.tabs.captureVisibleTab(activeTab.windowId, {
-      format: "png",
-    });
+    const capture = await captureVisiblePng(command, "Screenshot");
+    if (!capture.ok) return capture.result;
     return context.dispatchDestination(command.destination, {
       kind: "image",
       mimeType: "image/png",
-      dataUrl,
+      dataUrl: capture.dataUrl,
     });
   },
 });

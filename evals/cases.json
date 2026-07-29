@@ -104,6 +104,36 @@
     "transcript": "grab the screen and open Gemini",
     "expected": { "action": "screenshot", "destination": "gemini" }
   },
+  {
+    "id": "ask-screen-01",
+    "transcript": "what is on my screen",
+    "expected": { "action": "ask-screen" }
+  },
+  {
+    "id": "ask-screen-02",
+    "transcript": "what is this chart",
+    "expected": { "action": "ask-screen", "question": "What is this chart?" }
+  },
+  {
+    "id": "ask-screen-03",
+    "transcript": "describe what I see",
+    "expected": { "action": "ask-screen" }
+  },
+  {
+    "id": "ask-screen-04",
+    "transcript": "what error is shown on my screen",
+    "expected": { "action": "ask-screen", "question": "What error is shown on my screen?" }
+  },
+  {
+    "id": "ask-screen-05",
+    "transcript": "explain this diagram on my screen",
+    "expected": { "action": "ask-screen", "question": "Explain this diagram on my screen." }
+  },
+  {
+    "id": "ask-screen-06",
+    "transcript": "tell me what is visible in this window",
+    "expected": { "action": "ask-screen" }
+  },
 
   {
     "id": "summarize-page-01",

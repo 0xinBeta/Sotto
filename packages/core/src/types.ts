@@ -212,6 +212,22 @@ export interface DictationActionServices {
   stop(): Promise<string>;
 }
 
+export type ScreenQuestionResult =
+  | {
+      readonly availability: "unavailable";
+    }
+  | {
+      readonly availability: "downloadable" | "downloading" | "available";
+      readonly text: string;
+    };
+
+export interface ScreenQuestionServices {
+  ask(options: {
+    readonly imageDataUrl: string;
+    readonly question?: string;
+  }): Promise<ScreenQuestionResult>;
+}
+
 export interface ActionCatalog {
   list(): readonly ActionDefinition[];
 }
@@ -231,6 +247,8 @@ export interface ActionContext {
   readonly type?: EditableActionServices;
   /** Worker-owned continuous dictation session. */
   readonly dictation?: DictationActionServices;
+  /** Worker-owned bridge from a visible-tab image to an isolated screen model. */
+  readonly screen?: ScreenQuestionServices;
   /** Registry metadata for actions that present command help. */
   readonly actionCatalog?: ActionCatalog;
 }
