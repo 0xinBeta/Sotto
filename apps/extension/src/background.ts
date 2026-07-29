@@ -2263,6 +2263,7 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
           await sendPanel({
             type: "pipeline-error",
             message: `Speech feedback unavailable: ${detail}`,
+            errorClass: "tts-failure",
           });
         }
       }

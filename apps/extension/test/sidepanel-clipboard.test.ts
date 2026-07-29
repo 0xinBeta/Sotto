@@ -798,9 +798,12 @@ describe("side-panel screenshot clipboard fallback", () => {
       message: "Speech was too short or quiet.",
     });
     expect(elements.transcript.textContent).toBe(
-      "Speech was too short or quiet.",
+      "Speech was too short or quiet.Speak closer to the microphone.",
     );
     expect(elements.transcript.dataset.diagnostic).toBe("vad-rejected");
+    expect(
+      elements.transcript.querySelector(".recovery-hint")?.textContent,
+    ).toBe("Speak closer to the microphone.");
   });
 
   it("shows idle, listening, and speech meter states", async () => {
@@ -1537,19 +1540,46 @@ describe("side-panel screenshot clipboard fallback", () => {
     );
   });
 
-  it("announces pipeline errors through the alert region only", async () => {
+  it("renders a recovery hint with the error line", async () => {
     const { elements, onMessage } = await installSidepanel();
 
     onMessage({
       target: "sidepanel",
       type: "pipeline-error",
-      message: "The speech model could not start.",
+      message: "Speech feedback failed.",
+      errorClass: "tts-failure",
     });
 
     expect(elements["pipeline-error"].textContent).toBe(
-      "The speech model could not start.",
+      "Speech feedback failed.Check the sound output.",
     );
+    expect(
+      elements["pipeline-error"].querySelector(".recovery-hint")?.textContent,
+    ).toBe("Check the sound output.");
+    expect(
+      elements["action-log"].firstElementChild
+        ?.querySelector(".recovery-hint")?.textContent,
+    ).toBe("Check the sound output.");
     expect(elements["action-log-announcer"].textContent).toBe("");
+  });
+
+  it("renders no recovery hint for a restricted page", async () => {
+    const { elements, onMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "pipeline-error",
+      message: "Sotto cannot use this page.",
+      errorClass: "restricted-page",
+    });
+
+    expect(
+      elements["pipeline-error"].querySelector(".recovery-hint"),
+    ).toBeUndefined();
+    expect(
+      elements["action-log"].firstElementChild
+        ?.querySelector(".recovery-hint"),
+    ).toBeUndefined();
   });
 
   it("clears a successful automatic workflow so a later click cannot write twice", async () => {

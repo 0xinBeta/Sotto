@@ -1199,6 +1199,7 @@ async function ensureParserSession(options: {
             await sendPanel({
               type: "pipeline-error",
               message: `Gemini Nano could not start: ${created.error.message}`,
+              errorClass: "nano-unavailable",
             });
           }
         }
@@ -1779,6 +1780,7 @@ async function processCommandTranscript(
           void sendPanel({
             type: "pipeline-error",
             message: `Gemini Nano could not parse that command: ${error.message}`,
+            errorClass: "nano-parse-failure",
           });
         },
       });

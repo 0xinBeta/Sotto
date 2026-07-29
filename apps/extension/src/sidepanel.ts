@@ -45,6 +45,11 @@ import {
   type SetupRowId,
   type SetupRowState,
 } from "./setup-view.js";
+import {
+  RECOVERY_ERROR_CLASSES,
+  recoveryHint,
+  type RecoveryErrorClass,
+} from "./recovery-hint.js";
 import "./styles.css";
 
 type NanoAvailability = NanoSetupState;
@@ -276,7 +281,12 @@ type PanelMessage =
         readonly notificationPermission?: string;
       };
     }
-  | { target: "sidepanel"; type: "pipeline-error"; message: string }
+  | {
+      target: "sidepanel";
+      type: "pipeline-error";
+      message: string;
+      errorClass?: RecoveryErrorClass;
+    }
   | {
       target: "sidepanel";
       type: "premium-tts-state";
@@ -535,6 +545,16 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           message.diagnostic === "timeout" ||
           message.diagnostic === "webgpu-failed") &&
         isBoundedString(message.message, 1_000, 1)
+      );
+    case "pipeline-error":
+      return (
+        isBoundedString(message.message, 1_000, 1) &&
+        (
+          message.errorClass === undefined ||
+          RECOVERY_ERROR_CLASSES.includes(
+            message.errorClass as RecoveryErrorClass,
+          )
+        )
       );
     case "mic-level":
       return (
@@ -889,7 +909,13 @@ async function previewPremiumVoice(voice: KokoroVoiceId): Promise<void> {
   } catch {
     selectedPremiumVoice = previousVoice;
     selectPremiumVoiceInput(previousVoice);
-    appendLog("voice preview", "Voice preview failed.");
+    appendLog(
+      "voice preview",
+      "Voice preview failed.",
+      undefined,
+      true,
+      "tts-failure",
+    );
   } finally {
     premiumVoicePreviewPending = false;
     premiumVoicePicker.disabled = premiumState !== "ready";
@@ -940,6 +966,21 @@ function setStatus(
 ): void {
   statusChip.dataset.state = state;
   statusLabel.textContent = label;
+}
+
+function renderRecoveryMessage(
+  element: HTMLElement,
+  message: string,
+  errorClass?: RecoveryErrorClass,
+): void {
+  element.textContent = message;
+  if (!errorClass) return;
+  const hint = recoveryHint(errorClass);
+  if (!hint) return;
+  const hintLine = document.createElement("span");
+  hintLine.className = "recovery-hint";
+  hintLine.textContent = hint;
+  element.append(hintLine);
 }
 
 function setListening(listening: boolean): void {
@@ -1024,8 +1065,15 @@ function showMicLevel(level: number): void {
   updateMeterAccessibleValue(level);
 }
 
-function showTranscript(text: string): void {
-  transcript.textContent = text || "Your words will appear here.";
+function showTranscript(
+  text: string,
+  errorClass?: RecoveryErrorClass,
+): void {
+  renderRecoveryMessage(
+    transcript,
+    text || "Your words will appear here.",
+    errorClass,
+  );
   transcript.dataset.placeholder = String(!text);
 }
 
@@ -1152,8 +1200,28 @@ function renderSetupView(): void {
     const elements = setupRows[row.id];
     elements.row.dataset.state = row.state;
     elements.icon.textContent = SETUP_ICONS[row.state];
-    elements.state.textContent =
-      `${SETUP_STATE_LABELS[row.state]}. ${row.description}`;
+    const errorClass =
+      row.id === "microphone" && microphonePermission === "denied"
+        ? "mic-permission-denied"
+        : row.id === "capture" && capturePermissionGranted === false
+          ? "capture-permission"
+          : row.id === "nano" && nanoAvailability === "unavailable"
+            ? "nano-unavailable"
+            : row.id === "premium" &&
+                (
+                  premiumState === "error" ||
+                  (
+                    highAccuracyState === "error" &&
+                    highAccuracyResumable
+                  )
+                )
+              ? "download-failure"
+              : undefined;
+    renderRecoveryMessage(
+      elements.state,
+      `${SETUP_STATE_LABELS[row.state]}. ${row.description}`,
+      errorClass,
+    );
 
     switch (row.action) {
       case "microphone":
@@ -1408,6 +1476,9 @@ async function runModelAction(
     appendLog(
       "model storage",
       error instanceof Error ? error.message : "The model task failed.",
+      undefined,
+      true,
+      action === "download-model" ? "download-failure" : undefined,
     );
   }
 }
@@ -1525,9 +1596,12 @@ function showPremiumVoiceState(
       break;
     case "error":
       downloadPremiumVoice.textContent = "Retry voice download";
-      premiumVoiceCopy.textContent =
+      renderRecoveryMessage(
+        premiumVoiceCopy,
         error ??
-        "The voice download failed. Select retry to use completed files from the local cache.";
+          "The voice download failed. Select retry to use completed files from the local cache.",
+        "download-failure",
+      );
       break;
   }
   renderSetupView();
@@ -1614,11 +1688,15 @@ function showPremiumSttState(
       downloadPremiumStt.textContent = resumable
         ? "Resume download"
         : "Retry high accuracy setup";
-      premiumSttCopy.textContent =
-        resumable
+      const message = resumable
           ? "The download stopped. Select resume after the network is available."
           : error ??
             "High accuracy speech could not start. Moonshine tiny remains active.";
+      renderRecoveryMessage(
+        premiumSttCopy,
+        message,
+        resumable ? "download-failure" : undefined,
+      );
       break;
   }
   renderSetupView();
@@ -1883,6 +1961,7 @@ function appendLog(
   did: string,
   timings?: ExchangeTimings,
   announce = true,
+  errorClass?: RecoveryErrorClass,
 ): void {
   const decision = nextLogEntry(newestLogEntry, heard, did);
   const now = new Date();
@@ -1921,6 +2000,13 @@ function appendLog(
     document.createTextNode(` → ${did}`),
     count,
   );
+  const hint = errorClass ? recoveryHint(errorClass) : undefined;
+  if (hint) {
+    const hintLine = document.createElement("span");
+    hintLine.className = "recovery-hint";
+    hintLine.textContent = hint;
+    copy.append(hintLine);
+  }
   item.append(time, copy);
   if (timingLine) item.append(timingLine);
   actionLog.prepend(item);
@@ -2151,7 +2237,7 @@ async function prepareNanoModel(): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Nano setup failed";
     setStatus("error", "Nano setup failed");
-    appendLog("model setup", message);
+    appendLog("model setup", message, undefined, true, "nano-unavailable");
     setupPrepareNano.disabled = false;
   }
 }
@@ -2277,7 +2363,13 @@ enableCapture.addEventListener("click", async () => {
   enableCapture.disabled = true;
   try {
     if (!(await requestCapturePermission())) {
-      appendLog("screen capture", "Permission was not granted");
+      appendLog(
+        "screen capture",
+        "Permission was not granted",
+        undefined,
+        true,
+        "capture-permission",
+      );
     }
   } finally {
     enableCapture.disabled = false;
@@ -2383,7 +2475,17 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       setListening(message.listening);
       showNanoState(message.nano);
       showMicrophoneState(message.mic);
-      if (message.error) appendLog("system", message.error);
+      if (message.error) {
+        appendLog(
+          "system",
+          message.error,
+          undefined,
+          true,
+          message.mic === "denied"
+            ? "mic-permission-denied"
+            : undefined,
+        );
+      }
       break;
     case "premium-tts-state":
       showPremiumVoiceState(
@@ -2409,9 +2511,15 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       renderModelInventory(message.rows, message.totalBytes);
       break;
     case "stt-diagnostic":
-      showTranscript(message.message);
+      showTranscript(message.message, message.diagnostic);
       transcript.dataset.diagnostic = message.diagnostic;
-      appendLog(`speech / ${message.diagnostic}`, message.message);
+      appendLog(
+        `speech / ${message.diagnostic}`,
+        message.message,
+        undefined,
+        true,
+        message.diagnostic,
+      );
       break;
     case "show-command-reference":
       showCommandReference();
@@ -2525,14 +2633,27 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       pendingScreenshot = undefined;
       pendingScreenshotPermission = message.workflow;
       copyScreenshot.textContent = "Enable screen capture (one-time)";
-      clipboardCopy.textContent =
-        `Sotto needs one-time access to capture ${message.workflow.host}.`;
+      renderRecoveryMessage(
+        clipboardCopy,
+        `Sotto needs one-time access to capture ${message.workflow.host}.`,
+        "capture-permission",
+      );
       clipboardCard.hidden = false;
       break;
     case "pipeline-error":
       setStatus("error", "Needs attention");
-      pipelineError.textContent = message.message;
-      appendLog("system", message.message, undefined, false);
+      renderRecoveryMessage(
+        pipelineError,
+        message.message,
+        message.errorClass,
+      );
+      appendLog(
+        "system",
+        message.message,
+        undefined,
+        false,
+        message.errorClass,
+      );
       break;
   }
 });

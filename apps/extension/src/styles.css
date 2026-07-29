@@ -983,6 +983,22 @@ progress::-webkit-progress-value {
   color: var(--transcript-placeholder);
 }
 
+.recovery-hint {
+  display: block;
+  margin-top: 5px;
+  color: var(--paper-dim);
+  font-size: 0.86em;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.transcript .recovery-hint {
+  margin-top: 12px;
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
 .control-panel {
   display: grid;
   justify-items: center;

@@ -147,4 +147,13 @@ describe("side-panel preference styles", () => {
     expect(reducedMotion).toContain("animation: none !important");
     expect(reducedMotion).toContain("transition: none !important");
   });
+
+  it("dims recovery hints on a separate line", () => {
+    const recoveryStyles = panelStyles.slice(
+      panelStyles.indexOf(".recovery-hint {"),
+      panelStyles.indexOf(".control-panel {"),
+    );
+    expect(recoveryStyles).toContain("display: block");
+    expect(recoveryStyles).toContain("color: var(--paper-dim)");
+  });
 });
