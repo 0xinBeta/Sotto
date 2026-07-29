@@ -33,9 +33,13 @@ export class ConfirmationSession {
     };
   }
 
-  resolve(transcript: string): ConfirmationResolution {
+  resolve(
+    transcript: string,
+    command?: ActionCommand,
+  ): ConfirmationResolution {
     const pending = this.#pending;
     if (!pending) return { kind: "none" };
+    if (command?.action === "repeat") return { kind: "none" };
 
     this.#pending = undefined;
     if (

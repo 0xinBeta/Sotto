@@ -2884,7 +2884,11 @@ confirmSettingsImport.addEventListener("click", async () => {
         ? t("importCompleteNoNotes")
         : t("importCompleteWithNotes", String(added)),
     );
-    await Promise.all([loadSpeechSettings(), loadQuietMode()]);
+    await Promise.all([
+      loadSpeechSettings(),
+      loadQuietMode(),
+      loadBlockedSites(),
+    ]);
   } catch (error) {
     clearSettingsImport();
     showSettingsBackupStatus(

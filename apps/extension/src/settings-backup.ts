@@ -32,12 +32,18 @@ import {
   QUIET_MODE_KEY,
 } from "./quiet-mode.js";
 import {
+  BLOCKED_HOSTNAMES_KEY,
+  normalizeBlockedHostnames,
+} from "./blocked-sites.js";
+import { LIVE_TRANSCRIPT_PREVIEW_KEY } from "./live-transcript-preview.js";
+import {
   normalizeSpeechSettings,
   RESPONSE_VERBOSITY_KEY,
   SPEECH_RATE_KEY,
   SPEECH_VOLUME_KEY,
   type ResponseVerbosity,
 } from "./speech-settings.js";
+import { WAKE_WORD_ENABLED_KEY } from "./wake-word-settings.js";
 
 export const SETTINGS_BACKUP_SCHEMA_VERSION = 1;
 export const MAX_SETTINGS_BACKUP_BYTES = 20 * 1024 * 1024;
@@ -53,6 +59,9 @@ export interface SettingsBackupSettings {
   readonly volume: number;
   readonly verbosity: ResponseVerbosity;
   readonly doNotDisturb: boolean;
+  readonly wakeWordEnabled: boolean;
+  readonly liveTranscriptPreview: boolean;
+  readonly blockedHostnames: readonly string[];
   readonly premiumTts: {
     readonly enabled: boolean;
     readonly voice: KokoroVoiceId;
@@ -146,6 +155,17 @@ export const SETTINGS_BACKUP_SCHEMA: JsonSchema = {
         volume: { type: "number" },
         verbosity: { enum: ["normal", "brief"] },
         doNotDisturb: { type: "boolean" },
+        wakeWordEnabled: { type: "boolean" },
+        liveTranscriptPreview: { type: "boolean" },
+        blockedHostnames: {
+          type: "array",
+          items: {
+            type: "string",
+            minLength: 1,
+            maxLength: 253,
+          },
+          maxItems: 5_000,
+        },
         premiumTts: {
           type: "object",
           properties: {
@@ -217,6 +237,12 @@ function backupSettings(
     volume: speech.volume,
     verbosity: speech.verbosity,
     doNotDisturb: normalizeQuietMode(values),
+    wakeWordEnabled: values[WAKE_WORD_ENABLED_KEY] === true,
+    liveTranscriptPreview:
+      values[LIVE_TRANSCRIPT_PREVIEW_KEY] !== false,
+    blockedHostnames: normalizeBlockedHostnames(
+      values[BLOCKED_HOSTNAMES_KEY],
+    ),
     premiumTts: {
       enabled: values[PREMIUM_TTS_ENABLED_KEY] === true,
       voice: isKokoroVoiceId(values[PREMIUM_TTS_VOICE_KEY])
@@ -324,6 +350,9 @@ export function parseSettingsBackup(text: string): SettingsBackup {
     [SPEECH_VOLUME_KEY]: settings.volume,
     [RESPONSE_VERBOSITY_KEY]: settings.verbosity,
     [QUIET_MODE_KEY]: settings.doNotDisturb,
+    [WAKE_WORD_ENABLED_KEY]: settings.wakeWordEnabled,
+    [LIVE_TRANSCRIPT_PREVIEW_KEY]: settings.liveTranscriptPreview,
+    [BLOCKED_HOSTNAMES_KEY]: settings.blockedHostnames,
     [PREMIUM_TTS_ENABLED_KEY]: settings.premiumTts.enabled,
     [PREMIUM_TTS_VOICE_KEY]: settings.premiumTts.voice,
     [PREMIUM_STT_ENABLED_KEY]: settings.premiumStt.enabled,
@@ -366,6 +395,9 @@ function importPlan(
     [SPEECH_VOLUME_KEY]: settings.volume,
     [RESPONSE_VERBOSITY_KEY]: settings.verbosity,
     [QUIET_MODE_KEY]: settings.doNotDisturb,
+    [WAKE_WORD_ENABLED_KEY]: settings.wakeWordEnabled,
+    [LIVE_TRANSCRIPT_PREVIEW_KEY]: settings.liveTranscriptPreview,
+    [BLOCKED_HOSTNAMES_KEY]: settings.blockedHostnames,
     [PREMIUM_TTS_ENABLED_KEY]: settings.premiumTts.enabled,
     [PREMIUM_TTS_VOICE_KEY]: settings.premiumTts.voice,
     [PREMIUM_STT_ENABLED_KEY]: settings.premiumStt.enabled,

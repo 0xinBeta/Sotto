@@ -355,6 +355,34 @@ describe("offscreen fail-soft status", () => {
     expect(nano.parseCommand).toHaveBeenCalledOnce();
   });
 
+  it("does not decode or publish command partials during dictation", async () => {
+    const harness = await installPremiumOffscreen({ webGpu: true });
+
+    await harness.message({ type: "dictation-start" });
+    await vi.waitFor(() => expect(speech.moonshineInit).toHaveBeenCalled());
+    const vadOptions = vad.create.mock.calls[0]?.[0] as {
+      onSpeechStart(): void;
+      onFrameProcessed(
+        probabilities: Record<string, number>,
+        frame: Float32Array,
+      ): void;
+    };
+    vadOptions.onSpeechStart();
+    const frame = new Float32Array(512).fill(0.02);
+    for (let index = 0; index < 19; index += 1) {
+      vadOptions.onFrameProcessed({}, frame);
+    }
+    await Promise.resolve();
+
+    expect(speech.moonshineTranscribe).not.toHaveBeenCalled();
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "partial-transcript",
+      }),
+    );
+  });
+
   it("serializes screen inference and releases each transported image", async () => {
     const resolvers: Array<
       (value: {
@@ -1002,6 +1030,64 @@ describe("offscreen fail-soft status", () => {
     expect(nano.parseCommand.mock.calls[2]?.[0]?.memory).toEqual([]);
   });
 
+  it("does not record a confirmation reply as a completed exchange", async () => {
+    const harness = await installPremiumOffscreen();
+    nano.parseCommand
+      .mockResolvedValueOnce({
+        action: "tabs",
+        operation: "switch",
+        target: "GitHub",
+      })
+      .mockResolvedValueOnce({
+        action: "tabs",
+        operation: "count",
+      })
+      .mockResolvedValueOnce({ action: "unknown" });
+    let executions = 0;
+    harness.sendMessage.mockImplementation(
+      async (message: {
+        readonly target?: string;
+        readonly type?: string;
+      }) => {
+        if (
+          message.target !== "worker" ||
+          message.type !== "execute-command"
+        ) {
+          return message.target === "worker" ? { ok: true } : undefined;
+        }
+        executions += 1;
+        return executions === 2
+          ? { ok: true }
+          : { ok: true, value: { spoken: "Done." } };
+      },
+    );
+
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "switch to GitHub",
+    });
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "yes",
+    });
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "one more command",
+    });
+
+    expect(nano.parseCommand.mock.calls[2]?.[0]?.memory).toEqual([
+      {
+        transcript: "switch to GitHub",
+        command: {
+          action: "tabs",
+          operation: "switch",
+          target: "GitHub",
+        },
+        resultSummary: "Command completed.",
+      },
+    ]);
+  });
+
   it("does not wait for warm-up before listening starts", async () => {
     premium.prewarm.mockImplementation(
       () => new Promise<void>(() => undefined),
@@ -1456,6 +1542,44 @@ describe("offscreen fail-soft status", () => {
       did: "Zoom one hundred forty percent.",
       timings: { input: "voice" },
     });
+  });
+
+  it("suppresses the completion earcon when quiet mode is on", async () => {
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockImplementation(
+      async (message: {
+        readonly target?: string;
+        readonly type?: string;
+      }) =>
+        message.target === "worker"
+          ? {
+              ok: true,
+              ...(message.type === "get-quiet-mode"
+                ? { value: true }
+                : {}),
+            }
+          : undefined,
+    );
+
+    await harness.message({
+      type: "action-result",
+      transcript: "zoom in",
+      command: { action: "page-control", operation: "zoom-in" },
+      result: { spoken: "Zoom one hundred forty percent." },
+    });
+
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "earcon",
+      }),
+    );
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "worker",
+        type: "speak",
+      }),
+    );
   });
 
   it("speaks the settings confirmation without responder changes", async () => {

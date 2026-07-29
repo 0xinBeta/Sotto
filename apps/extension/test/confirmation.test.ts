@@ -55,4 +55,17 @@ describe("confirmation session", () => {
     expect(session.resolve("yes")).toEqual({ kind: "cancelled" });
     expect(session.resolve("yes")).toEqual({ kind: "none" });
   });
+
+  it("keeps the held command when the user asks for a repeat", () => {
+    const session = new ConfirmationSession(() => 1_000);
+    session.request(command);
+
+    expect(
+      session.resolve("repeat that", { action: "repeat" }),
+    ).toEqual({ kind: "none" });
+    expect(session.resolve("yes")).toEqual({
+      kind: "confirmed",
+      command,
+    });
+  });
 });

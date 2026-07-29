@@ -37,7 +37,8 @@ vi.mock("@sotto/actions", () => ({
     );
   },
 }));
-vi.mock("@sotto/core", () => ({
+vi.mock("@sotto/core", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@sotto/core")>(),
   ActionRegistry: class ActionRegistry {},
   CommandRouter: class CommandRouter {
     parse(command: unknown) {
@@ -83,6 +84,7 @@ interface ChromeHarness {
   readonly sendMessage: ReturnType<typeof vi.fn>;
   readonly storageSet: ReturnType<typeof vi.fn>;
   readonly storageValues: Record<string, unknown>;
+  readonly sessionValues: Record<string, unknown>;
   readonly tabSendMessage: ReturnType<typeof vi.fn>;
   readonly updateTab: ReturnType<typeof vi.fn>;
   readonly command: (
@@ -155,6 +157,7 @@ async function installBackground(
   const tabSendMessage = vi.fn();
   const alarmCreate = vi.fn();
   const storageValues = { ...initialStorage };
+  const sessionValues: Record<string, unknown> = {};
   const storageSet = vi.fn(async (updates: Record<string, unknown>) => {
     Object.assign(storageValues, updates);
   });
@@ -228,6 +231,17 @@ async function installBackground(
         }),
         setAccessLevel: vi.fn(),
       },
+      session: {
+        get: vi.fn(async (key: string) =>
+          key in sessionValues ? { [key]: sessionValues[key] } : {}
+        ),
+        set: vi.fn(async (updates: Record<string, unknown>) => {
+          Object.assign(sessionValues, updates);
+        }),
+        remove: vi.fn(async (key: string) => {
+          delete sessionValues[key];
+        }),
+      },
     },
     alarms: {
       get: vi.fn(),
@@ -256,6 +270,7 @@ async function installBackground(
     sendMessage,
     storageSet,
     storageValues,
+    sessionValues,
     tabSendMessage,
     updateTab,
     command: (command, tab = activeTab) => onCommand?.(command, tab),
@@ -517,6 +532,43 @@ describe("background screenshot clipboard injection", () => {
     );
   });
 
+  it("blocks the next page command after navigation reaches a blocked site", async () => {
+    worker.route.mockResolvedValue({ spoken: "Opened private.example." });
+    const harness = await installBackground(
+      { id: 2, url: "https://public.example/start" },
+      { blockedHostnames: ["private.example"] },
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "open private example",
+      command: {
+        action: "navigate",
+        operation: "open",
+        site: "private.example",
+      },
+    });
+    harness.queryTabs.mockResolvedValue([
+      { id: 2, url: "https://private.example/account" },
+    ]);
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "summarize this page",
+        command: {
+          action: "summarize",
+          mode: "summarize",
+          scope: "page",
+        },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Sotto is off on this site." },
+    });
+
+    expect(worker.route).toHaveBeenCalledOnce();
+  });
+
   it("keeps settings available on a blocked site", async () => {
     const harness = await installBackground(
       { id: 2, url: "https://news.example.com/story" },
@@ -656,13 +708,7 @@ describe("background screenshot clipboard injection", () => {
         transcript: "delete my last note",
         command: deleteCommand,
       }),
-    ).resolves.toEqual({
-      ok: true,
-      value: {
-        spoken:
-          "Delete the note: Buy oat milk before the local market closes…? Say yes.",
-      },
-    });
+    ).resolves.toEqual({ ok: true });
     expect(worker.route).not.toHaveBeenCalled();
 
     await expect(
@@ -671,13 +717,111 @@ describe("background screenshot clipboard injection", () => {
         transcript: "yes please",
         command: { action: "unknown" },
       }),
-    ).resolves.toEqual({ ok: true, value: deleteResult });
+    ).resolves.toEqual({ ok: true });
     expect(worker.routeConfirmed).toHaveBeenCalledWith(
       deleteCommand,
       expect.objectContaining({
         actionCatalog: expect.anything(),
       }),
     );
+  });
+
+  it("repeats the prompt without clearing a pending confirmation", async () => {
+    const note = {
+      id: "note-1",
+      body: "Buy oat milk",
+      createdAt: "2026-07-28T12:00:00.000Z",
+      updatedAt: "2026-07-28T12:00:00.000Z",
+    };
+    worker.requiresConfirmation.mockImplementation(
+      (command) =>
+        (command as { readonly operation?: unknown }).operation ===
+          "delete-last",
+    );
+    worker.route.mockImplementation(repeatResult);
+    worker.routeConfirmed.mockResolvedValue({ spoken: "Deleted the note." });
+    const harness = await installBackground(
+      { id: 4, url: "https://example.com/current" },
+      {
+        schemaVersion: 1,
+        "note:note-1": note,
+      },
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "delete my last note",
+      command: { action: "notes", operation: "delete-last" },
+    });
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "repeat that",
+      command: { action: "repeat" },
+    });
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "yes",
+      command: { action: "unknown" },
+    });
+
+    expect(worker.route).toHaveBeenCalledWith(
+      { action: "repeat" },
+      expect.objectContaining({ actionCatalog: expect.anything() }),
+    );
+    expect(worker.routeConfirmed).toHaveBeenCalledOnce();
+  });
+
+  it("does not store confirmation follow-up utterances in history", async () => {
+    const note = {
+      id: "note-1",
+      body: "Buy oat milk",
+      createdAt: "2026-07-28T12:00:00.000Z",
+      updatedAt: "2026-07-28T12:00:00.000Z",
+    };
+    worker.requiresConfirmation.mockImplementation(
+      (command) =>
+        (command as { readonly operation?: unknown }).operation ===
+          "delete-last",
+    );
+    worker.routeConfirmed.mockResolvedValue({ spoken: "Deleted the note." });
+    const harness = await installBackground(
+      { id: 4, url: "https://example.com/current" },
+      {
+        schemaVersion: 1,
+        "note:note-1": note,
+      },
+    );
+    await harness.workerMessage({
+      type: "set-session-history-enabled",
+      enabled: true,
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "delete my last note",
+      command: { action: "notes", operation: "delete-last" },
+    });
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "yes",
+      command: { action: "unknown" },
+    });
+    const history = await harness.workerMessage({
+      type: "get-session-history",
+    });
+
+    expect(history).toEqual({
+      ok: true,
+      value: {
+        enabled: true,
+        entries: [
+          expect.objectContaining({
+            transcript: "delete my last note",
+            actionId: "notes",
+          }),
+        ],
+      },
+    });
   });
 
   it("cancels a held command when the next command is not yes", async () => {
@@ -713,7 +857,6 @@ describe("background screenshot clipboard injection", () => {
       }),
     ).resolves.toEqual({
       ok: true,
-      value: { spoken: "Cancelled." },
     });
 
     expect(worker.routeConfirmed).not.toHaveBeenCalled();
@@ -755,12 +898,7 @@ describe("background screenshot clipboard injection", () => {
         transcript: "cancel my reminder",
         command: { action: "notes", operation: "cancel-reminder" },
       }),
-    ).resolves.toEqual({
-      ok: true,
-      value: {
-        spoken: "Cancel the reminder: Check the build? Say yes.",
-      },
-    });
+    ).resolves.toEqual({ ok: true });
 
     await expect(
       harness.workerMessage({
@@ -768,10 +906,7 @@ describe("background screenshot clipboard injection", () => {
         transcript: "yes",
         command: { action: "unknown" },
       }),
-    ).resolves.toEqual({
-      ok: true,
-      value: { spoken: "Cancelled the reminder." },
-    });
+    ).resolves.toEqual({ ok: true });
     expect(harness.storageValues["reminder:build"]).toBeUndefined();
     expect(worker.routeConfirmed).not.toHaveBeenCalled();
   });
@@ -888,6 +1023,67 @@ describe("background screenshot clipboard injection", () => {
       target: "offscreen",
       type: "set-premium-stt-enabled",
       enabled: false,
+    });
+  });
+
+  it("imports post-backup settings and adopts their runtime state", async () => {
+    const harness = await installBackground({
+      id: 71,
+      url: "https://example.com/current",
+    });
+    const backup = JSON.stringify({
+      schemaVersion: 1,
+      settings: {
+        rate: 1.2,
+        volume: 0.8,
+        verbosity: "brief",
+        doNotDisturb: false,
+        wakeWordEnabled: true,
+        liveTranscriptPreview: false,
+        blockedHostnames: ["private.example"],
+        premiumTts: {
+          enabled: true,
+          voice: "af_heart",
+        },
+        premiumStt: {
+          enabled: false,
+          tier: "moonshine-base",
+        },
+      },
+      notes: [],
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "import-settings-backup",
+        backup,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        valid: true,
+        result: {
+          settings: {
+            wakeWordEnabled: true,
+            liveTranscriptPreview: false,
+            blockedHostnames: ["private.example"],
+          },
+        },
+      },
+    });
+    expect(harness.storageValues).toMatchObject({
+      wakeWordEnabled: true,
+      liveTranscriptPreview: false,
+      blockedHostnames: ["private.example"],
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "offscreen",
+      type: "adopt-settings-backup",
+      premiumTtsEnabled: true,
+      voice: "af_heart",
+      premiumSttEnabled: false,
+      wakeWordEnabled: true,
+      liveTranscriptPreview: false,
     });
   });
 
@@ -1035,6 +1231,36 @@ describe("background screenshot clipboard injection", () => {
     });
   });
 
+  it("repeats a command response that quiet mode suppressed", async () => {
+    worker.route
+      .mockResolvedValueOnce({ spoken: "The local task is complete." })
+      .mockImplementationOnce(repeatResult);
+    const harness = await installBackground(
+      { id: 600, url: "https://example.com/current" },
+      { quietMode: true },
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "finish the local task",
+      command: { action: "tabs", operation: "count" },
+    });
+    await harness.workerMessage({
+      type: "set-quiet-mode",
+      enabled: false,
+    });
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "repeat that",
+      command: { action: "repeat" },
+    });
+
+    expect(worker.speak).toHaveBeenLastCalledWith(
+      "The local task is complete.",
+      expect.objectContaining({ rate: 1, volume: 1 }),
+    );
+  });
+
   it("uses the on confirmation as the last utterance", async () => {
     worker.speak.mockResolvedValue(undefined);
     const harness = await installBackground({
@@ -1166,6 +1392,44 @@ describe("background screenshot clipboard injection", () => {
         ([spoken]) => spoken === "Keep this response.",
       ),
     ).toHaveLength(3);
+  });
+
+  it("stores a safe result line for repeat history entries", async () => {
+    worker.route.mockImplementation(repeatResult);
+    const harness = await installBackground({
+      id: 621,
+      url: "https://example.com/current",
+    });
+    await harness.workerMessage({
+      type: "set-session-history-enabled",
+      enabled: true,
+    });
+    await harness.workerMessage({
+      type: "speak",
+      text: "Private response text.",
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "repeat that",
+      command: { action: "repeat" },
+    });
+    const history = await harness.workerMessage({
+      type: "get-session-history",
+    }) as {
+      readonly value?: {
+        readonly entries?: readonly {
+          readonly resultLine?: string;
+        }[];
+      };
+    };
+
+    expect(history.value?.entries).toEqual([
+      expect.objectContaining({
+        resultLine: "Repeated the last response.",
+      }),
+    ]);
+    expect(JSON.stringify(history)).not.toContain("Private response text.");
   });
 
   it("uses the empty-state line before any successful speech", async () => {
@@ -1784,6 +2048,62 @@ describe("background screenshot clipboard injection", () => {
     });
     expect(worker.stop).toHaveBeenCalled();
     await reading;
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reading-state",
+      active: false,
+      paused: false,
+    });
+  });
+
+  it("stops an active read before quiet-mode playback controls run", async () => {
+    let finishRead!: () => void;
+    worker.speak.mockImplementation(
+      async () =>
+        await new Promise<void>((resolve) => {
+          finishRead = resolve;
+        }),
+    );
+    worker.stop.mockImplementation(() => {
+      finishRead?.();
+    });
+    worker.route.mockResolvedValue({
+      spoken: "Reading the page.",
+      pageText: {
+        text: "One. Two. Three.",
+        title: "Article",
+        speech: "long",
+      },
+    });
+    const harness = await installBackground({
+      id: 141,
+      url: "https://example.com/article",
+    });
+
+    const reading = harness.workerMessage({
+      type: "execute-command",
+      transcript: "read this page",
+      command: {
+        action: "summarize",
+        mode: "read",
+        scope: "page",
+      },
+    });
+    await vi.waitFor(() => expect(worker.speak).toHaveBeenCalledOnce());
+
+    await harness.workerMessage({
+      type: "set-quiet-mode",
+      enabled: true,
+    });
+    await reading;
+    worker.pause.mockClear();
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "pause",
+      command: { action: "playback", operation: "pause" },
+    });
+
+    expect(worker.pause).not.toHaveBeenCalled();
     expect(harness.sendMessage).toHaveBeenCalledWith({
       target: "sidepanel",
       type: "reading-state",

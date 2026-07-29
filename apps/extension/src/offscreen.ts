@@ -138,6 +138,8 @@ interface OffscreenMessage {
   readonly voice?: unknown;
   readonly premiumTtsEnabled?: unknown;
   readonly premiumSttEnabled?: unknown;
+  readonly wakeWordEnabled?: unknown;
+  readonly liveTranscriptPreview?: unknown;
   readonly modelId?: unknown;
   readonly preview?: unknown;
   readonly timings?: unknown;
@@ -380,6 +382,7 @@ const liveTranscriptPreview = new LiveTranscriptPreview({
     if (!isPlausibleSttText(partial, audioSamples)) return;
     void sendPanel({ type: "partial-transcript", text: partial });
   },
+  shouldPublish: () => dictationState === "inactive",
   onError(error) {
     console.warn("Sotto partial transcription failed", error);
   },
@@ -410,7 +413,9 @@ async function publishWakeWordStatus(): Promise<void> {
 function handleWakeWordModelProgress(
   progress: WakeWordModelProgress,
 ): void {
-  const downloading = progress.status !== "ready";
+  const downloading =
+    progress.status === "downloading" ||
+    progress.status === "validating";
   if (wakeWordModelDownloading !== downloading) {
     wakeWordModelDownloading = downloading;
     if (!downloading) modelCache.invalidate();
@@ -1134,7 +1139,8 @@ async function deleteManagedModelCache(id: ManagedModelId): Promise<void> {
         premiumSttStatus?.state === "loading" ||
         premiumSttStatus?.state === "warming")) ||
     (isKokoro && premiumTtsState === "downloading") ||
-    (isWakeWord && wakeWordModelDownloading)
+    (isWakeWord &&
+      (wakeWordModelDownloading || wakeWordModels.loading))
   ) {
     throw new Error("Wait for the model task to finish");
   }
@@ -2320,8 +2326,11 @@ async function startListening(
       onSpeechStart() {
         if (discardWakeSession) return;
         speechContext.onSpeechStart();
-        liveTranscriptPreview.start();
-        if (dictationState === "active") dictationSilenceTimer.reset();
+        if (dictationState === "active") {
+          dictationSilenceTimer.reset();
+        } else {
+          liveTranscriptPreview.start();
+        }
         void sendPanel({ type: "speech-start" });
       },
       onSpeechRealStart() {
@@ -2645,6 +2654,8 @@ async function handleOffscreenMessage(
       if (
         typeof message.premiumTtsEnabled !== "boolean" ||
         typeof message.premiumSttEnabled !== "boolean" ||
+        typeof message.wakeWordEnabled !== "boolean" ||
+        typeof message.liveTranscriptPreview !== "boolean" ||
         !isKokoroVoiceId(message.voice)
       ) {
         throw new TypeError("Valid imported settings are required");
@@ -2655,8 +2666,14 @@ async function handleOffscreenMessage(
       premiumTts?.setVoice(premiumTtsVoice);
       await ensurePremiumSttSettings();
       await premiumStt!.setEnabled(message.premiumSttEnabled);
+      liveTranscriptPreviewSetting =
+        liveTranscriptPreviewAvailable &&
+        message.liveTranscriptPreview;
+      liveTranscriptPreview.setEnabled(liveTranscriptPreviewSetting);
+      await setWakeWordEnabled(message.wakeWordEnabled);
       await publishPremiumStatus();
       await publishPremiumSttStatus();
+      await publishLiveTranscriptPreviewStatus();
       return;
     case "prepare-premium-stt":
       await ensurePremiumSttSettings();

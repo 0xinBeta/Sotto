@@ -237,7 +237,7 @@
     "message": "Settings and notes backup"
   },
   "settingsBackupCopy": {
-    "message": "Save your settings and notes in one JSON file."
+    "message": "The file includes your settings, blocked site names, and notes."
   },
   "exportBackup": {
     "message": "Export backup"

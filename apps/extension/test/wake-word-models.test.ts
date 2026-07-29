@@ -282,6 +282,74 @@ describe("wake model downloads", () => {
     ).toBe("bytes=2-");
   });
 
+  it("does not clear model caches while a download is active", async () => {
+    const bytes = {
+      melspectrogram: new Uint8Array([1]),
+      embedding: new Uint8Array([2]),
+      classifier: new Uint8Array([3]),
+    };
+    let releaseFetch!: (response: Response) => void;
+    const firstFetch = new Promise<Response>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const cacheStorage = new MemoryCacheStorage();
+    const store = new WakeWordModelStore({
+      cacheStorage: cacheStorage as unknown as CacheStorage,
+      fetch: vi.fn()
+        .mockReturnValueOnce(firstFetch)
+        .mockResolvedValueOnce(new Response(bytes.embedding))
+        .mockResolvedValueOnce(new Response(bytes.classifier)),
+      assets: testAssets(bytes),
+      modelRoot: "https://huggingface.co/test/wake/resolve/revision",
+      cacheName: "test-wake-clear-race",
+      sleep: async () => undefined,
+    });
+
+    const loading = store.load();
+    await vi.waitFor(() => expect(store.loading).toBe(true));
+    await expect(store.clear()).rejects.toThrow(
+      "Wait for the model task to finish",
+    );
+
+    releaseFetch(new Response(bytes.melspectrogram));
+    await loading;
+    expect(store.loading).toBe(false);
+    await expect(store.clear()).resolves.toBeUndefined();
+    expect(cacheStorage.caches.size).toBe(0);
+  });
+
+  it("publishes a terminal error and allows a resumed download", async () => {
+    const bytes = {
+      melspectrogram: new Uint8Array([1]),
+      embedding: new Uint8Array([2]),
+      classifier: new Uint8Array([3]),
+    };
+    const progress: string[] = [];
+    const fetch = vi.fn().mockRejectedValue(
+      new Error("connection stopped"),
+    );
+    const store = new WakeWordModelStore({
+      cacheStorage: new MemoryCacheStorage() as unknown as CacheStorage,
+      fetch,
+      assets: testAssets(bytes),
+      modelRoot: "https://huggingface.co/test/wake/resolve/revision",
+      cacheName: "test-wake-retry-after-failure",
+      sleep: async () => undefined,
+    });
+
+    await expect(
+      store.load((event) => progress.push(event.status)),
+    ).rejects.toThrow("connection stopped");
+    expect(progress.at(-1)).toBe("error");
+    expect(store.loading).toBe(false);
+
+    fetch.mockReset()
+      .mockResolvedValueOnce(new Response(bytes.melspectrogram))
+      .mockResolvedValueOnce(new Response(bytes.embedding))
+      .mockResolvedValueOnce(new Response(bytes.classifier));
+    await expect(store.load()).resolves.toMatchObject(bytes);
+  });
+
   it("keeps wake ONNX files out of public assets and build output", () => {
     const forbidden = new Set(
       Object.values(WAKE_WORD_MODEL_ASSETS).map((asset) => asset.file),

@@ -39,6 +39,9 @@ function validBackup(notes: readonly NoteRecord[] = [note("one")]) {
       volume: 0.8,
       verbosity: "brief",
       doNotDisturb: true,
+      wakeWordEnabled: true,
+      liveTranscriptPreview: false,
+      blockedHostnames: ["example.com", "private.example"],
       premiumTts: {
         enabled: true,
         voice: "af_heart",
@@ -97,6 +100,9 @@ describe("settings and notes backup", () => {
       premiumTtsVoice: "bf_emma",
       premiumSttEnabled: false,
       premiumSttTier: "parakeet",
+      wakeWordEnabled: true,
+      liveTranscriptPreview: false,
+      blockedHostnames: ["example.com", "private.example"],
       "note:first": firstNote,
       "note:second": note("second", "Second note"),
     });
@@ -131,6 +137,9 @@ describe("settings and notes backup", () => {
       premiumTtsVoice: "af_heart",
       premiumSttEnabled: false,
       premiumSttTier: "moonshine-base",
+      wakeWordEnabled: true,
+      liveTranscriptPreview: false,
+      blockedHostnames: ["example.com", "private.example"],
       premiumTtsDownloaded: true,
       premiumSttDownloaded: true,
       premiumSttDownloadedTiers: { parakeet: true },
@@ -164,6 +173,22 @@ describe("settings and notes backup", () => {
     ]) {
       expect(json).not.toContain(forbidden);
     }
+    expect(json).toContain("example.com");
+    expect(json).toContain("private.example");
+  });
+
+  it("uses safe defaults for backups made before the new settings", () => {
+    const backup = validBackup();
+    delete (backup.settings as any).wakeWordEnabled;
+    delete (backup.settings as any).liveTranscriptPreview;
+    delete (backup.settings as any).blockedHostnames;
+
+    expect(parseSettingsBackup(JSON.stringify(backup)).settings)
+      .toMatchObject({
+        wakeWordEnabled: false,
+        liveTranscriptPreview: true,
+        blockedHostnames: [],
+      });
   });
 
   it.each([
@@ -207,6 +232,15 @@ describe("settings and notes backup", () => {
     }],
     ["do not disturb", (backup: any) => {
       backup.settings.doNotDisturb = "yes";
+    }],
+    ["wake phrase", (backup: any) => {
+      backup.settings.wakeWordEnabled = "yes";
+    }],
+    ["live transcript preview", (backup: any) => {
+      backup.settings.liveTranscriptPreview = 1;
+    }],
+    ["blocked site names", (backup: any) => {
+      backup.settings.blockedHostnames = [1];
     }],
     ["premium voice enabled", (backup: any) => {
       backup.settings.premiumTts.enabled = 1;
@@ -362,6 +396,9 @@ describe("settings and notes backup", () => {
       speechVolume: 0.8,
       responseVerbosity: "brief",
       quietMode: true,
+      wakeWordEnabled: true,
+      liveTranscriptPreview: false,
+      blockedHostnames: ["example.com", "private.example"],
       premiumTtsEnabled: true,
       premiumTtsVoice: "af_heart",
       premiumSttEnabled: false,

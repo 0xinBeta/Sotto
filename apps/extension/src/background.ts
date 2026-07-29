@@ -462,7 +462,10 @@ async function publishQuietMode(enabled?: boolean): Promise<void> {
 }
 
 async function setQuietMode(enabled: boolean): Promise<boolean> {
-  if (enabled) tts.stop();
+  if (enabled) {
+    if (readingActive) beginCommandGeneration();
+    else tts.stop();
+  }
   // Quiet mode controls sound only. Wake listening stays available.
   const saved = await quietMode.update(enabled);
   await publishQuietMode(saved);
@@ -1903,6 +1906,7 @@ async function publishActionResult(
   result: ActionResult,
   generation: number,
   timings: ExchangeTimings,
+  recordHistory = true,
 ): Promise<void> {
   if (!commandIsCurrent(generation)) return;
   if (command.action === "notes") {
@@ -1910,7 +1914,17 @@ async function publishActionResult(
     await publishReminders();
     if (!commandIsCurrent(generation)) return;
   }
-  await recordSessionHistory(transcript, command.action, result.spoken);
+  const historyResultLine = result.replayLastSpoken === true &&
+      lastSpokenResponse !== undefined
+    ? "Repeated the last response."
+    : result.spoken;
+  if (recordHistory) {
+    await recordSessionHistory(
+      transcript,
+      command.action,
+      historyResultLine,
+    );
+  }
   if (!commandIsCurrent(generation)) return;
   if (result.silent === true) {
     await sendPanel({
@@ -1924,6 +1938,7 @@ async function publishActionResult(
   const quiet = await quietMode.get();
   const readAloud = isReadAloudCommand(command);
   if (quiet && readAloud && !result.pageText) {
+    lastSpokenResponse = result.spoken;
     if (result.workflow?.kind === "panel-command-reference") {
       await sendPanel({ type: "show-command-reference" });
     }
@@ -1990,6 +2005,7 @@ async function publishActionResult(
     });
     if (!commandIsCurrent(generation)) return;
     if (quiet) {
+      lastSpokenResponse = text;
       await sendPanel({
         type: "action-log",
         heard: transcript,
@@ -2079,6 +2095,7 @@ async function publishActionResult(
     }
   }
   if (quiet) {
+    lastSpokenResponse = result.spoken;
     await sendPanel({
       type: "action-log",
       heard: transcript,
@@ -2214,7 +2231,10 @@ async function executeCommand(
   let generation = commandGeneration;
   let generationStarted = false;
   try {
-    const confirmation = confirmationSession.resolve(transcript);
+    const confirmation = confirmationSession.resolve(
+      transcript,
+      command as ActionCommand,
+    );
     if (confirmation.kind === "cancelled") {
       pendingReminderConfirmationId = undefined;
       generation = beginCommandGeneration();
@@ -2226,8 +2246,9 @@ async function executeCommand(
         result,
         generation,
         timings,
+        false,
       );
-      return result;
+      return undefined;
     }
     if (confirmation.kind === "confirmed") {
       generation = beginCommandGeneration();
@@ -2255,8 +2276,9 @@ async function executeCommand(
         result,
         generation,
         completedTimings,
+        false,
       );
-      return result;
+      return undefined;
     }
 
     const reminderSelection = reminderSelectionSession.resolve(transcript);
@@ -2326,10 +2348,14 @@ async function executeCommand(
     generationStarted = true;
     const actionStartedAt = performance.now();
     let result: ActionResult;
+    let pendingConfirmation = false;
     try {
       if (commandRouter.requiresConfirmation(validated)) {
         const request = await confirmationResult(validated);
-        if (request.pending) confirmationSession.request(validated);
+        if (request.pending) {
+          confirmationSession.request(validated);
+          pendingConfirmation = true;
+        }
         result = request.result;
       } else {
         result = await routeAction(validated);
@@ -2348,7 +2374,7 @@ async function executeCommand(
       generation,
       completedTimings,
     );
-    return result;
+    return pendingConfirmation ? undefined : result;
   } catch (error) {
     if (!generationStarted) {
       generation = beginCommandGeneration();
@@ -2569,7 +2595,10 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
           verbosity: result.settings.verbosity,
         });
         quietMode.adopt(result.settings.doNotDisturb);
-        if (result.settings.doNotDisturb) tts.stop();
+        if (result.settings.doNotDisturb) {
+          if (readingActive) beginCommandGeneration();
+          else tts.stop();
+        }
         await Promise.all([
           publishQuietMode(result.settings.doNotDisturb).catch(
             (error: unknown) => {
@@ -2584,6 +2613,9 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
             premiumTtsEnabled: result.settings.premiumTts.enabled,
             voice: result.settings.premiumTts.voice,
             premiumSttEnabled: result.settings.premiumStt.enabled,
+            wakeWordEnabled: result.settings.wakeWordEnabled,
+            liveTranscriptPreview:
+              result.settings.liveTranscriptPreview,
           }).catch((error: unknown) => {
             console.warn("Imported premium settings are pending", error);
           }),

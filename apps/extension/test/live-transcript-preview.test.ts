@@ -16,6 +16,7 @@ function createPreview(options: {
     signal: AbortSignal,
   ) => Promise<string> | undefined;
   readonly now: () => number;
+  readonly shouldPublish?: () => boolean;
 }) {
   const publish = vi.fn();
   const decode = vi.fn(
@@ -25,6 +26,9 @@ function createPreview(options: {
     decode,
     publish,
     now: options.now,
+    ...(options.shouldPublish === undefined
+      ? {}
+      : { shouldPublish: options.shouldPublish }),
   });
   preview.setEnabled(true);
   preview.start();
@@ -132,6 +136,28 @@ describe("live transcript preview policy", () => {
     expect(publish).not.toHaveBeenCalled();
   });
 
+  it("does not publish a command partial after dictation starts", async () => {
+    let resolve!: (text: string) => void;
+    let dictating = false;
+    const { preview, publish } = createPreview({
+      now: () => 0,
+      shouldPublish: () => !dictating,
+      decode: () =>
+        new Promise<string>((done) => {
+          resolve = done;
+        }),
+    });
+
+    preview.addFrame(FRAME);
+    preview.addFrame(FRAME);
+    preview.addFrame(FRAME);
+    dictating = true;
+    resolve("literal dictated text");
+    await Promise.resolve();
+
+    expect(publish).not.toHaveBeenCalled();
+  });
+
   it("defaults ON only when WebGPU is available", () => {
     expect(liveTranscriptPreviewEnabled(true, undefined)).toBe(true);
     expect(liveTranscriptPreviewEnabled(true, true)).toBe(true);
@@ -151,6 +177,9 @@ describe("live transcript preview policy", () => {
 
     expect(boundary).toContain(
       'sendPanel({ type: "partial-transcript", text: partial })',
+    );
+    expect(boundary).toContain(
+      'shouldPublish: () => dictationState === "inactive"',
     );
     expect(boundary).not.toMatch(
       /parseCommand|processTranscript|followUpMemory|session-history|askWorker/,

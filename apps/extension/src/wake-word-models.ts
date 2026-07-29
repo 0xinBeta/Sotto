@@ -51,7 +51,7 @@ export type WakeWordModelBytes = Readonly<
 >;
 
 export interface WakeWordModelProgress {
-  readonly status: "downloading" | "validating" | "ready";
+  readonly status: "downloading" | "validating" | "ready" | "error";
   readonly progress: number;
   readonly loaded: number;
   readonly total: number;
@@ -120,6 +120,10 @@ export class WakeWordModelStore {
   readonly #totalBytes: number;
   #loadPromise: Promise<WakeWordModelBytes> | undefined;
 
+  get loading(): boolean {
+    return this.#loadPromise !== undefined;
+  }
+
   constructor(options: WakeWordModelStoreOptions = {}) {
     this.#cacheStorage = options.cacheStorage ?? globalThis.caches;
     this.#fetch = options.fetch ?? globalThis.fetch;
@@ -140,13 +144,26 @@ export class WakeWordModelStore {
   load(
     onProgress?: (progress: WakeWordModelProgress) => void,
   ): Promise<WakeWordModelBytes> {
-    this.#loadPromise ??= this.#load(onProgress).finally(() => {
-      this.#loadPromise = undefined;
-    });
+    this.#loadPromise ??= this.#load(onProgress)
+      .catch((error: unknown) => {
+        this.#emit(onProgress, {
+          status: "error",
+          progress: 0,
+          loaded: 0,
+          total: this.#totalBytes,
+        });
+        throw error;
+      })
+      .finally(() => {
+        this.#loadPromise = undefined;
+      });
     return this.#loadPromise;
   }
 
   async clear(): Promise<void> {
+    if (this.#loadPromise) {
+      throw new Error("Wait for the model task to finish");
+    }
     if (!this.#cacheStorage) return;
     await Promise.all([
       this.#cacheStorage.delete(this.#cacheName),

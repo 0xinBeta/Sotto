@@ -19,6 +19,7 @@ export interface LiveTranscriptPreviewOptions {
     signal: AbortSignal,
   ) => Promise<string> | undefined;
   readonly publish: (text: string, audioSamples: number) => void;
+  readonly shouldPublish?: () => boolean;
   readonly now?: () => number;
   readonly onError?: (error: unknown) => void;
 }
@@ -26,6 +27,7 @@ export interface LiveTranscriptPreviewOptions {
 export class LiveTranscriptPreview {
   readonly #decode: LiveTranscriptPreviewOptions["decode"];
   readonly #publish: LiveTranscriptPreviewOptions["publish"];
+  readonly #shouldPublish: () => boolean;
   readonly #now: () => number;
   readonly #onError: (error: unknown) => void;
   readonly #frames: Float32Array[] = [];
@@ -41,6 +43,7 @@ export class LiveTranscriptPreview {
   constructor(options: LiveTranscriptPreviewOptions) {
     this.#decode = options.decode;
     this.#publish = options.publish;
+    this.#shouldPublish = options.shouldPublish ?? (() => true);
     this.#now = options.now ?? performance.now.bind(performance);
     this.#onError = options.onError ?? (() => undefined);
   }
@@ -112,7 +115,8 @@ export class LiveTranscriptPreview {
         if (
           !controller.signal.aborted &&
           this.#active &&
-          this.#generation === generation
+          this.#generation === generation &&
+          this.#shouldPublish()
         ) {
           this.#publish(text, audio.length);
         }
