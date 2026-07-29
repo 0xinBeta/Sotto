@@ -94,12 +94,18 @@ describe("side-panel accessibility structure", () => {
     expect(panelMarkup).toContain(
       '<label for="speech-volume">Volume</label>',
     );
+    expect(panelMarkup).toContain(
+      '<label for="response-verbosity">Response length</label>',
+    );
     expect(openingTag("speech-rate")).toContain('type="range"');
     expect(openingTag("speech-rate")).toContain('min="0.5"');
     expect(openingTag("speech-rate")).toContain('max="2"');
     expect(openingTag("speech-volume")).toContain('type="range"');
     expect(openingTag("speech-volume")).toContain('min="0"');
     expect(openingTag("speech-volume")).toContain('max="1"');
+    expect(openingTag("response-verbosity")).toMatch(/^<select\b/);
+    expect(panelMarkup).toContain('<option value="normal">Normal</option>');
+    expect(panelMarkup).toContain('<option value="brief">Brief</option>');
 
     const headingLevels = Array.from(
       panelMarkup.matchAll(/<h([1-6])(?:\s|>)/g),

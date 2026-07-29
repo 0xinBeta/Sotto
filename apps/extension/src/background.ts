@@ -54,6 +54,7 @@ import {
 } from "./timings.js";
 import { createCommandReference } from "./command-reference.js";
 import {
+  isResponseVerbosity,
   SpeechSettingsStore,
   SpeechSettingsTtsEngine,
 } from "./speech-settings.js";
@@ -89,6 +90,7 @@ interface WorkerMessage {
   readonly error?: unknown;
   readonly rate?: unknown;
   readonly volume?: unknown;
+  readonly verbosity?: unknown;
   readonly heard?: unknown;
   readonly did?: unknown;
   readonly timings?: unknown;
@@ -1459,9 +1461,11 @@ async function completeClipboardWorkflow(
     await executeDestinationFollowUp(issued.followUp);
   }
   const spoken = issued.spoken ?? "Screenshot copied.";
+  const { verbosity } = await speechSettings.get();
   await sendOffscreen({
     type: "workflow-complete",
     spoken,
+    verbosity,
   });
   await sendPanel({
     type: "action-log",
@@ -1738,6 +1742,7 @@ async function publishActionResult(
     transcript,
     command,
     result,
+    verbosity: (await speechSettings.get()).verbosity,
     timings,
   });
 }
@@ -2074,7 +2079,11 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
     case "get-speech-settings":
       return speechSettings.get();
     case "set-speech-settings": {
-      const update: { rate?: number; volume?: number } = {};
+      const update: {
+        rate?: number;
+        volume?: number;
+        verbosity?: "normal" | "brief";
+      } = {};
       if (message.rate !== undefined) {
         if (
           typeof message.rate !== "number" ||
@@ -2093,7 +2102,17 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         }
         update.volume = message.volume;
       }
-      if (update.rate === undefined && update.volume === undefined) {
+      if (message.verbosity !== undefined) {
+        if (!isResponseVerbosity(message.verbosity)) {
+          throw new TypeError("A valid response length is required");
+        }
+        update.verbosity = message.verbosity;
+      }
+      if (
+        update.rate === undefined &&
+        update.volume === undefined &&
+        update.verbosity === undefined
+      ) {
         throw new TypeError("A speech setting is required");
       }
       return speechSettings.update(update);

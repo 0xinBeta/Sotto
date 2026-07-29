@@ -908,6 +908,17 @@ h2 {
   appearance: none;
 }
 
+.speech-setting select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--switch-border);
+  border-radius: 0;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: var(--surface-card);
+  font: inherit;
+}
+
 .speech-setting input[type="range"]::-webkit-slider-runnable-track {
   height: 2px;
   background: var(--switch-border);

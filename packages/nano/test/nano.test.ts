@@ -12,6 +12,7 @@ import {
   buildParserPrompt,
   composeResponseConstraint,
   createNanoSession,
+  createResponderSession,
   getNanoAvailability,
   isCorrectionFollowUp,
   parseCommand,
@@ -348,6 +349,34 @@ describe("Nano parser support", () => {
 });
 
 describe("one-sentence responder", () => {
+  it("selects the brief responder instruction", async () => {
+    const model = {
+      prompt: vi.fn().mockResolvedValue('{"spoken":"Done."}'),
+      destroy: vi.fn(),
+    };
+    const api = {
+      availability: vi.fn().mockResolvedValue("available"),
+      create: vi.fn().mockResolvedValue(model),
+    };
+    vi.stubGlobal("LanguageModel", api);
+
+    await expect(
+      createResponderSession({ verbosity: "brief" }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(api.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialPrompts: [
+          expect.objectContaining({
+            role: "system",
+            content: expect.stringContaining(
+              "Use one sentence with four words or fewer.",
+            ),
+          }),
+        ],
+      }),
+    );
+  });
+
   it("uses deterministic fallback without Nano", async () => {
     await expect(
       respondOneSentence({
@@ -371,6 +400,22 @@ describe("one-sentence responder", () => {
         result: { spoken: "Opened the tab." },
       }),
     ).resolves.toBe("Opened the tab.");
+  });
+
+  it("uses the brief fallback when generated text exceeds four words", async () => {
+    const session = {
+      prompt: vi.fn().mockResolvedValue(
+        '{"spoken":"The requested browser action is complete."}',
+      ),
+    };
+    await expect(
+      respondOneSentence({
+        session,
+        command: { action: "tabs", operation: "close" },
+        result: { spoken: "Closed." },
+        verbosity: "brief",
+      }),
+    ).resolves.toBe("Closed.");
   });
 
   it("falls back on malformed output and reports prompt failures", async () => {

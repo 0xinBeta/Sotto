@@ -83,7 +83,10 @@ import {
 import {
   clampSpeechRate,
   clampSpeechVolume,
+  isResponseVerbosity,
+  type ResponseVerbosity,
 } from "./speech-settings.js";
+import { selectSpokenLine } from "./spoken-lines.js";
 import {
   DictationSilenceTimer,
   routeTranscriptForMode,
@@ -107,6 +110,7 @@ interface OffscreenMessage {
   readonly enabled?: unknown;
   readonly rate?: unknown;
   readonly volume?: unknown;
+  readonly verbosity?: unknown;
   readonly voice?: unknown;
   readonly modelId?: unknown;
   readonly preview?: unknown;
@@ -138,6 +142,7 @@ let parserSession: NanoSession | undefined;
 let responderSession: NanoSession | undefined;
 let parserSessionPromise: Promise<NanoSession | undefined> | undefined;
 let responderSessionPromise: Promise<NanoSession | undefined> | undefined;
+let responderSessionVerbosity: ResponseVerbosity | undefined;
 let nanoAvailability: NanoAvailability = "unavailable";
 let listening = false;
 let starting = false;
@@ -1280,15 +1285,29 @@ function beginPipelineWarmup(): void {
   });
 }
 
-async function ensureResponderSession(): Promise<NanoSession | undefined> {
-  if (responderSession && !responderSession.destroyed) return responderSession;
+async function ensureResponderSession(
+  verbosity: ResponseVerbosity,
+): Promise<NanoSession | undefined> {
+  if (
+    responderSession &&
+    !responderSession.destroyed &&
+    responderSessionVerbosity === verbosity
+  ) {
+    return responderSession;
+  }
+  if (responderSession && responderSessionVerbosity !== verbosity) {
+    responderSession.destroy();
+    responderSession = undefined;
+    responderSessionVerbosity = undefined;
+  }
   if (responderSessionPromise) return responderSessionPromise;
 
   responderSessionPromise = (async () => {
     if ((await getNanoAvailability()) !== "available") return undefined;
-    const created = await createResponderSession();
+    const created = await createResponderSession({ verbosity });
     if (!created.ok) return undefined;
     responderSession = created.session;
+    responderSessionVerbosity = verbosity;
     return responderSession;
   })();
 
@@ -2183,6 +2202,10 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
     typeof message.transcript === "string" ? message.transcript : "command";
   const command = message.command;
   const result = message.result;
+  const verbosity = isResponseVerbosity(message.verbosity)
+    ? message.verbosity
+    : "normal";
+  const selectedLine = selectSpokenLine(result.spoken, verbosity);
   if (result.workflow?.kind === "clipboard-write") {
     await sendPanel({
       type: "screenshot-ready",
@@ -2193,18 +2216,26 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
     await sendPanel({ type: "earcon", kind: "complete" });
   }
 
+  const useResponder =
+    command.action !== "unknown" &&
+    command.action !== "help" &&
+    command.action !== "page-control" &&
+    command.action !== "ask-screen" &&
+    (verbosity === "normal" || selectedLine.key !== undefined);
   const spoken =
     command.action === "unknown"
       ? "Sorry, say that again?"
-      : command.action === "help" ||
-          command.action === "page-control" ||
-          command.action === "ask-screen"
-        ? result.spoken
+      : !useResponder
+        ? selectedLine.text
         : await inferenceMutex.run(async () =>
             await respondOneSentence({
-              session: await ensureResponderSession(),
+              session: await ensureResponderSession(verbosity),
               command,
-              result,
+              result: {
+                ...result,
+                spoken: selectedLine.text,
+              },
+              verbosity,
               onError(error) {
                 console.warn("Nano responder used deterministic fallback", error);
               },
@@ -2225,6 +2256,7 @@ async function resetNanoSessions(): Promise<void> {
   responderSession?.destroy();
   parserSession = undefined;
   responderSession = undefined;
+  responderSessionVerbosity = undefined;
   nanoAvailability = await getNanoAvailability();
   if (nanoAvailability === "available") {
     await inferenceMutex.run(() => ensureParserSession());
@@ -2434,11 +2466,16 @@ async function handleOffscreenMessage(
     }
     case "workflow-complete":
       await sendPanel({ type: "earcon", kind: "complete" });
-      await speak(
-        typeof message.spoken === "string"
-          ? message.spoken
-          : "Screenshot copied.",
-      );
+      {
+        const verbosity = isResponseVerbosity(message.verbosity)
+          ? message.verbosity
+          : "normal";
+        const source =
+          typeof message.spoken === "string"
+            ? message.spoken
+            : "Screenshot copied.";
+        await speak(selectSpokenLine(source, verbosity).text);
+      }
       return;
     default:
       throw new TypeError(`Unsupported offscreen message type: ${message.type}`);

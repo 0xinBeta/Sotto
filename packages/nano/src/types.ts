@@ -5,6 +5,7 @@ import type {
 } from "@sotto/core";
 
 export type NanoAvailability = Availability;
+export type ResponseVerbosity = "normal" | "brief";
 
 export interface NanoDownloadProgress {
   /** Fraction of the model download completed, clamped to 0..1. */
@@ -71,6 +72,7 @@ export interface OneSentenceResponseOptions {
   readonly session: NanoPromptSession | null | undefined;
   readonly command: ActionCommand;
   readonly result: ActionResult;
+  readonly verbosity?: ResponseVerbosity;
   readonly signal?: AbortSignal;
   readonly onError?: (error: NanoError) => void;
 }
@@ -81,7 +83,9 @@ export interface ParserSessionOptions
 }
 
 export interface ResponderSessionOptions
-  extends Omit<NanoSessionOptions, "initialPrompts"> {}
+  extends Omit<NanoSessionOptions, "initialPrompts"> {
+  readonly verbosity?: ResponseVerbosity;
+}
 
 export class NanoSession {
   #destroyed = false;

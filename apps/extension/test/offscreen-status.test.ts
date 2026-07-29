@@ -1260,6 +1260,67 @@ describe("offscreen fail-soft status", () => {
     });
   });
 
+  it("keeps informational lines unchanged in brief mode", async () => {
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockClear();
+    nano.respondOneSentence.mockReset();
+
+    await expect(
+      harness.message({
+        type: "action-result",
+        transcript: "how many tabs are open",
+        command: { action: "tabs", operation: "count" },
+        result: { spoken: "You have 12 tabs open." },
+        verbosity: "brief",
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(nano.respondOneSentence).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "speak",
+      text: "You have 12 tabs open.",
+      heard: "how many tabs are open",
+      did: "You have 12 tabs open.",
+      timings: { input: "voice" },
+    });
+  });
+
+  it("routes known confirmations through the brief responder", async () => {
+    nano.respondOneSentence.mockReset();
+    nano.respondOneSentence.mockImplementation(
+      async (options: { readonly result: { readonly spoken: string } }) =>
+        options.result.spoken,
+    );
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockClear();
+
+    await expect(
+      harness.message({
+        type: "action-result",
+        transcript: "close this tab",
+        command: { action: "tabs", operation: "close" },
+        result: { spoken: "Closed the tab." },
+        verbosity: "brief",
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(nano.respondOneSentence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ spoken: "Closed." }),
+        verbosity: "brief",
+      }),
+    );
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "speak",
+      text: "Closed.",
+      heard: "close this tab",
+      did: "Closed the tab.",
+      timings: { input: "voice" },
+    });
+  });
+
   it("speaks the exact screen-model fallback without responder changes", async () => {
     const harness = await installPremiumOffscreen();
     harness.sendMessage.mockClear();

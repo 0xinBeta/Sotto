@@ -216,6 +216,7 @@ const elementIds = [
   "speech-rate-value",
   "speech-volume",
   "speech-volume-value",
+  "response-verbosity",
   "copy-diagnostic-report",
   "page-text-card",
   "page-text-title",
@@ -272,6 +273,7 @@ async function installSidepanel(options: {
   readonly speechSettings?: {
     readonly rate: number;
     readonly volume: number;
+    readonly verbosity: "normal" | "brief";
   };
 } = {}) {
   const elements = Object.fromEntries(
@@ -528,12 +530,17 @@ describe("side-panel screenshot clipboard fallback", () => {
 
   it("shows and persists bounded speech slider values", async () => {
     const { elements, sendMessage } = await installSidepanel({
-      speechSettings: { rate: 1.3, volume: 0.55 },
+      speechSettings: {
+        rate: 1.3,
+        volume: 0.55,
+        verbosity: "brief",
+      },
     });
     await vi.waitFor(() =>
       expect(elements["speech-rate-value"].textContent).toBe("1.3×")
     );
     expect(elements["speech-volume-value"].textContent).toBe("55%");
+    expect(elements["response-verbosity"].value).toBe("brief");
     expect(elements["speech-rate"].getAttribute("aria-valuetext")).toBe(
       "1.3 times",
     );
@@ -549,6 +556,7 @@ describe("side-panel screenshot clipboard fallback", () => {
         type: "set-speech-settings",
         rate: 2,
         volume: 0.55,
+        verbosity: "brief",
       })
     );
     expect(elements["speech-rate-value"].textContent).toBe("2.0×");
@@ -561,9 +569,22 @@ describe("side-panel screenshot clipboard fallback", () => {
         type: "set-speech-settings",
         rate: 2,
         volume: 0,
+        verbosity: "brief",
       })
     );
     expect(elements["speech-volume-value"].textContent).toBe("0%");
+
+    elements["response-verbosity"].value = "normal";
+    await elements["response-verbosity"].emit("change");
+    await vi.waitFor(() =>
+      expect(sendMessage).toHaveBeenCalledWith({
+        target: "worker",
+        type: "set-speech-settings",
+        rate: 2,
+        volume: 0,
+        verbosity: "normal",
+      })
+    );
   });
 
   it("shows and saves quiet mode in the header", async () => {

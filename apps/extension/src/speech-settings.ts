@@ -7,19 +7,24 @@ import type {
 
 export const SPEECH_RATE_KEY = "speechRate";
 export const SPEECH_VOLUME_KEY = "speechVolume";
+export const RESPONSE_VERBOSITY_KEY = "responseVerbosity";
 export const MIN_SPEECH_RATE = 0.5;
 export const MAX_SPEECH_RATE = 2;
 export const MIN_SPEECH_VOLUME = 0;
 export const MAX_SPEECH_VOLUME = 1;
 
+export type ResponseVerbosity = "normal" | "brief";
+
 export interface SpeechSettings {
   readonly rate: number;
   readonly volume: number;
+  readonly verbosity: ResponseVerbosity;
 }
 
 export const DEFAULT_SPEECH_SETTINGS: SpeechSettings = {
   rate: 1,
   volume: 1,
+  verbosity: "normal",
 };
 
 export interface SpeechSettingsStorage {
@@ -35,11 +40,18 @@ export function clampSpeechVolume(volume: number): number {
   return Math.max(MIN_SPEECH_VOLUME, Math.min(MAX_SPEECH_VOLUME, volume));
 }
 
+export function isResponseVerbosity(
+  value: unknown,
+): value is ResponseVerbosity {
+  return value === "normal" || value === "brief";
+}
+
 export function normalizeSpeechSettings(
   stored: Record<string, unknown>,
 ): SpeechSettings {
   const storedRate = stored[SPEECH_RATE_KEY];
   const storedVolume = stored[SPEECH_VOLUME_KEY];
+  const storedVerbosity = stored[RESPONSE_VERBOSITY_KEY];
   return {
     rate:
       typeof storedRate === "number" && Number.isFinite(storedRate)
@@ -49,6 +61,9 @@ export function normalizeSpeechSettings(
       typeof storedVolume === "number" && Number.isFinite(storedVolume)
         ? clampSpeechVolume(storedVolume)
         : DEFAULT_SPEECH_SETTINGS.volume,
+    verbosity: isResponseVerbosity(storedVerbosity)
+      ? storedVerbosity
+      : DEFAULT_SPEECH_SETTINGS.verbosity,
   };
 }
 
@@ -84,11 +99,16 @@ export class SpeechSettingsStore {
             update.volume === undefined
               ? this.#settings.volume
               : clampSpeechVolume(update.volume),
+          verbosity:
+            update.verbosity === undefined
+              ? this.#settings.verbosity
+              : update.verbosity,
         };
         this.#settings = next;
         await this.#storage.set({
           [SPEECH_RATE_KEY]: next.rate,
           [SPEECH_VOLUME_KEY]: next.volume,
+          [RESPONSE_VERBOSITY_KEY]: next.verbosity,
         });
         return { ...next };
       });
@@ -107,6 +127,7 @@ export class SpeechSettingsStore {
         await this.#storage.get([
           SPEECH_RATE_KEY,
           SPEECH_VOLUME_KEY,
+          RESPONSE_VERBOSITY_KEY,
         ]),
       );
     } catch (error) {
@@ -143,7 +164,11 @@ export class SpeechSettingsTtsEngine implements LongFormTtsEngine {
     const generation = this.#generation;
     const settings = await this.#settings.get();
     if (generation !== this.#generation) return;
-    await this.#engine.speak(text, { ...options, ...settings });
+    await this.#engine.speak(text, {
+      ...options,
+      rate: settings.rate,
+      volume: settings.volume,
+    });
   }
 
   async speakLong(
@@ -153,7 +178,11 @@ export class SpeechSettingsTtsEngine implements LongFormTtsEngine {
     const generation = this.#generation;
     const settings = await this.#settings.get();
     if (generation !== this.#generation) return;
-    await this.#engine.speakLong(text, { ...options, ...settings });
+    await this.#engine.speakLong(text, {
+      ...options,
+      rate: settings.rate,
+      volume: settings.volume,
+    });
   }
 
   stop(): void {

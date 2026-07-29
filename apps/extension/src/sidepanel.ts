@@ -34,6 +34,7 @@ import {
   clampSpeechRate,
   clampSpeechVolume,
   DEFAULT_SPEECH_SETTINGS,
+  isResponseVerbosity,
   type SpeechSettings,
 } from "./speech-settings.js";
 import {
@@ -713,6 +714,8 @@ const speechVolume =
   requiredElement<HTMLInputElement>("#speech-volume");
 const speechVolumeValue =
   requiredElement<HTMLOutputElement>("#speech-volume-value");
+const responseVerbosity =
+  requiredElement<HTMLSelectElement>("#response-verbosity");
 const copyDiagnosticReport =
   requiredElement<HTMLButtonElement>("#copy-diagnostic-report");
 const pageTextCard = requiredElement<HTMLElement>("#page-text-card");
@@ -785,7 +788,8 @@ function isSpeechSettings(value: unknown): value is SpeechSettings {
     typeof value.rate === "number" &&
     Number.isFinite(value.rate) &&
     typeof value.volume === "number" &&
-    Number.isFinite(value.volume)
+    Number.isFinite(value.volume) &&
+    isResponseVerbosity(value.verbosity)
   );
 }
 
@@ -799,6 +803,9 @@ function currentSpeechSettings(): SpeechSettings {
     volume: clampSpeechVolume(
       Number.isFinite(volume) ? volume : DEFAULT_SPEECH_SETTINGS.volume,
     ),
+    verbosity: isResponseVerbosity(responseVerbosity.value)
+      ? responseVerbosity.value
+      : DEFAULT_SPEECH_SETTINGS.verbosity,
   };
 }
 
@@ -818,6 +825,7 @@ function showSpeechSettings(settings: SpeechSettings): void {
     "aria-valuetext",
     `${volumePercent} percent`,
   );
+  responseVerbosity.value = settings.verbosity;
 }
 
 function showQuietMode(enabled: boolean): void {
@@ -2310,6 +2318,10 @@ for (const slider of [speechRate, speechVolume]) {
     void saveSpeechSettings();
   });
 }
+
+responseVerbosity.addEventListener("change", () => {
+  void saveSpeechSettings();
+});
 
 async function preparePremiumSpeechModel(): Promise<void> {
   downloadPremiumStt.disabled = true;

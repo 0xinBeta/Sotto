@@ -538,20 +538,22 @@ describe("background screenshot clipboard injection", () => {
         type: "set-speech-settings",
         rate: 8,
         volume: -2,
+        verbosity: "brief",
       }),
     ).resolves.toEqual({
       ok: true,
-      value: { rate: 2, volume: 0 },
+      value: { rate: 2, volume: 0, verbosity: "brief" },
     });
     expect(harness.storageValues).toMatchObject({
       speechRate: 2,
       speechVolume: 0,
+      responseVerbosity: "brief",
     });
     await expect(
       harness.workerMessage({ type: "get-speech-settings" }),
     ).resolves.toEqual({
       ok: true,
-      value: { rate: 2, volume: 0 },
+      value: { rate: 2, volume: 0, verbosity: "brief" },
     });
 
     await harness.workerMessage({
@@ -1438,6 +1440,7 @@ describe("background screenshot clipboard injection", () => {
       target: "offscreen",
       type: "workflow-complete",
       spoken: "Paste-ready — hit Control V.",
+      verbosity: "normal",
     });
     expect(harness.sendMessage).toHaveBeenCalledWith({
       target: "sidepanel",
@@ -1478,6 +1481,7 @@ describe("background screenshot clipboard injection", () => {
       transcript: "take a screenshot",
       command: { action: "screenshot", destination: "claude" },
       result,
+      verbosity: "normal",
       timings: {
         input: "voice",
         actionMs: expect.any(Number),
@@ -1521,6 +1525,7 @@ describe("background screenshot clipboard injection", () => {
       transcript: "take a screenshot",
       command: { action: "screenshot", destination: "claude" },
       result,
+      verbosity: "normal",
       timings: {
         input: "voice",
         actionMs: expect.any(Number),

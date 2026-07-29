@@ -40,15 +40,21 @@ describe("speech settings", () => {
     const persisted = storageHarness({
       speechRate: 1.4,
       speechVolume: 0.65,
+      responseVerbosity: "brief",
     });
     await expect(
       new SpeechSettingsStore(persisted.storage).get(),
-    ).resolves.toEqual({ rate: 1.4, volume: 0.65 });
+    ).resolves.toEqual({
+      rate: 1.4,
+      volume: 0.65,
+      verbosity: "brief",
+    });
 
     expect(
       normalizeSpeechSettings({
         speechRate: Number.NaN,
         speechVolume: "loud",
+        responseVerbosity: "long",
       }),
     ).toEqual(DEFAULT_SPEECH_SETTINGS);
   });
@@ -58,19 +64,21 @@ describe("speech settings", () => {
     const store = new SpeechSettingsStore(harness.storage);
 
     await expect(
-      store.update({ rate: 20, volume: -4 }),
-    ).resolves.toEqual({ rate: 2, volume: 0 });
+      store.update({ rate: 20, volume: -4, verbosity: "brief" }),
+    ).resolves.toEqual({ rate: 2, volume: 0, verbosity: "brief" });
     expect(harness.values).toMatchObject({
       speechRate: 2,
       speechVolume: 0,
+      responseVerbosity: "brief",
     });
 
     await expect(
       store.update({ rate: -20, volume: 4 }),
-    ).resolves.toEqual({ rate: 0.5, volume: 1 });
+    ).resolves.toEqual({ rate: 0.5, volume: 1, verbosity: "brief" });
     expect(harness.set).toHaveBeenLastCalledWith({
       speechRate: 0.5,
       speechVolume: 1,
+      responseVerbosity: "brief",
     });
   });
 
