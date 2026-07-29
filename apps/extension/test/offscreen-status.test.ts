@@ -118,6 +118,7 @@ async function installPremiumOffscreen(options: {
       message.target === "worker" ? { ok: true } : undefined,
   );
   let onMessage: OffscreenListener | undefined;
+  let unloadListener: (() => void) | undefined;
   vi.stubGlobal("navigator", {
     ...(options.webGpu
       ? {
@@ -136,7 +137,13 @@ async function installPremiumOffscreen(options: {
     },
   });
   vi.stubGlobal("window", {
-    addEventListener: vi.fn(),
+    addEventListener: vi.fn(
+      (type: string, listener: EventListenerOrEventListenerObject) => {
+        if (type === "unload" && typeof listener === "function") {
+          unloadListener = () => listener({} as Event);
+        }
+      },
+    ),
     clearInterval,
     clearTimeout,
     setInterval,
@@ -181,6 +188,7 @@ async function installPremiumOffscreen(options: {
           onMessage?.({ target: "offscreen", ...message }, {}, resolve),
         ).toBe(true);
       }),
+    unload: () => unloadListener?.(),
   };
 }
 
@@ -568,6 +576,71 @@ describe("offscreen fail-soft status", () => {
     await vi.waitFor(() =>
       expect(premium.prewarm).toHaveBeenCalledTimes(2)
     );
+  });
+
+  it("keeps safe exchange memory until offscreen teardown", async () => {
+    const harness = await installPremiumOffscreen();
+    nano.parseCommand
+      .mockResolvedValueOnce({
+        action: "tabs",
+        operation: "switch",
+        target: "GitHub",
+      })
+      .mockResolvedValue({ action: "tabs", operation: "count" });
+    harness.sendMessage.mockImplementation(
+      async (message: {
+        readonly target?: string;
+        readonly type?: string;
+      }) =>
+        message.target === "worker" && message.type === "execute-command"
+          ? {
+              ok: true,
+              value: {
+                spoken: "Switched to a private tab title.",
+                pageText: {
+                  text: "Private page text",
+                  speech: "long",
+                },
+                data: { modelOutput: "Private model output" },
+              },
+            }
+          : message.target === "worker"
+            ? { ok: true }
+            : undefined,
+    );
+
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "switch to GitHub",
+    });
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "no, count them instead",
+    });
+
+    const recentMemory = nano.parseCommand.mock.calls[1]?.[0]?.memory;
+    expect(recentMemory).toEqual([
+      {
+        transcript: "switch to GitHub",
+        command: {
+          action: "tabs",
+          operation: "switch",
+          target: "GitHub",
+        },
+        resultSummary: "Command completed.",
+      },
+    ]);
+    expect(JSON.stringify(recentMemory)).not.toContain("private");
+    expect(JSON.stringify(recentMemory)).not.toContain("pageText");
+    expect(JSON.stringify(recentMemory)).not.toContain("modelOutput");
+
+    harness.unload();
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "no, count them instead",
+    });
+
+    expect(nano.parseCommand.mock.calls[2]?.[0]?.memory).toEqual([]);
   });
 
   it("does not wait for warm-up before listening starts", async () => {
@@ -998,6 +1071,7 @@ describe("offscreen fail-soft status", () => {
 
   it("aborts a pending page task when a new transcript barges in", async () => {
     nano.getNanoAvailability.mockResolvedValue("unavailable");
+    nano.parseCommand.mockResolvedValue({ action: "unknown" });
     let taskSignal: AbortSignal | undefined;
     nano.askPageWithPrompt.mockImplementation(
       async (

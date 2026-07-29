@@ -1,3 +1,4 @@
+import { validateSchema } from "@sotto/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import tabsAction from "../src/tabs/index.js";
@@ -77,6 +78,68 @@ describe("tabs action", () => {
     expect(chromeStub.windows.update).toHaveBeenCalledWith(5, {
       focused: true,
     });
+  });
+
+  it("excludes the active tab for a switch correction", async () => {
+    chromeStub.tabs.query
+      .mockResolvedValueOnce([
+        chromeTab({ id: 41, windowId: 5, title: "GitHub · First" }),
+      ])
+      .mockResolvedValueOnce([
+        chromeTab({ id: 41, windowId: 5, title: "GitHub · First" }),
+        chromeTab({ id: 42, windowId: 6, title: "GitHub · Second" }),
+      ]);
+    chromeStub.tabs.get.mockResolvedValue(
+      chromeTab({ id: 42, windowId: 6, title: "GitHub · Second" }),
+    );
+
+    await expect(
+      tabsAction.execute(
+        {
+          action: "tabs",
+          operation: "switch",
+          target: "GitHub",
+          correction: true,
+        },
+        {},
+      ),
+    ).resolves.toEqual({ spoken: "Switched to GitHub · Second." });
+
+    expect(chromeStub.tabs.query).toHaveBeenNthCalledWith(1, {
+      active: true,
+      currentWindow: true,
+    });
+    expect(chromeStub.tabs.query).toHaveBeenNthCalledWith(2, {});
+    expect(chromeStub.tabs.update).toHaveBeenCalledWith(42, { active: true });
+    expect(chromeStub.windows.update).toHaveBeenCalledWith(6, {
+      focused: true,
+    });
+  });
+
+  it("accepts only a true correction on a tab switch", () => {
+    expect(
+      validateSchema(tabsAction.schema, {
+        action: "tabs",
+        operation: "switch",
+        target: "GitHub",
+        correction: true,
+      }).valid,
+    ).toBe(true);
+    expect(
+      validateSchema(tabsAction.schema, {
+        action: "tabs",
+        operation: "switch",
+        target: "GitHub",
+        correction: false,
+      }).valid,
+    ).toBe(false);
+    expect(
+      validateSchema(tabsAction.schema, {
+        action: "tabs",
+        operation: "new",
+        correction: true,
+      }).valid,
+    ).toBe(false);
   });
 
   it("uses a generic switch confirmation for an untitled tab", async () => {

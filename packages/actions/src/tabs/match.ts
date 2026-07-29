@@ -67,9 +67,11 @@ export function findBestTabMatch<TTab extends MatchableTab>(
   tabs: readonly TTab[],
   target: string,
   minimumScore = 0.42,
+  excludedTabId?: number,
 ): TTab | undefined {
   let best: { tab: TTab; score: number } | undefined;
   for (const tab of tabs) {
+    if (excludedTabId !== undefined && tab.id === excludedTabId) continue;
     const score = scoreTabMatch(tab, target);
     if (!best || score > best.score) best = { tab, score };
   }

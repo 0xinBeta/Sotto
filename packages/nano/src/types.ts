@@ -50,6 +50,13 @@ export type NanoPromptSession = Pick<LanguageModel, "prompt">;
 export interface ParserPromptInput {
   readonly registry: ActionRegistry;
   readonly transcript: string;
+  readonly memory?: readonly ParserMemoryExchange[];
+}
+
+export interface ParserMemoryExchange {
+  readonly transcript: string;
+  readonly command: ActionCommand;
+  readonly resultSummary: string;
 }
 
 export interface ParseCommandOptions extends ParserPromptInput {

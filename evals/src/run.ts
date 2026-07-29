@@ -7,7 +7,14 @@ import type { ActionCommand } from "@sotto/core";
 export interface EvalCase {
   readonly id: string;
   readonly transcript: string;
+  readonly memory?: readonly EvalMemoryExchange[];
   readonly expected: ActionCommand;
+}
+
+export interface EvalMemoryExchange {
+  readonly transcript: string;
+  readonly command: ActionCommand;
+  readonly resultSummary: string;
 }
 
 export interface EvalOutcome {
@@ -23,7 +30,10 @@ export interface EvalSummary {
   readonly outcomes: readonly EvalOutcome[];
 }
 
-export type EvalParser = (transcript: string) => Promise<ActionCommand>;
+export type EvalParser = (
+  transcript: string,
+  memory?: readonly EvalMemoryExchange[],
+) => Promise<ActionCommand>;
 
 export async function loadCases(
   url = new URL("../cases.json", import.meta.url),
@@ -41,7 +51,7 @@ export async function runEvals(
 ): Promise<EvalSummary> {
   const outcomes: EvalOutcome[] = [];
   for (const testCase of cases) {
-    const actual = await parse(testCase.transcript);
+    const actual = await parse(testCase.transcript, testCase.memory);
     outcomes.push({
       id: testCase.id,
       pass: isDeepStrictEqual(actual, testCase.expected),

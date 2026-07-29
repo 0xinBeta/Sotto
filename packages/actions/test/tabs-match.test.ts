@@ -67,6 +67,33 @@ describe("tab fuzzy matching", () => {
     expect(findBestTabMatch(tied, "inbox")?.id).toBe(10);
   });
 
+  it("excludes the prior match and returns the next-best tab", () => {
+    const repeated = [
+      { id: 10, title: "Inbox" },
+      { id: 11, title: "Inbox messages" },
+      { id: 12, title: "Calendar" },
+    ];
+
+    expect(findBestTabMatch(repeated, "inbox", 0.42, 10)?.id).toBe(11);
+  });
+
+  it("returns no match when the excluded tab is the only match", () => {
+    expect(
+      findBestTabMatch(
+        [{ id: 10, title: "Inbox" }, { id: 11, title: "Calendar" }],
+        "inbox",
+        0.42,
+        10,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not exclude tabs without an id", () => {
+    expect(
+      findBestTabMatch([{ title: "Inbox" }], "inbox", 0.42, 10)?.title,
+    ).toBe("Inbox");
+  });
+
   it("exposes the same fallback through matchTabTarget", () => {
     expect(matchTabTarget(tabs, "not represented")).toBeUndefined();
   });

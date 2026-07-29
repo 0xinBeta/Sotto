@@ -502,6 +502,140 @@
     "transcript": "bring up the Claude conversation",
     "expected": { "action": "tabs", "operation": "switch", "target": "Claude" }
   },
+  {
+    "id": "followup-tabs-other-01",
+    "transcript": "no, the other one",
+    "memory": [
+      {
+        "transcript": "switch to GitHub",
+        "command": { "action": "tabs", "operation": "switch", "target": "GitHub" },
+        "resultSummary": "Command completed."
+      }
+    ],
+    "expected": {
+      "action": "tabs",
+      "operation": "switch",
+      "target": "GitHub",
+      "correction": true
+    }
+  },
+  {
+    "id": "followup-tabs-other-02",
+    "transcript": "not that one, the other one",
+    "memory": [
+      {
+        "transcript": "go to my inbox",
+        "command": { "action": "tabs", "operation": "switch", "target": "inbox" },
+        "resultSummary": "Command completed."
+      }
+    ],
+    "expected": {
+      "action": "tabs",
+      "operation": "switch",
+      "target": "inbox",
+      "correction": true
+    }
+  },
+  {
+    "id": "followup-tabs-count-again",
+    "transcript": "again",
+    "memory": [
+      {
+        "transcript": "how many tabs are open",
+        "command": { "action": "tabs", "operation": "count" },
+        "resultSummary": "Command completed."
+      }
+    ],
+    "expected": { "action": "tabs", "operation": "count" }
+  },
+  {
+    "id": "followup-screenshot-again",
+    "transcript": "do that again",
+    "memory": [
+      {
+        "transcript": "take a screenshot",
+        "command": { "action": "screenshot", "destination": "copy" },
+        "resultSummary": "Command completed."
+      }
+    ],
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "followup-summarize-read-instead",
+    "transcript": "no, read it instead",
+    "memory": [
+      {
+        "transcript": "summarize this page",
+        "command": { "action": "summarize", "mode": "summarize", "scope": "page" },
+        "resultSummary": "Command completed."
+      }
+    ],
+    "expected": { "action": "summarize", "mode": "read", "scope": "page" }
+  },
+  {
+    "id": "followup-rewrite-instead",
+    "transcript": "not that, make it friendlier instead",
+    "memory": [
+      {
+        "transcript": "make it more formal",
+        "command": {
+          "action": "type",
+          "operation": "rewrite",
+          "transformation": "more-formal"
+        },
+        "resultSummary": "Command completed."
+      }
+    ],
+    "expected": {
+      "action": "type",
+      "operation": "rewrite",
+      "transformation": "friendlier"
+    }
+  },
+  {
+    "id": "followup-reminder-instead",
+    "transcript": "no, twenty minutes instead",
+    "memory": [
+      {
+        "transcript": "remind me to check the oven in ten minutes",
+        "command": {
+          "action": "notes",
+          "operation": "remind",
+          "text": "Check the oven",
+          "delayMinutes": 10
+        },
+        "resultSummary": "Command completed."
+      }
+    ],
+    "expected": {
+      "action": "notes",
+      "operation": "remind",
+      "text": "Check the oven",
+      "delayMinutes": 20
+    }
+  },
+  {
+    "id": "followup-no-context-other",
+    "transcript": "no, the other one",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "followup-no-context-again",
+    "transcript": "do that again",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "followup-gate-normal-command",
+    "transcript": "open a new tab",
+    "memory": [
+      {
+        "transcript": "close this tab",
+        "command": { "action": "tabs", "operation": "close" },
+        "resultSummary": "Command completed."
+      }
+    ],
+    "expected": { "action": "tabs", "operation": "new" }
+  },
 
   {
     "id": "tabs-mute-01",

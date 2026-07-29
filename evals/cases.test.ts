@@ -50,6 +50,43 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps at least eight follow-up cases, including no-context negatives", () => {
+    const followUps = cases.filter((testCase) =>
+      testCase.id.startsWith("followup-")
+    );
+    const noContext = followUps.filter((testCase) =>
+      testCase.id.startsWith("followup-no-context-")
+    );
+
+    expect(followUps.length).toBeGreaterThanOrEqual(8);
+    expect(noContext.length).toBeGreaterThanOrEqual(2);
+    expect(
+      noContext.every(
+        (testCase) => testCase.expected.action === "unknown" &&
+          !("memory" in testCase),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps follow-up memory in the approved structural form", () => {
+    const memoryEntries = cases.flatMap((testCase) =>
+      "memory" in testCase ? testCase.memory : []
+    );
+
+    expect(memoryEntries.length).toBeGreaterThan(0);
+    for (const entry of memoryEntries) {
+      expect(Object.keys(entry).sort()).toEqual([
+        "command",
+        "resultSummary",
+        "transcript",
+      ]);
+      expect(entry.resultSummary).toBe("Command completed.");
+      expect(validateSchema(constraint, entry.command).valid).toBe(true);
+      expect(JSON.stringify(entry)).not.toContain("pageText");
+      expect(JSON.stringify(entry)).not.toContain("modelOutput");
+    }
+  });
+
   it("keeps security near-misses on the unknown path", () => {
     const nearMisses = cases.filter((testCase) =>
       testCase.id.startsWith("unknown-") &&

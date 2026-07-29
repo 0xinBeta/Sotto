@@ -20,6 +20,7 @@ export type TabsCommand =
       readonly action: "tabs";
       readonly operation: "switch";
       readonly target: string;
+      readonly correction?: true;
     }
   | {
       readonly action: "tabs";
@@ -54,6 +55,7 @@ const schema = {
           maxLength: 200,
           description: "A concise tab target copied only from the transcript",
         },
+        correction: { const: true },
       },
       required: ["action", "operation", "target"],
       additionalProperties: false,
@@ -99,8 +101,9 @@ async function reopenLastTab(): Promise<void> {
 export function matchTabTarget(
   tabs: readonly chrome.tabs.Tab[],
   target: string,
+  excludedTabId?: number,
 ): chrome.tabs.Tab | undefined {
-  return findBestTabMatch(tabs, target);
+  return findBestTabMatch(tabs, target, 0.42, excludedTabId);
 }
 
 const tabsAction = defineAction<TabsCommand>({
@@ -151,8 +154,15 @@ const tabsAction = defineAction<TabsCommand>({
         };
       }
       case "switch": {
+        const excludedTabId = command.correction
+          ? (await activeTab()).id
+          : undefined;
         const tabs = await chrome.tabs.query({});
-        const matched = matchTabTarget(tabs, command.target);
+        const matched = matchTabTarget(
+          tabs,
+          command.target,
+          excludedTabId,
+        );
         if (matched?.id === undefined) {
           throw new Error(`No open tab matches "${command.target}"`);
         }

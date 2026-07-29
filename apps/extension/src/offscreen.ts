@@ -62,6 +62,10 @@ import {
   type ExchangeTimings,
 } from "./timings.js";
 import {
+  FollowUpMemory,
+  resolveFollowUpCommand,
+} from "./follow-up-memory.js";
+import {
   clampSpeechRate,
   clampSpeechVolume,
 } from "./speech-settings.js";
@@ -101,6 +105,7 @@ const tinyStt = new MoonshineEngine();
 const inferenceMutex = new InferenceMutex();
 const modelLru = new ModelResidencyLru();
 const speechContext = new SpeechContextRing();
+const followUpMemory = new FollowUpMemory();
 
 let vad: MicVAD | undefined;
 let micStream: MediaStream | undefined;
@@ -1226,6 +1231,7 @@ async function processTranscript(
   lastExchangeAt = Date.now();
 
   await sendPanel({ type: "transcript", text: transcript });
+  const memory = followUpMemory.recent();
   let parseMs = 0;
   const command = await inferenceMutex.run(async () => {
     const session = await ensureParserSession();
@@ -1235,6 +1241,7 @@ async function processTranscript(
         session,
         registry,
         transcript,
+        memory,
         onError(error) {
           console.warn("Nano intent parsing failed closed", error);
           void sendPanel({
@@ -1247,12 +1254,16 @@ async function processTranscript(
       parseMs = Math.max(0, performance.now() - parseStartedAt);
     }
   });
-  await askWorker({
+  const resolvedCommand = resolveFollowUpCommand(command, memory);
+  const result = await askWorker<ActionResult>({
     type: "execute-command",
     transcript,
-    command,
+    command: resolvedCommand,
     timings: { ...timings, parseMs },
   });
+  if (result && isActionResult(result)) {
+    followUpMemory.record(transcript, resolvedCommand);
+  }
 }
 
 async function processSpeech(
@@ -1787,6 +1798,7 @@ chrome.runtime.onMessage.addListener(
 
 window.addEventListener("unload", () => {
   cancelActiveModelTask();
+  followUpMemory.clear();
   stopMicLevelMeter();
   modelLru.dispose();
   speechContext.dispose();
