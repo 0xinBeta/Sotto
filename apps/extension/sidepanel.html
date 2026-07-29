@@ -4,13 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
-    <title>Sotto</title>
+    <title data-i18n="extensionName"></title>
   </head>
   <body>
     <main class="shell">
       <header class="masthead">
         <div>
-          <p class="eyebrow">ON-DEVICE VOICE UTILITY</p>
+          <p class="eyebrow" data-i18n="panelEyebrow"></p>
           <div class="wordmark">
             <svg
               class="brand-mark"
@@ -26,7 +26,7 @@
                 <rect x="93" y="52" width="12" height="24" rx="6" />
               </g>
             </svg>
-            <h1>Sotto<span aria-hidden="true">.</span></h1>
+            <h1 data-i18n-prepend="extensionName"><span aria-hidden="true">.</span></h1>
           </div>
         </div>
         <div class="masthead-actions">
@@ -38,7 +38,7 @@
             aria-atomic="true"
           >
             <span class="status-dot" aria-hidden="true"></span>
-            <span id="status-label">Checking hardware</span>
+            <span id="status-label" data-i18n="statusCheckingHardware"></span>
           </div>
           <label
             class="quiet-switch"
@@ -56,7 +56,7 @@
               <path d="M13 7c1.5 1.5 1.5 4.5 0 6" />
               <path class="quiet-icon-slash" d="M4 4l12 12" />
             </svg>
-            <span id="quiet-mode-label">Quiet mode off</span>
+            <span id="quiet-mode-label" data-i18n="quietModeOff"></span>
             <input
               id="quiet-mode"
               type="checkbox"
@@ -77,70 +77,77 @@
       >
         <div class="setup-heading">
           <div>
-            <p class="section-index">00 / SETUP</p>
-            <h2 id="setup-heading">Set up Sotto.</h2>
+            <p class="section-index" data-i18n="setupIndex"></p>
+            <h2 id="setup-heading" data-i18n="setupHeading"></h2>
           </div>
-          <span class="setup-count">4 STEPS</span>
+          <span class="setup-count" data-i18n="setupStepCount"></span>
         </div>
         <ol class="setup-list" id="setup-list">
           <li class="setup-row" id="setup-microphone" data-state="pending">
             <span class="setup-icon" id="setup-microphone-icon" aria-hidden="true">…</span>
             <p>
-              <strong>Microphone</strong>
+              <strong data-i18n="microphone"></strong>
               <span
                 id="setup-microphone-state"
                 role="status"
                 aria-live="polite"
                 aria-atomic="true"
-              >Pending. Checking access.</span>
+                data-i18n="setupPendingCheckingAccess"
+              ></span>
             </p>
             <button class="link-button" id="setup-grant-mic" type="button" hidden>
-              Grant microphone access
+              <span data-i18n="grantMicrophoneAccess"></span>
             </button>
           </li>
           <li class="setup-row" id="setup-capture" data-state="pending">
             <span class="setup-icon" id="setup-capture-icon" aria-hidden="true">…</span>
             <p>
-              <strong>Screen capture</strong>
+              <strong data-i18n="screenCapture"></strong>
               <span
                 id="setup-capture-state"
                 role="status"
                 aria-live="polite"
                 aria-atomic="true"
-              >Pending. Checking the one-time grant.</span>
+                data-i18n="setupPendingCheckingCapture"
+              ></span>
             </p>
             <button class="button" id="enable-capture" type="button" hidden>
-              Enable screen capture
+              <span data-i18n="enableScreenCapture"></span>
             </button>
           </li>
           <li class="setup-row" id="setup-nano" data-state="pending">
             <span class="setup-icon" id="setup-nano-icon" aria-hidden="true">…</span>
             <p>
-              <strong>Gemini Nano</strong>
+              <strong data-i18n="geminiNano"></strong>
               <span
                 id="setup-nano-state"
                 role="status"
                 aria-live="polite"
                 aria-atomic="true"
-              >Pending. Checking the local model.</span>
+                data-i18n="setupPendingCheckingLocalModel"
+              ></span>
             </p>
             <button class="button" id="setup-prepare-nano" type="button" hidden>
-              Prepare Gemini Nano
+              <span data-i18n="prepareGeminiNano"></span>
             </button>
           </li>
           <li class="setup-row" id="setup-premium" data-state="pending">
             <span class="setup-icon" id="setup-premium-icon" aria-hidden="true">…</span>
             <p>
-              <strong>Premium models <span class="optional-mark">Optional</span></strong>
+              <strong>
+                <span data-i18n="premiumModels"></span>
+                <span class="optional-mark" data-i18n="optional"></span>
+              </strong>
               <span
                 id="setup-premium-state"
                 role="status"
                 aria-live="polite"
                 aria-atomic="true"
-              >Pending. Checking the optional models.</span>
+                data-i18n="setupPendingCheckingOptionalModels"
+              ></span>
             </p>
             <button class="button" id="setup-download-premium" type="button" hidden>
-              Download premium voice
+              <span data-i18n="downloadPremiumVoice"></span>
             </button>
           </li>
         </ol>
@@ -151,16 +158,21 @@
           aria-live="polite"
           hidden
         >
-          <span><span aria-hidden="true">✓</span> Setup complete</span>
+          <span data-i18n-append="setupComplete">
+            <span aria-hidden="true">✓</span>
+          </span>
           <button class="link-button" id="dismiss-setup" type="button">
-            Dismiss
+            <span data-i18n="dismiss"></span>
           </button>
         </div>
       </section>
 
-      <section class="progress-stack" aria-label="Model setup">
+      <section
+        class="progress-stack"
+        data-i18n-aria-label="modelSetup"
+      >
         <div class="progress-card" id="nano-progress-card" hidden>
-          <div class="progress-copy"><span id="nano-progress-label">Gemini Nano</span><output id="nano-progress-value">0%</output></div>
+          <div class="progress-copy"><span id="nano-progress-label" data-i18n="geminiNano"></span><output id="nano-progress-value">0%</output></div>
           <progress
             id="nano-progress"
             max="1"
@@ -169,7 +181,7 @@
           ></progress>
         </div>
         <div class="progress-card" id="stt-progress-card" hidden>
-          <div class="progress-copy"><span id="stt-progress-label">Moonshine speech model</span><output id="stt-progress-value">0%</output></div>
+          <div class="progress-copy"><span id="stt-progress-label" data-i18n="moonshineSpeechModel"></span><output id="stt-progress-value">0%</output></div>
           <progress
             id="stt-progress"
             max="1"
@@ -182,32 +194,34 @@
       <section class="premium-voice-card" id="premium-voice-card" data-state="absent">
         <div class="premium-voice-heading">
           <div>
-            <p class="section-index">LOCAL OUTPUT / AF_HEART</p>
-            <h2>Premium voice</h2>
+            <p class="section-index" data-i18n="localOutputVoiceIndex"></p>
+            <h2 data-i18n="premiumVoice"></h2>
           </div>
-          <span class="premium-state" id="premium-voice-state">ABSENT</span>
+          <span class="premium-state" id="premium-voice-state" data-i18n="stateAbsent"></span>
         </div>
-        <p class="premium-voice-copy" id="premium-voice-copy">
-          Download the natural on-device voice when you are ready. Until then, Sotto uses your operating system voice instantly.
-        </p>
+        <p
+          class="premium-voice-copy"
+          id="premium-voice-copy"
+          data-i18n="premiumVoiceAbsentCopy"
+        ></p>
         <div class="premium-voice-actions">
           <button class="button primary" id="download-premium-voice" type="button">
-            Download premium voice
+            <span data-i18n="downloadPremiumVoice"></span>
           </button>
           <label class="voice-switch" for="premium-voice-enabled">
-            <span>Use premium</span>
+            <span data-i18n="usePremium"></span>
             <input id="premium-voice-enabled" type="checkbox" role="switch" disabled />
             <span class="voice-switch-track" aria-hidden="true"></span>
           </label>
         </div>
         <fieldset class="premium-voice-picker" id="premium-voice-picker" hidden>
-          <legend>Choose a voice</legend>
-          <p>Preview downloads only that voice.</p>
+          <legend data-i18n="chooseVoice"></legend>
+          <p data-i18n="previewDownloadsVoice"></p>
           <div class="premium-voice-options" id="premium-voice-options"></div>
         </fieldset>
         <div class="premium-progress" id="premium-progress-card" hidden>
           <div class="progress-copy">
-            <span id="premium-progress-label">Kokoro voice model</span>
+            <span id="premium-progress-label" data-i18n="kokoroVoiceModel"></span>
             <output id="premium-progress-value">0%</output>
           </div>
           <progress
@@ -222,27 +236,29 @@
       <section class="premium-voice-card" id="premium-stt-card" data-state="not-downloaded">
         <div class="premium-voice-heading">
           <div>
-            <p class="section-index">LOCAL INPUT / BETA</p>
-            <h2>High accuracy speech (beta)</h2>
+            <p class="section-index" data-i18n="localInputBetaIndex"></p>
+            <h2 data-i18n="highAccuracySpeechBeta"></h2>
           </div>
-          <span class="premium-state" id="premium-stt-state">CHECKING</span>
+          <span class="premium-state" id="premium-stt-state" data-i18n="stateChecking"></span>
         </div>
-        <p class="premium-voice-copy" id="premium-stt-copy">
-          Checking local speech hardware. Moonshine tiny remains available instantly.
-        </p>
+        <p
+          class="premium-voice-copy"
+          id="premium-stt-copy"
+          data-i18n="premiumSpeechCheckingCopy"
+        ></p>
         <div class="premium-voice-actions">
           <button class="button primary" id="download-premium-stt" type="button" disabled>
-            Checking hardware…
+            <span data-i18n="checkingHardwareEllipsis"></span>
           </button>
           <label class="voice-switch" for="premium-stt-enabled">
-            <span>Use high accuracy</span>
+            <span data-i18n="useHighAccuracy"></span>
             <input id="premium-stt-enabled" type="checkbox" role="switch" disabled />
             <span class="voice-switch-track" aria-hidden="true"></span>
           </label>
         </div>
         <div class="premium-progress" id="premium-stt-progress-card" hidden>
           <div class="progress-copy">
-            <span id="premium-stt-progress-label">Speech model</span>
+            <span id="premium-stt-progress-label" data-i18n="speechModel"></span>
             <output id="premium-stt-progress-value">0%</output>
           </div>
           <progress
@@ -257,17 +273,15 @@
       <section class="models-card" aria-labelledby="models-heading">
         <div class="models-heading">
           <div>
-            <p class="section-index">LOCAL STORAGE</p>
-            <h2 id="models-heading">Models</h2>
+            <p class="section-index" data-i18n="localStorageIndex"></p>
+            <h2 id="models-heading" data-i18n="models"></h2>
           </div>
-          <output id="models-total" aria-live="polite">Total: 0 B</output>
+          <output id="models-total" aria-live="polite"></output>
         </div>
-        <p class="models-copy">
-          Sotto measures files in the local model cache. Chrome manages its built-in models.
-        </p>
+        <p class="models-copy" data-i18n="modelsCopy"></p>
         <ul class="models-list" id="models-list" aria-live="polite">
           <li class="model-row">
-            <span>Checking local files.</span>
+            <span data-i18n="checkingLocalFiles"></span>
           </li>
         </ul>
       </section>
@@ -275,16 +289,18 @@
       <section class="settings-card" aria-labelledby="speech-settings-heading">
         <div class="settings-heading">
           <div>
-            <p class="section-index">LOCAL OUTPUT / SETTINGS</p>
-            <h2 id="speech-settings-heading">Speech settings</h2>
+            <p class="section-index" data-i18n="localOutputSettingsIndex"></p>
+            <h2 id="speech-settings-heading" data-i18n="speechSettings"></h2>
           </div>
         </div>
-        <p class="settings-copy" id="speech-settings-copy">
-          Changes apply to the next spoken response.
-        </p>
+        <p
+          class="settings-copy"
+          id="speech-settings-copy"
+          data-i18n="speechSettingsCopy"
+        ></p>
         <div class="speech-setting">
           <div class="speech-setting-label">
-            <label for="speech-rate">Rate</label>
+            <label for="speech-rate" data-i18n="rate"></label>
             <output id="speech-rate-value" for="speech-rate" aria-live="polite">1.0×</output>
           </div>
           <input
@@ -299,7 +315,7 @@
         </div>
         <div class="speech-setting">
           <div class="speech-setting-label">
-            <label for="speech-volume">Volume</label>
+            <label for="speech-volume" data-i18n="volume"></label>
             <output id="speech-volume-value" for="speech-volume" aria-live="polite">100%</output>
           </div>
           <input
@@ -314,14 +330,14 @@
         </div>
         <div class="speech-setting">
           <div class="speech-setting-label">
-            <label for="response-verbosity">Response length</label>
+            <label for="response-verbosity" data-i18n="responseLength"></label>
           </div>
           <select
             id="response-verbosity"
             aria-describedby="speech-settings-copy"
           >
-            <option value="normal">Normal</option>
-            <option value="brief">Brief</option>
+            <option value="normal" data-i18n="responseNormal"></option>
+            <option value="brief" data-i18n="responseBrief"></option>
           </select>
         </div>
         <button
@@ -329,17 +345,17 @@
           id="copy-diagnostic-report"
           type="button"
         >
-          Copy diagnostic report
+          <span data-i18n="copyDiagnosticReport"></span>
         </button>
         <div class="settings-backup" aria-labelledby="settings-backup-heading">
-          <h3 id="settings-backup-heading">Settings and notes backup</h3>
-          <p>Save your settings and notes in one JSON file.</p>
+          <h3 id="settings-backup-heading" data-i18n="settingsBackupHeading"></h3>
+          <p data-i18n="settingsBackupCopy"></p>
           <div class="settings-backup-actions">
             <button class="button" id="export-settings-backup" type="button">
-              Export backup
+              <span data-i18n="exportBackup"></span>
             </button>
             <button class="button" id="choose-settings-backup" type="button">
-              Import backup
+              <span data-i18n="importBackup"></span>
             </button>
             <input
               id="settings-backup-file"
@@ -368,14 +384,14 @@
                 id="confirm-settings-import"
                 type="button"
               >
-                Import
+                <span data-i18n="import"></span>
               </button>
               <button
                 class="button"
                 id="cancel-settings-import"
                 type="button"
               >
-                Cancel
+                <span data-i18n="cancel"></span>
               </button>
             </div>
           </div>
@@ -384,15 +400,19 @@
 
       <section class="transcript-panel" aria-labelledby="transcript-heading">
         <div class="section-heading">
-          <h2 class="section-index" id="transcript-heading">01 / HEARD</h2>
-          <span class="listening-mark" id="listening-mark">IDLE</span>
+          <h2 class="section-index" id="transcript-heading" data-i18n="transcriptIndex"></h2>
+          <span class="listening-mark" id="listening-mark" data-i18n="stateIdle"></span>
         </div>
-        <p class="transcript" id="transcript" aria-live="polite" aria-atomic="true">
-          Your words will appear here.
-        </p>
+        <p
+          class="transcript"
+          id="transcript"
+          aria-live="polite"
+          aria-atomic="true"
+          data-i18n="transcriptPlaceholder"
+        ></p>
       </section>
 
-      <section class="control-panel" aria-label="Voice input">
+      <section class="control-panel" data-i18n-aria-label="voiceInput">
         <button
           class="listen-button"
           id="listen-button"
@@ -401,18 +421,19 @@
           aria-labelledby="listen-label"
         >
           <span class="listen-rings" aria-hidden="true"></span>
-          <span id="listen-label">Hold to talk</span>
+          <span id="listen-label" data-i18n="holdToTalk"></span>
           <kbd id="shortcut-label">⌥ S</kbd>
         </button>
         <p class="shortcut-help">
-          Read this page <kbd id="read-page-shortcut-label">⌥ R</kbd>
+          <span data-i18n="readThisPage"></span>
+          <kbd id="read-page-shortcut-label">⌥ R</kbd>
         </p>
         <div
           class="mic-meter"
           id="mic-meter"
           data-state="idle"
           role="meter"
-          aria-label="Microphone input level"
+          data-i18n-aria-label="microphoneInputLevel"
           aria-valuemin="0"
           aria-valuemax="100"
           aria-valuenow="0"
@@ -420,8 +441,10 @@
           <span class="mic-meter-fill" id="mic-meter-fill"></span>
         </div>
         <p class="mic-help" id="mic-help">
-          Voice unavailable?
-          <button class="link-button" id="grant-mic" type="button">Grant microphone access</button>
+          <span data-i18n="voiceUnavailable"></span>
+          <button class="link-button" id="grant-mic" type="button">
+            <span data-i18n="grantMicrophoneAccess"></span>
+          </button>
         </p>
       </section>
 
@@ -433,24 +456,24 @@
         hidden
       >
         <div>
-          <h2 class="section-index" id="dictation-heading">DICTATION</h2>
-          <p id="dictation-copy">Speak your text. Say stop dictation to finish.</p>
+          <h2 class="section-index" id="dictation-heading" data-i18n="dictation"></h2>
+          <p id="dictation-copy" data-i18n="dictationActiveCopy"></p>
         </div>
         <button
           class="button primary"
           id="resume-dictation"
           type="button"
           hidden
-        >Resume</button>
+        ><span data-i18n="resume"></span></button>
       </section>
 
       <form class="command-form" id="command-form">
-        <label for="command-input">TYPE A COMMAND</label>
+        <label for="command-input" data-i18n="typeCommand"></label>
         <div class="command-row">
-          <input id="command-input" name="command" type="text" autocomplete="off" placeholder="switch to the GitHub tab" />
-          <button type="submit" aria-label="Run command">→</button>
+          <input id="command-input" name="command" type="text" autocomplete="off" data-i18n-placeholder="commandPlaceholder" />
+          <button type="submit" data-i18n-aria-label="runCommand">→</button>
         </div>
-        <p>Uses the same private parse → validate → act pipeline.</p>
+        <p data-i18n="commandPipelineCopy"></p>
       </form>
 
       <section
@@ -460,10 +483,12 @@
         hidden
       >
         <div>
-          <h2 class="section-index" id="clipboard-heading">SCREENSHOT READY</h2>
-          <p id="clipboard-copy">Copy the PNG to continue.</p>
+          <h2 class="section-index" id="clipboard-heading" data-i18n="screenshotReady"></h2>
+          <p id="clipboard-copy" data-i18n="copyPngToContinue"></p>
         </div>
-        <button class="button primary" id="copy-screenshot" type="button">Copy &amp; continue</button>
+        <button class="button primary" id="copy-screenshot" type="button">
+          <span data-i18n="copyAndContinue"></span>
+        </button>
       </section>
 
       <section
@@ -474,15 +499,17 @@
         aria-live="polite"
       >
         <div class="section-heading">
-          <h2 class="section-index" id="page-text-title">PAGE</h2>
-          <button class="link-button" id="close-page-text" type="button">Close</button>
+          <h2 class="section-index" id="page-text-title" data-i18n="page"></h2>
+          <button class="link-button" id="close-page-text" type="button">
+            <span data-i18n="close"></span>
+          </button>
         </div>
         <p class="page-text-output" id="page-text-output"></p>
         <div
           class="page-text-output"
           id="reading-text-output"
           role="region"
-          aria-label="Text being read"
+          data-i18n-aria-label="textBeingRead"
           tabindex="0"
           hidden
         ></div>
@@ -490,15 +517,15 @@
           id="reading-progress"
           max="1"
           value="0"
-          aria-label="Reading progress"
+          data-i18n-aria-label="readingProgress"
           hidden
         ></progress>
         <div class="reading-controls" id="reading-controls" hidden>
           <button class="button" id="pause-reading" type="button">
-            Pause
+            <span data-i18n="pause"></span>
           </button>
           <button class="button" id="skip-reading" type="button">
-            Next sentence
+            <span data-i18n="nextSentence"></span>
           </button>
         </div>
       </section>
@@ -510,41 +537,45 @@
       >
         <div class="section-heading">
           <h2 class="section-index" id="reminders-heading">
-            REMINDERS
+            <span data-i18n="reminders"></span>
             <span class="storage-count" id="reminders-count" hidden></span>
           </h2>
         </div>
         <ul class="notes-list" id="reminders-list" aria-live="polite">
-          <li class="empty-notes">No pending reminders.</li>
+          <li class="empty-notes" data-i18n="noPendingReminders"></li>
         </ul>
       </section>
 
       <section class="notes-panel" id="notes-panel" aria-labelledby="notes-heading">
         <div class="section-heading">
           <h2 class="section-index" id="notes-heading">
-            03 / NOTES
+            <span data-i18n="notesIndex"></span>
             <span class="storage-count" id="notes-count" hidden></span>
           </h2>
-          <button class="link-button" id="export-notes" type="button" disabled>Export .md</button>
+          <button class="link-button" id="export-notes" type="button" disabled>
+            <span data-i18n="exportMarkdown"></span>
+          </button>
         </div>
-        <label class="sr-only" for="notes-search">Search notes</label>
+        <label class="sr-only" for="notes-search" data-i18n="searchNotes"></label>
         <input
           class="notes-search"
           id="notes-search"
           type="search"
-          placeholder="Search notes"
+          data-i18n-placeholder="searchNotes"
           autocomplete="off"
         />
         <p class="reminder-banner" id="reminder-banner" hidden></p>
         <ul class="notes-list" id="notes-list">
-          <li class="empty-notes">No notes yet.</li>
+          <li class="empty-notes" data-i18n="noNotesYet"></li>
         </ul>
       </section>
 
       <section class="log-panel" aria-labelledby="log-heading">
         <div class="section-heading">
-          <h2 class="section-index" id="log-heading">02 / DID</h2>
-          <button class="link-button" id="clear-log" type="button">Clear</button>
+          <h2 class="section-index" id="log-heading" data-i18n="logIndex"></h2>
+          <button class="link-button" id="clear-log" type="button">
+            <span data-i18n="clear"></span>
+          </button>
         </div>
         <details class="latency-readout" id="latency-readout" hidden>
           <summary
@@ -553,20 +584,20 @@
             aria-atomic="true"
           ></summary>
           <table>
-            <caption class="sr-only">Latency by stage</caption>
+            <caption class="sr-only" data-i18n="latencyByStage"></caption>
             <thead>
               <tr>
-                <th scope="col">Stage</th>
-                <th scope="col">p50</th>
-                <th scope="col">p95</th>
-                <th scope="col">n</th>
+                <th scope="col" data-i18n="stage"></th>
+                <th scope="col" data-i18n="p50"></th>
+                <th scope="col" data-i18n="p95"></th>
+                <th scope="col" data-i18n="sampleCountAbbreviation"></th>
               </tr>
             </thead>
             <tbody id="latency-details"></tbody>
           </table>
         </details>
         <ol class="action-log" id="action-log">
-          <li class="empty-log">No commands yet.</li>
+          <li class="empty-log" data-i18n="noCommandsYet"></li>
         </ol>
         <p
           class="sr-only"
@@ -579,11 +610,11 @@
       <section class="commands-panel" aria-labelledby="commands-heading">
         <details id="command-reference">
           <summary id="commands-heading">
-            <span class="section-index">04 /</span>
-            Commands
+            <span class="section-index" data-i18n="commandsIndex"></span>
+            <span data-i18n="commands"></span>
           </summary>
           <div class="command-reference-list" id="command-reference-list">
-            <p class="command-reference-status">Loading commands.</p>
+            <p class="command-reference-status" data-i18n="loadingCommands"></p>
           </div>
         </details>
       </section>

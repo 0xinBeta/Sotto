@@ -56,7 +56,10 @@ import {
   recoveryHint,
   type RecoveryErrorClass,
 } from "./recovery-hint.js";
+import { localizePanel, t } from "./panel-i18n.js";
 import "./styles.css";
+
+localizePanel();
 
 type NanoAvailability = NanoSetupState;
 type ModelProgressKind =
@@ -837,13 +840,13 @@ function showSpeechSettings(settings: SpeechSettings): void {
   speechRate.value = String(rate);
   speechRateValue.value = `${rateText}×`;
   speechRateValue.textContent = speechRateValue.value;
-  speechRate.setAttribute("aria-valuetext", `${rateText} times`);
+  speechRate.setAttribute("aria-valuetext", t("speechRateTimes", rateText));
   speechVolume.value = String(volume);
   speechVolumeValue.value = `${volumePercent}%`;
   speechVolumeValue.textContent = speechVolumeValue.value;
   speechVolume.setAttribute(
     "aria-valuetext",
-    `${volumePercent} percent`,
+    t("speechVolumePercent", String(volumePercent)),
   );
   responseVerbosity.value = settings.verbosity;
 }
@@ -853,7 +856,7 @@ function showQuietMode(enabled: boolean): void {
   quietModeToggle.checked = enabled;
   quietModeControl.dataset.state = enabled ? "on" : "off";
   quietModeLabel.textContent =
-    enabled ? "Quiet mode on" : "Quiet mode off";
+    enabled ? t("quietModeOn") : t("quietModeOff");
 }
 
 async function loadQuietMode(): Promise<void> {
@@ -864,7 +867,7 @@ async function loadQuietMode(): Promise<void> {
     showQuietMode(enabled === true);
   } catch {
     showQuietMode(false);
-    appendLog("quiet mode", "Quiet mode is unavailable.");
+    appendLog(t("logQuietMode"), t("quietModeUnavailable"));
   }
 }
 
@@ -878,7 +881,7 @@ async function saveSpeechSettings(): Promise<void> {
     });
     if (isSpeechSettings(saved)) showSpeechSettings(saved);
   } catch {
-    appendLog("speech settings", "Speech settings could not be saved.");
+    appendLog(t("logSpeechSettings"), t("speechSettingsSaveFailed"));
   }
 }
 
@@ -890,7 +893,7 @@ async function loadSpeechSettings(): Promise<void> {
     });
     if (isSpeechSettings(settings)) showSpeechSettings(settings);
   } catch {
-    appendLog("speech settings", "Speech settings are unavailable.");
+    appendLog(t("logSpeechSettings"), t("speechSettingsUnavailable"));
   }
 }
 
@@ -905,19 +908,19 @@ copyDiagnosticReport.addEventListener("click", async () => {
       !report.startsWith("# Sotto diagnostic report\n") ||
       report.split("\n").length > 120
     ) {
-      throw new Error("The diagnostic report is invalid.");
+      throw new Error(t("diagnosticReportInvalid"));
     }
     if (!navigator.clipboard?.writeText) {
-      throw new Error("Text clipboard writes are unavailable.");
+      throw new Error(t("textClipboardUnavailable"));
     }
     await navigator.clipboard.writeText(report);
-    appendLog("diagnostic report", "Diagnostic report copied.");
+    appendLog(t("logDiagnosticReport"), t("diagnosticReportCopied"));
   } catch (error) {
     appendLog(
-      "diagnostic report",
+      t("logDiagnosticReport"),
       error instanceof Error
         ? error.message
-        : "The diagnostic report could not be copied.",
+        : t("diagnosticReportCopyFailed"),
     );
   } finally {
     copyDiagnosticReport.disabled = false;
@@ -946,8 +949,8 @@ async function previewPremiumVoice(voice: KokoroVoiceId): Promise<void> {
     selectedPremiumVoice = previousVoice;
     selectPremiumVoiceInput(previousVoice);
     appendLog(
-      "voice preview",
-      "Voice preview failed.",
+      t("logVoicePreview"),
+      t("voicePreviewFailed"),
       undefined,
       true,
       "tts-failure",
@@ -979,11 +982,11 @@ function renderPremiumVoiceOptions(): void {
     label.htmlFor = inputId;
     label.textContent = voice.label;
     accent.className = "premium-voice-accent";
-    accent.textContent = `${voice.accent} English`;
+    accent.textContent = t("accentEnglish", voice.accent);
     preview.className = "premium-voice-preview";
     preview.type = "button";
-    preview.textContent = "Preview";
-    preview.setAttribute("aria-label", `Preview ${voice.label}`);
+    preview.textContent = t("preview");
+    preview.setAttribute("aria-label", t("previewVoice", voice.label));
     preview.addEventListener("click", () => {
       void previewPremiumVoice(voice.id);
     });
@@ -1024,16 +1027,16 @@ function setListening(listening: boolean): void {
   listenButton.setAttribute("aria-pressed", String(listening));
   listenLabel.textContent = isDictating
     ? isDictationPaused
-      ? "Dictation paused"
-      : "Stop dictation"
+      ? t("dictationPaused")
+      : t("stopDictation")
     : listening
-      ? "Listening…"
-      : "Hold to talk";
+      ? t("listeningEllipsis")
+      : t("holdToTalk");
   listeningMark.textContent = isDictating
-    ? "DICTATION"
+    ? t("dictation")
     : listening
-      ? "LIVE"
-      : "IDLE";
+      ? t("stateLive")
+      : t("stateIdle");
   listeningMark.dataset.active = String(listening || isDictating);
   micMeter.dataset.state = listening ? "listening" : "idle";
   if (!listening) {
@@ -1044,11 +1047,11 @@ function setListening(listening: boolean): void {
     isDictating || listening ? "listening" : "ready",
     isDictating
       ? isDictationPaused
-        ? "Dictation paused"
-        : "Dictation"
+        ? t("dictationPaused")
+        : t("statusDictation")
       : listening
-        ? "Listening"
-        : "On device",
+        ? t("statusListening")
+        : t("statusOnDevice"),
   );
 }
 
@@ -1058,14 +1061,14 @@ function showDictationState(active: boolean, paused: boolean): void {
   dictationCard.hidden = !active;
   resumeDictation.hidden = !paused;
   dictationCopy.textContent = paused
-    ? "Focus the same text field, then select Resume."
-    : "Speak your text. Say stop dictation to finish.";
+    ? t("dictationPausedCopy")
+    : t("dictationActiveCopy");
   setListening(isListening);
   actionLogAnnouncer.textContent = !active
-    ? "Dictation stopped."
+    ? t("dictationStoppedAnnouncement")
     : paused
-      ? "Dictation paused."
-      : "Dictation active.";
+      ? t("dictationPausedAnnouncement")
+      : t("dictationActiveAnnouncement");
 }
 
 function commitMeterAccessibleValue(value: number): void {
@@ -1107,7 +1110,7 @@ function showTranscript(
 ): void {
   renderRecoveryMessage(
     transcript,
-    text || "Your words will appear here.",
+    text || t("transcriptPlaceholder"),
     errorClass,
   );
   transcript.dataset.placeholder = String(!text);
@@ -1193,17 +1196,17 @@ function showReadingState(active: boolean, paused: boolean): void {
     clearReadingView();
   }
   readingControls.hidden = !active;
-  pauseReading.textContent = paused ? "Resume" : "Pause";
+  pauseReading.textContent = paused ? t("resume") : t("pause");
   pauseReading.setAttribute(
     "aria-label",
-    paused ? "Resume reading" : "Pause reading",
+    paused ? t("resumeReading") : t("pauseReading"),
   );
   if (!active) readingProgress.hidden = true;
   actionLogAnnouncer.textContent = !active
-    ? "Reading stopped."
+    ? t("readingStoppedAnnouncement")
     : paused
-      ? "Reading paused."
-      : "Reading active.";
+      ? t("readingPausedAnnouncement")
+      : t("readingActiveAnnouncement");
 }
 
 const SETUP_ICONS: Record<SetupRowState, string> = {
@@ -1213,9 +1216,9 @@ const SETUP_ICONS: Record<SetupRowState, string> = {
 };
 
 const SETUP_STATE_LABELS: Record<SetupRowState, string> = {
-  done: "Done",
-  pending: "Pending",
-  "needs-action": "Needs action",
+  done: t("setupStateDone"),
+  pending: t("setupStatePending"),
+  "needs-action": t("setupStateNeedsAction"),
 };
 
 function renderSetupView(): void {
@@ -1255,7 +1258,7 @@ function renderSetupView(): void {
               : undefined;
     renderRecoveryMessage(
       elements.state,
-      `${SETUP_STATE_LABELS[row.state]}. ${row.description}`,
+      t("setupStateLine", SETUP_STATE_LABELS[row.state], row.description),
       errorClass,
     );
 
@@ -1264,8 +1267,8 @@ function renderSetupView(): void {
         setupGrantMic.hidden = false;
         setupGrantMic.disabled = false;
         setupGrantMic.textContent = microphonePermission === "denied"
-          ? "Review microphone settings"
-          : "Grant microphone access";
+          ? t("reviewMicrophoneSettings")
+          : t("grantMicrophoneAccess");
         break;
       case "capture":
         enableCapture.hidden = false;
@@ -1274,22 +1277,22 @@ function renderSetupView(): void {
         setupPrepareNano.hidden = false;
         setupPrepareNano.disabled = false;
         setupPrepareNano.textContent = nanoAvailability === "downloading"
-          ? "Continue model setup"
-          : "Prepare Gemini Nano";
+          ? t("continueModelSetup")
+          : t("prepareGeminiNano");
         break;
       case "premium-voice":
         setupDownloadPremium.hidden = false;
         setupDownloadPremium.disabled = false;
         setupDownloadPremium.textContent = premiumState === "error"
-          ? "Retry voice download"
-          : "Download premium voice";
+          ? t("retryVoiceDownload")
+          : t("downloadPremiumVoice");
         break;
       case "premium-speech":
         setupDownloadPremium.hidden = false;
         setupDownloadPremium.disabled = false;
         setupDownloadPremium.textContent = highAccuracyResumable
-          ? "Resume speech download"
-          : "Download speech model";
+          ? t("resumeSpeechDownload")
+          : t("downloadSpeechModel");
         break;
     }
   }
@@ -1306,16 +1309,24 @@ function showNanoState(availability: NanoAvailability): void {
   renderSetupView();
 
   if (availability === "unavailable") {
-    setStatus("error", "Nano unavailable");
+    setStatus("error", t("statusNanoUnavailable"));
     return;
   }
 
   if (availability === "downloadable" || availability === "downloading") {
-    setStatus("booting", availability === "downloading" ? "Nano downloading" : "Nano setup");
+    setStatus(
+      "booting",
+      availability === "downloading"
+        ? t("statusNanoDownloading")
+        : t("statusNanoSetup"),
+    );
     return;
   }
 
-  setStatus(isListening ? "listening" : "ready", isListening ? "Listening" : "On device");
+  setStatus(
+    isListening ? "listening" : "ready",
+    isListening ? t("statusListening") : t("statusOnDevice"),
+  );
 }
 
 function showMicrophoneState(state: PermissionState | "unknown"): void {
@@ -1324,16 +1335,18 @@ function showMicrophoneState(state: PermissionState | "unknown"): void {
   listenButton.disabled = !granted;
   const label =
     state === "denied"
-      ? "Review microphone settings"
-      : "Grant microphone access";
+      ? t("reviewMicrophoneSettings")
+      : t("grantMicrophoneAccess");
   grantMic.textContent = label;
   renderSetupView();
   if (granted) return;
 
-  listenLabel.textContent = "Use text command";
+  listenLabel.textContent = t("useTextCommand");
   setStatus(
     state === "denied" ? "error" : "booting",
-    state === "denied" ? "Microphone blocked" : "Microphone setup",
+    state === "denied"
+      ? t("statusMicrophoneBlocked")
+      : t("statusMicrophoneSetup"),
   );
 }
 
@@ -1433,22 +1446,28 @@ function updateProgress(
   if (progressKind === "nano") {
     nanoProgressLabel.textContent =
       model === "summarizer"
-        ? "Chrome Summarizer"
+        ? t("chromeSummarizer")
         : model === "translator"
-          ? "Chrome Translator"
+          ? t("chromeTranslator")
         : model === "rewriter"
-          ? "Chrome Rewriter"
-          : "Gemini Nano";
+          ? t("chromeRewriter")
+          : t("geminiNano");
   }
   if (progressKind === "premium-tts") {
     premiumProgressLabel.textContent = file
-      ? `Kokoro · ${file.split("/").at(-1) ?? "model"}`
-      : "Kokoro voice model";
+      ? t(
+          "kokoroFileProgress",
+          file.split("/").at(-1) ?? t("modelFile"),
+        )
+      : t("kokoroVoiceModel");
   }
   if (progressKind === "premium-stt") {
     premiumSttProgressLabel.textContent = file
-      ? `Speech · ${file.split("/").at(-1) ?? "model"}`
-      : "High accuracy speech model";
+      ? t(
+          "speechFileProgress",
+          file.split("/").at(-1) ?? t("modelFile"),
+        )
+      : t("highAccuracySpeechModel");
   }
   card.hidden = false;
   if (file) card.title = file;
@@ -1459,7 +1478,11 @@ function updateProgress(
       typeof total === "number" &&
       Number.isFinite(total) &&
       total > 0
-      ? `${formatMegabytes(loaded)} of ${formatMegabytes(total)} MB`
+      ? t(
+          "downloadProgressMegabytes",
+          formatMegabytes(loaded),
+          formatMegabytes(total),
+        )
       : `${Math.round(normalized * 100)}%`;
   output.textContent = output.value;
   const previousTimer = progressHideTimers[progressKind];
@@ -1502,16 +1525,16 @@ async function runModelAction(
   button.disabled = true;
   const previousText = button.textContent;
   button.textContent = action === "download-model"
-    ? "Starting…"
-    : "Deleting…";
+    ? t("startingEllipsis")
+    : t("deletingEllipsis");
   try {
     await requestWorker({ type: action, modelId: row.id });
   } catch (error) {
     button.disabled = false;
     button.textContent = previousText;
     appendLog(
-      "model storage",
-      error instanceof Error ? error.message : "The model task failed.",
+      t("logModelStorage"),
+      error instanceof Error ? error.message : t("modelTaskFailed"),
       undefined,
       true,
       action === "download-model" ? "download-failure" : undefined,
@@ -1523,7 +1546,7 @@ function renderModelInventory(
   rows: readonly PanelModelRow[],
   totalBytes: number,
 ): void {
-  modelsTotal.value = `Total: ${formatBytes(totalBytes)}`;
+  modelsTotal.value = t("modelsTotal", formatBytes(totalBytes));
   modelsTotal.textContent = modelsTotal.value;
   modelsList.replaceChildren(
     ...rows.map((row) => {
@@ -1544,7 +1567,7 @@ function renderModelInventory(
       meta.className = "model-meta";
       state.className = "model-state";
       state.dataset.state = row.state;
-      state.textContent = row.state;
+      state.textContent = MODEL_STATE_LABELS[row.state];
       meta.append(state);
       if (row.bytes !== undefined) {
         size.className = "model-size";
@@ -1563,8 +1586,8 @@ function renderModelInventory(
         const button = document.createElement("button");
         button.className = "button model-action";
         button.type = "button";
-        button.textContent = "Download";
-        button.setAttribute("aria-label", `Download ${row.label}`);
+        button.textContent = t("download");
+        button.setAttribute("aria-label", t("downloadNamed", row.label));
         button.addEventListener("click", () => {
           void runModelAction(row, "download-model", button);
         });
@@ -1574,8 +1597,8 @@ function renderModelInventory(
         const button = document.createElement("button");
         button.className = "button model-action";
         button.type = "button";
-        button.textContent = "Delete";
-        button.setAttribute("aria-label", `Delete ${row.label}`);
+        button.textContent = t("delete");
+        button.setAttribute("aria-label", t("deleteNamed", row.label));
         button.addEventListener("click", () => {
           void runModelAction(row, "delete-model", button);
         });
@@ -1586,6 +1609,20 @@ function renderModelInventory(
     }),
   );
 }
+
+const MODEL_STATE_LABELS: Readonly<Record<PanelModelState, string>> = {
+  active: t("modelStateActive"),
+  cached: t("modelStateCached"),
+  absent: t("modelStateAbsent"),
+  downloading: t("modelStateDownloading"),
+};
+
+const PREMIUM_VOICE_STATE_LABELS: Readonly<Record<PremiumTtsState, string>> = {
+  absent: t("stateAbsent"),
+  downloading: t("stateDownloading"),
+  ready: t("stateReady"),
+  error: t("stateError"),
+};
 
 function showPremiumVoiceState(
   state: PremiumTtsState,
@@ -1598,7 +1635,7 @@ function showPremiumVoiceState(
   premiumSetupVoiceState = state;
   selectedPremiumVoice = voice;
   premiumVoiceCard.dataset.state = state;
-  premiumVoiceState.textContent = state.toUpperCase();
+  premiumVoiceState.textContent = PREMIUM_VOICE_STATE_LABELS[state];
   premiumVoiceEnabled.checked = enabled;
   premiumVoiceEnabled.disabled = state !== "ready";
   premiumVoicePicker.hidden = state !== "ready";
@@ -1610,38 +1647,50 @@ function showPremiumVoiceState(
 
   switch (state) {
     case "absent":
-      downloadPremiumVoice.textContent = "Download premium voice";
-      premiumVoiceCopy.textContent =
-        "Download the natural on-device voice when you are ready. Until then, Sotto uses your operating system voice instantly.";
+      downloadPremiumVoice.textContent = t("downloadPremiumVoice");
+      premiumVoiceCopy.textContent = t("premiumVoiceAbsentCopy");
       break;
     case "downloading":
       downloadPremiumVoice.hidden = false;
-      downloadPremiumVoice.textContent = "Downloading on device…";
+      downloadPremiumVoice.textContent = t("downloadingOnDevice");
       premiumProgressCard.hidden = false;
-      premiumVoiceCopy.textContent =
-        "Sotto stays responsive while the model downloads. Spoken feedback continues through your operating system voice.";
+      premiumVoiceCopy.textContent = t("premiumVoiceDownloadingCopy");
       break;
     case "ready":
       {
         const selected = KOKORO_VOICES.find(
           (catalogVoice) => catalogVoice.id === voice,
         );
-        premiumVoiceCopy.textContent =
-          `${selected?.label ?? "Premium voice"} is ready at 24 kHz${backend ? ` with ${backend.toUpperCase()}` : ""}. The system voice stays available.`;
+        const label = selected?.label ?? t("premiumVoice");
+        premiumVoiceCopy.textContent = backend
+          ? t("premiumVoiceReadyWithBackend", label, backend.toUpperCase())
+          : t("premiumVoiceReady", label);
       }
       break;
     case "error":
-      downloadPremiumVoice.textContent = "Retry voice download";
+      downloadPremiumVoice.textContent = t("retryVoiceDownload");
       renderRecoveryMessage(
         premiumVoiceCopy,
-        error ??
-          "The voice download failed. Select retry to use completed files from the local cache.",
+        error ?? t("premiumVoiceDownloadFailed"),
         "download-failure",
       );
       break;
   }
   renderSetupView();
 }
+
+const PREMIUM_SPEECH_STATE_LABELS: Readonly<
+  Record<PremiumSttState, string>
+> = {
+  "not-downloaded": t("stateNotDownloaded"),
+  downloading: t("stateDownloading"),
+  validating: t("stateValidating"),
+  loading: t("stateLoading"),
+  warming: t("stateWarming"),
+  ready: t("stateReady"),
+  active: t("stateActive"),
+  error: t("stateError"),
+};
 
 function showPremiumSttState(
   state: PremiumSttState,
@@ -1657,7 +1706,7 @@ function showPremiumSttState(
   highAccuracyTier = tier;
   highAccuracyResumable = resumable;
   premiumSttCard.dataset.state = state;
-  premiumSttState.textContent = state.replace("-", " ").toUpperCase();
+  premiumSttState.textContent = PREMIUM_SPEECH_STATE_LABELS[state];
   premiumSttEnabled.checked = enabled;
   premiumSttEnabled.disabled = !downloaded ||
     (state !== "ready" && state !== "active");
@@ -1669,65 +1718,62 @@ function showPremiumSttState(
   downloadPremiumStt.disabled = busy;
   downloadPremiumStt.hidden = state === "ready" || state === "active";
   const modelCopy = tier === "parakeet"
-    ? "Parakeet-TDT v3 uses a 409 MB pinned model with a WebGPU encoder."
-    : "This machine uses Moonshine base q8, a 63 MB WASM accuracy upgrade.";
+    ? t("parakeetModelCopy")
+    : t("moonshineBaseModelCopy");
 
   switch (state) {
     case "not-downloaded":
       downloadPremiumStt.hidden = false;
       downloadPremiumStt.disabled = false;
       downloadPremiumStt.textContent = resumable
-        ? "Resume download"
+        ? t("resumeDownload")
         : tier === "parakeet"
-          ? "Download 409 MB model"
-          : "Download 63 MB model";
-      premiumSttCopy.textContent =
-        `${modelCopy} Nothing downloads until you choose it; Moonshine tiny remains instant.`;
+          ? t("download409Model")
+          : t("download63Model");
+      premiumSttCopy.textContent = t("premiumSpeechAbsentCopy", modelCopy);
       break;
     case "downloading":
       downloadPremiumStt.hidden = false;
-      downloadPremiumStt.textContent = "Downloading on device…";
+      downloadPremiumStt.textContent = t("downloadingOnDevice");
       premiumSttProgressCard.hidden = false;
-      premiumSttCopy.textContent =
-        `${modelCopy} The files are validated before activation.`;
+      premiumSttCopy.textContent = t(
+        "premiumSpeechDownloadingCopy",
+        modelCopy,
+      );
       break;
     case "validating":
       downloadPremiumStt.hidden = false;
-      downloadPremiumStt.textContent = "Validating pinned files…";
+      downloadPremiumStt.textContent = t("validatingPinnedFiles");
       premiumSttProgressCard.hidden = false;
-      premiumSttCopy.textContent =
-        "Sotto is checking the complete local model before loading it.";
+      premiumSttCopy.textContent = t("premiumSpeechValidatingCopy");
       break;
     case "loading":
       downloadPremiumStt.hidden = false;
-      downloadPremiumStt.textContent = "Loading local model…";
-      premiumSttCopy.textContent =
-        "The model is compiling locally. Moonshine tiny stays available until validation finishes.";
+      downloadPremiumStt.textContent = t("loadingLocalModel");
+      premiumSttCopy.textContent = t("premiumSpeechLoadingCopy");
       break;
     case "warming":
       downloadPremiumStt.hidden = false;
-      downloadPremiumStt.textContent = "Running hardware check…";
-      premiumSttCopy.textContent =
-        "A bundled spoken-word fixture is checking recognition and warm latency.";
+      downloadPremiumStt.textContent = t("runningHardwareCheck");
+      premiumSttCopy.textContent = t("premiumSpeechWarmingCopy");
       break;
     case "ready":
-      premiumSttCopy.textContent =
-        `${modelCopy} It is ready but switched off; Moonshine tiny is active.`;
+      premiumSttCopy.textContent = t("premiumSpeechReadyCopy", modelCopy);
       break;
     case "active":
-      premiumSttCopy.textContent =
-        `${modelCopy} High accuracy is ON${resident ? "" : " and will reload from the local cache when needed"}.`;
+      premiumSttCopy.textContent = resident
+        ? t("premiumSpeechActiveCopy", modelCopy)
+        : t("premiumSpeechActiveReloadCopy", modelCopy);
       break;
     case "error":
       downloadPremiumStt.hidden = false;
       downloadPremiumStt.disabled = false;
       downloadPremiumStt.textContent = resumable
-        ? "Resume download"
-        : "Retry high accuracy setup";
+        ? t("resumeDownload")
+        : t("retryHighAccuracySetup");
       const message = resumable
-          ? "The download stopped. Select resume after the network is available."
-          : error ??
-            "High accuracy speech could not start. Moonshine tiny remains active.";
+          ? t("premiumSpeechDownloadStopped")
+          : error ?? t("premiumSpeechStartFailed");
       renderRecoveryMessage(
         premiumSttCopy,
         message,
@@ -1749,7 +1795,7 @@ function renderStorageCount(
   count: number,
   maximum: number,
 ): void {
-  element.textContent = `${count} of ${maximum}`;
+  element.textContent = t("storageCount", String(count), String(maximum));
   element.hidden = count <= maximum * 0.8;
 }
 
@@ -1766,7 +1812,7 @@ function renderNoteList(): void {
     const empty = document.createElement("li");
     empty.className = "empty-notes";
     empty.textContent =
-      panelNotes.length === 0 ? "No notes yet." : "No notes match your search.";
+      panelNotes.length === 0 ? t("noNotesYet") : t("noNotesMatch");
     notesList.append(empty);
     exportNotes.disabled = panelNotes.length === 0;
     return;
@@ -1782,7 +1828,7 @@ function renderNoteList(): void {
     const created = new Date(note.createdAt);
     time.dateTime = note.createdAt;
     time.textContent = Number.isNaN(created.getTime())
-      ? "Saved note"
+      ? t("savedNote")
       : created.toLocaleString([], {
           dateStyle: "medium",
           timeStyle: "short",
@@ -1790,10 +1836,10 @@ function renderNoteList(): void {
     details.className = "note-details";
     deleteButton.className = "note-delete";
     deleteButton.type = "button";
-    deleteButton.textContent = "Delete";
+    deleteButton.textContent = t("delete");
     deleteButton.setAttribute(
       "aria-label",
-      `Delete note: ${note.body.slice(0, 80)}`,
+      t("deleteNote", note.body.slice(0, 80)),
     );
     deleteButton.addEventListener("click", async () => {
       deleteButton.disabled = true;
@@ -1808,8 +1854,8 @@ function renderNoteList(): void {
         }
       } catch (error) {
         appendLog(
-          "delete note",
-          error instanceof Error ? error.message : "Delete failed",
+          t("logDeleteNote"),
+          error instanceof Error ? error.message : t("deleteFailed"),
         );
         deleteButton.disabled = false;
       }
@@ -1835,7 +1881,7 @@ function renderReminderList(): void {
   if (panelReminders.length === 0) {
     const empty = document.createElement("li");
     empty.className = "empty-notes";
-    empty.textContent = "No pending reminders.";
+    empty.textContent = t("noPendingReminders");
     remindersList.append(empty);
     return;
   }
@@ -1856,10 +1902,10 @@ function renderReminderList(): void {
     details.className = "note-details";
     cancelButton.className = "note-delete";
     cancelButton.type = "button";
-    cancelButton.textContent = "Cancel";
+    cancelButton.textContent = t("cancel");
     cancelButton.setAttribute(
       "aria-label",
-      `Cancel reminder: ${reminder.text.slice(0, 80)}`,
+      t("cancelReminder", reminder.text.slice(0, 80)),
     );
     cancelButton.addEventListener("click", async () => {
       cancelButton.disabled = true;
@@ -1876,10 +1922,10 @@ function renderReminderList(): void {
         }
       } catch (error) {
         appendLog(
-          "cancel reminder",
+          t("logCancelReminder"),
           error instanceof Error
             ? error.message
-            : "The reminder was not cancelled.",
+            : t("reminderNotCancelled"),
         );
         cancelButton.disabled = false;
       }
@@ -1911,8 +1957,8 @@ function showReminder(
 ): void {
   reminderBanner.textContent =
     notificationDenied && reminder.notificationPermission === "denied"
-      ? `Reminder: ${reminder.text}. Desktop notifications are off.`
-      : `Reminder: ${reminder.text}`;
+      ? t("reminderBannerNotificationsOff", reminder.text)
+      : t("reminderBanner", reminder.text);
   reminderBanner.hidden = false;
 }
 
@@ -1951,11 +1997,11 @@ const latencyStages: readonly [
     "stt" | "parse" | "act" | "voice" | "total"
   >,
 ][] = [
-  ["Speech input", "stt"],
-  ["Parse", "parse"],
-  ["Act", "act"],
-  ["Voice", "voice"],
-  ["Total", "total"],
+  [t("latencySpeechInput"), "stt"],
+  [t("latencyParse"), "parse"],
+  [t("latencyAct"), "act"],
+  [t("latencyVoice"), "voice"],
+  [t("latencyTotal"), "total"],
 ];
 
 function latencyValue(
@@ -1978,10 +2024,12 @@ function renderLatencyStatistics(statistics: LatencyStatistics): void {
   }
 
   latencyReadout.hidden = false;
-  latencySummary.textContent =
-    `p50 ${formatLatencyDuration(statistics.total.p50Ms)} · ` +
-    `p95 ${formatLatencyDuration(statistics.total.p95Ms)} ` +
-    `(n=${statistics.sampleCount})`;
+  latencySummary.textContent = t(
+    "latencySummary",
+    formatLatencyDuration(statistics.total.p50Ms),
+    formatLatencyDuration(statistics.total.p95Ms),
+    String(statistics.sampleCount),
+  );
   latencyDetails.replaceChildren(
     ...latencyStages.map(([label, key]) => {
       const stage = statistics[key];
@@ -2004,7 +2052,7 @@ function renderLatencyStatistics(statistics: LatencyStatistics): void {
 function actionLogAnnouncement(heard: string, did: string): string {
   const heardText = /[.!?]$/.test(heard) ? heard : `${heard}.`;
   const didText = /[.!?]$/.test(did) ? did : `${did}.`;
-  return `${heardText} ${didText}`;
+  return t("actionLogAnnouncement", heardText, didText);
 }
 
 function appendLog(
@@ -2029,8 +2077,11 @@ function appendLog(
       if (timingLine) newest?.append(timingLine);
       newestLogEntry = decision.entry;
       if (announce) {
-        actionLogAnnouncer.textContent =
-          `${actionLogAnnouncement(heard, did)} Repeated ${decision.entry.count} times.`;
+        actionLogAnnouncer.textContent = t(
+          "actionLogRepeated",
+          actionLogAnnouncement(heard, did),
+          String(decision.entry.count),
+        );
       }
       return;
     }
@@ -2048,7 +2099,7 @@ function appendLog(
   count.hidden = true;
   copy.append(
     heardText,
-    document.createTextNode(` → ${did}`),
+    document.createTextNode(t("actionLogEntry", did)),
     count,
   );
   const hint = errorClass ? recoveryHint(errorClass) : undefined;
@@ -2081,7 +2132,7 @@ async function requestWorker<T>(
       }
     | undefined;
   if (response?.ok === false) {
-    throw new Error(response.error?.message ?? "Extension request failed");
+    throw new Error(response.error?.message ?? t("extensionRequestFailed"));
   }
   return response?.value;
 }
@@ -2091,9 +2142,11 @@ async function send(message: Record<string, unknown>): Promise<boolean> {
     await requestWorker(message);
     return true;
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Extension worker unavailable";
-    setStatus("error", "Needs attention");
-    appendLog("system", detail);
+    const detail = error instanceof Error
+      ? error.message
+      : t("extensionWorkerUnavailable");
+    setStatus("error", t("statusNeedsAttention"));
+    appendLog(t("logSystem"), detail);
     return false;
   }
 }
@@ -2103,7 +2156,7 @@ async function startListening(): Promise<void> {
   setListening(true);
   if (!(await send({ type: "start-listening" }))) {
     setListening(false);
-    setStatus("error", "Needs attention");
+    setStatus("error", t("statusNeedsAttention"));
   }
 }
 
@@ -2112,7 +2165,7 @@ async function stopListening(): Promise<void> {
   setListening(false);
   if (!(await send({ type: "stop-listening" }))) {
     setListening(true);
-    setStatus("error", "Needs attention");
+    setStatus("error", t("statusNeedsAttention"));
   }
 }
 
@@ -2211,7 +2264,7 @@ clearLog.addEventListener("click", () => {
   newestLogEntry = undefined;
   const empty = document.createElement("li");
   empty.className = "empty-log";
-  empty.textContent = "No commands yet.";
+  empty.textContent = t("noCommandsYet");
   actionLog.append(empty);
 });
 
@@ -2252,13 +2305,13 @@ exportNotes.addEventListener("click", async () => {
       !result.dataUrl.startsWith("data:text/markdown;charset=utf-8,") ||
       result.dataUrl.length > 2_500_000
     ) {
-      throw new Error("Notes export returned invalid data");
+      throw new Error(t("notesExportInvalid"));
     }
     downloadDataUrl(result.filename, result.dataUrl);
   } catch (error) {
     appendLog(
-      "export notes",
-      error instanceof Error ? error.message : "Export failed",
+      t("logExportNotes"),
+      error instanceof Error ? error.message : t("exportFailed"),
     );
   } finally {
     exportNotes.disabled = panelNotes.length === 0;
@@ -2296,9 +2349,9 @@ exportSettingsBackup.addEventListener("click", async () => {
       throw new Error("Backup export returned invalid data");
     }
     downloadDataUrl(result.filename, result.dataUrl);
-    showSettingsBackupStatus("Backup exported.");
+    showSettingsBackupStatus(t("backupExported"));
   } catch {
-    showSettingsBackupStatus("Backup export failed.");
+    showSettingsBackupStatus(t("backupExportFailed"));
   } finally {
     exportSettingsBackup.disabled = false;
   }
@@ -2337,20 +2390,21 @@ settingsBackupFile.addEventListener("change", async () => {
       throw new TypeError("Backup file is invalid");
     }
     pendingSettingsBackup = backup;
-    settingsBackupConfirmCopy.textContent =
-      `Import ${response.preview.noteCount} notes and settings? ` +
-      "This replaces your settings.";
+    settingsBackupConfirmCopy.textContent = t(
+      "importConfirm",
+      String(response.preview.noteCount),
+    );
     settingsBackupConfirm.hidden = false;
     confirmSettingsImport.focus();
   } catch {
     clearSettingsImport();
-    showSettingsBackupStatus("This backup file is not valid.");
+    showSettingsBackupStatus(t("invalidBackupFile"));
   }
 });
 
 cancelSettingsImport.addEventListener("click", () => {
   clearSettingsImport();
-  showSettingsBackupStatus("Import canceled.");
+  showSettingsBackupStatus(t("importCanceled"));
   chooseSettingsBackup.focus();
 });
 
@@ -2380,16 +2434,16 @@ confirmSettingsImport.addEventListener("click", async () => {
     clearSettingsImport();
     showSettingsBackupStatus(
       added === 0
-        ? "Import complete. Settings replaced. No notes added."
-        : `Import complete. Settings replaced. Added ${added} notes.`,
+        ? t("importCompleteNoNotes")
+        : t("importCompleteWithNotes", String(added)),
     );
     await Promise.all([loadSpeechSettings(), loadQuietMode()]);
   } catch (error) {
     clearSettingsImport();
     showSettingsBackupStatus(
       error instanceof TypeError
-        ? "This backup file is not valid."
-        : "Import failed. Nothing changed.",
+        ? t("invalidBackupFile")
+        : t("importFailed"),
     );
   }
 });
@@ -2397,11 +2451,11 @@ confirmSettingsImport.addEventListener("click", async () => {
 async function prepareNanoModel(): Promise<void> {
   setupPrepareNano.disabled = true;
   nanoProgressCard.hidden = false;
-  setStatus("booting", "Preparing Nano");
+  setStatus("booting", t("statusPreparingNano"));
 
   try {
     if (!("LanguageModel" in globalThis)) {
-      throw new Error("Chrome Prompt API is absent");
+      throw new Error(t("chromePromptApiAbsent"));
     }
 
     const session = await LanguageModel.create({
@@ -2422,9 +2476,17 @@ async function prepareNanoModel(): Promise<void> {
     showNanoState("available");
     await send({ type: "nano-ready" });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Nano setup failed";
-    setStatus("error", "Nano setup failed");
-    appendLog("model setup", message, undefined, true, "nano-unavailable");
+    const message = error instanceof Error
+      ? error.message
+      : t("nanoSetupFailed");
+    setStatus("error", t("nanoSetupFailed"));
+    appendLog(
+      t("logModelSetup"),
+      message,
+      undefined,
+      true,
+      "nano-unavailable",
+    );
     setupPrepareNano.disabled = false;
   }
 }
@@ -2444,7 +2506,7 @@ async function preparePremiumVoiceModel(): Promise<void> {
       false,
       selectedPremiumVoice,
       undefined,
-      "Premium voice setup could not start. Sotto is still using your operating system voice.",
+      t("premiumVoiceSetupStartFailed"),
     );
   }
 }
@@ -2495,7 +2557,7 @@ async function preparePremiumSpeechModel(): Promise<void> {
       false,
       highAccuracyTier,
       highAccuracyResumable,
-      "High accuracy speech setup could not start. Moonshine tiny is still available.",
+      t("premiumSpeechSetupStartFailed"),
     );
   }
 }
@@ -2544,7 +2606,7 @@ quietModeToggle.addEventListener("change", async () => {
     showQuietMode(saved);
   } catch {
     showQuietMode(!requested);
-    appendLog("quiet mode", "Quiet mode could not be saved.");
+    appendLog(t("logQuietMode"), t("quietModeSaveFailed"));
   } finally {
     quietModeToggle.disabled = false;
   }
@@ -2555,8 +2617,8 @@ enableCapture.addEventListener("click", async () => {
   try {
     if (!(await requestCapturePermission())) {
       appendLog(
-        "screen capture",
-        "Permission was not granted",
+        t("logScreenCapture"),
+        t("capturePermissionNotGranted"),
         undefined,
         true,
         "capture-permission",
@@ -2569,10 +2631,18 @@ enableCapture.addEventListener("click", async () => {
 
 function showClipboardWorkflow(workflow: ClipboardWorkflow): void {
   pendingScreenshot = workflow;
-  copyScreenshot.textContent = workflow.buttonLabel;
+  const createUrl = workflow.afterWrite?.followUp?.createUrl;
+  copyScreenshot.textContent =
+    createUrl === "https://claude.ai/new"
+      ? t("copyAndOpenClaude")
+      : createUrl === "https://chatgpt.com/"
+        ? t("copyAndOpenChatGpt")
+        : createUrl === "https://gemini.google.com/app"
+          ? t("copyAndOpenGemini")
+          : t("copyScreenshot");
   clipboardCopy.textContent = workflow.afterWrite?.followUp
-    ? "Copy the PNG. Sotto will then open the destination."
-    : "Copy the PNG to your clipboard.";
+    ? t("copyPngThenOpen")
+    : t("copyPngToClipboard");
   clipboardCard.hidden = false;
 }
 
@@ -2598,10 +2668,9 @@ async function receiveClipboardWorkflow(
     await completeClipboardWorkflow(workflow);
   } catch {
     showClipboardWorkflow(workflow);
-    const message =
-      "Chrome cannot copy while Sotto and the page are inactive. Select Copy.";
+    const message = t("clipboardInactive");
     clipboardCopy.textContent = message;
-    appendLog("copy screenshot", message);
+    appendLog(t("logCopyScreenshot"), message);
   }
 }
 
@@ -2620,7 +2689,10 @@ copyScreenshot.addEventListener("click", async () => {
         const spoken = screenQuestion
           ? "Screen questions need screen capture permission."
           : "Screenshot needs screen capture permission.";
-        appendLog(screenQuestion ? "screen question" : "screenshot", spoken);
+        appendLog(
+          screenQuestion ? t("logScreenQuestion") : t("logScreenshot"),
+          spoken,
+        );
         await send({ type: "speak", text: spoken });
         return;
       }
@@ -2635,7 +2707,7 @@ copyScreenshot.addEventListener("click", async () => {
         return;
       }
       if (result?.workflow?.kind !== "clipboard-write") {
-        throw new Error("Screenshot was not ready to copy");
+        throw new Error(t("screenshotNotReady"));
       }
       await receiveClipboardWorkflow(result.workflow);
       return;
@@ -2644,8 +2716,8 @@ copyScreenshot.addEventListener("click", async () => {
     await completeClipboardWorkflow(clipboardWorkflow!);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Clipboard write failed";
-    appendLog("copy screenshot", message);
+      error instanceof Error ? error.message : t("clipboardWriteFailed");
+    appendLog(t("logCopyScreenshot"), message);
   } finally {
     copyScreenshot.disabled = false;
   }
@@ -2668,7 +2740,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       showMicrophoneState(message.mic);
       if (message.error) {
         appendLog(
-          "system",
+          t("logSystem"),
           message.error,
           undefined,
           true,
@@ -2705,7 +2777,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       showTranscript(message.message, message.diagnostic);
       transcript.dataset.diagnostic = message.diagnostic;
       appendLog(
-        `speech / ${message.diagnostic}`,
+        t("logSpeechDiagnostic", message.diagnostic),
         message.message,
         undefined,
         true,
@@ -2722,13 +2794,17 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       showQuietMode(message.enabled);
       break;
     case "speech-start":
-      listeningMark.textContent = isDictating ? "DICTATION" : "SPEECH";
+      listeningMark.textContent = isDictating
+        ? t("dictation")
+        : t("stateSpeech");
       listeningMark.dataset.active = "true";
       micMeter.dataset.state = "speech";
       break;
     case "speech-end":
       if (isListening) {
-        listeningMark.textContent = isDictating ? "DICTATION" : "LIVE";
+        listeningMark.textContent = isDictating
+          ? t("dictation")
+          : t("stateLive");
         listeningMark.dataset.active = "true";
         micMeter.dataset.state = "listening";
       }
@@ -2755,14 +2831,14 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       break;
     case "page-text":
       readingProgress.hidden = true;
-      showPageText(message.text, message.title ?? "PAGE");
+      showPageText(message.text, message.title ?? t("page"));
       break;
     case "rewrite-fallback":
       readingProgress.hidden = true;
-      showPageText(message.text, "REWRITE NOT INSERTED");
+      showPageText(message.text, t("rewriteNotInserted"));
       appendLog(
-        "rewrite",
-        "The editor changed; generated text is shown without inserting it",
+        t("logRewrite"),
+        t("rewriteNotInsertedLog"),
       );
       break;
     case "reading-progress":
@@ -2823,23 +2899,23 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
     case "screenshot-permission-needed":
       pendingScreenshot = undefined;
       pendingScreenshotPermission = message.workflow;
-      copyScreenshot.textContent = "Enable screen capture (one-time)";
+      copyScreenshot.textContent = t("enableScreenCaptureOneTime");
       renderRecoveryMessage(
         clipboardCopy,
-        `Sotto needs one-time access to capture ${message.workflow.host}.`,
+        t("captureHostPermission", message.workflow.host),
         "capture-permission",
       );
       clipboardCard.hidden = false;
       break;
     case "pipeline-error":
-      setStatus("error", "Needs attention");
+      setStatus("error", t("statusNeedsAttention"));
       renderRecoveryMessage(
         pipelineError,
         message.message,
         message.errorClass,
       );
       appendLog(
-        "system",
+        t("logSystem"),
         message.message,
         undefined,
         false,
@@ -2856,22 +2932,21 @@ async function showAssignedShortcuts(): Promise<void> {
       {
         command: "toggle-sotto",
         label: shortcutLabel,
-        instruction: "Assign Listen in chrome://extensions/shortcuts.",
+        instruction: t("assignListenShortcut"),
       },
       {
         command: "read-this-page",
         label: readPageShortcutLabel,
-        instruction:
-          "Assign Read this page in chrome://extensions/shortcuts.",
+        instruction: t("assignReadShortcut"),
       },
     ] as const;
     for (const item of shortcuts) {
       const shortcut =
         commands.find((command) => command.name === item.command)?.shortcut ??
           "";
-      item.label.textContent = shortcut || "UNASSIGNED";
+      item.label.textContent = shortcut || t("unassigned");
       if (!shortcut) {
-        appendLog("shortcut", item.instruction);
+        appendLog(t("logShortcut"), item.instruction);
       }
     }
   } catch (error) {
@@ -2906,8 +2981,8 @@ async function showReminderFromLocation(): Promise<void> {
     }
   } catch (error) {
     appendLog(
-      "reminder",
-      error instanceof Error ? error.message : "Reminder is unavailable",
+      t("logReminder"),
+      error instanceof Error ? error.message : t("reminderUnavailable"),
     );
   }
 }
@@ -2931,6 +3006,8 @@ async function loadLatencyStatistics(): Promise<void> {
 }
 
 showTranscript("");
+modelsTotal.value = t("modelsTotal", "0 B");
+modelsTotal.textContent = modelsTotal.value;
 micMeter.dataset.state = "idle";
 micMeterFill.style.transform = "scaleX(0)";
 renderSetupView();
@@ -2941,8 +3018,8 @@ void requestWorker<readonly PanelNote[]>({ type: "get-notes" })
   })
   .catch((error: unknown) => {
     appendLog(
-      "notes",
-      error instanceof Error ? error.message : "Notes are unavailable",
+      t("logNotes"),
+      error instanceof Error ? error.message : t("notesUnavailable"),
     );
   });
 void requestWorker<readonly PanelReminder[]>({ type: "get-reminders" })
@@ -2951,10 +3028,10 @@ void requestWorker<readonly PanelReminder[]>({ type: "get-reminders" })
   })
   .catch((error: unknown) => {
     appendLog(
-      "reminders",
+      t("logReminders"),
       error instanceof Error
         ? error.message
-        : "Reminders are unavailable.",
+        : t("remindersUnavailable"),
     );
   });
 void loadCapturePermissionState();

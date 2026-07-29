@@ -1,3 +1,5 @@
+import { t } from "./panel-i18n.js";
+
 export type NanoSetupState =
   | "unavailable"
   | "downloadable"
@@ -62,22 +64,22 @@ function microphoneRow(
     return {
       id: "microphone",
       state: "done",
-      description: "Access is ready.",
+      description: t("setupAccessReady"),
     };
   }
   if (state === "unknown") {
     return {
       id: "microphone",
       state: "pending",
-      description: "Checking access.",
+      description: t("setupCheckingAccess"),
     };
   }
   return {
     id: "microphone",
     state: "needs-action",
     description: state === "denied"
-      ? "Access is blocked. Review Chrome settings."
-      : "Allow access to use voice commands.",
+      ? t("setupAccessBlocked")
+      : t("setupAllowAccess"),
     action: "microphone",
   };
 }
@@ -87,20 +89,20 @@ function captureRow(state: SetupState["capture"]): SetupRow {
     return {
       id: "capture",
       state: "done",
-      description: "The one-time grant is ready.",
+      description: t("setupCaptureReady"),
     };
   }
   if (state === undefined) {
     return {
       id: "capture",
       state: "pending",
-      description: "Checking the one-time grant.",
+      description: t("setupCheckingCapture"),
     };
   }
   return {
     id: "capture",
     state: "needs-action",
-    description: "Enable the one-time grant for screen tasks.",
+    description: t("setupEnableCapture"),
     action: "capture",
   };
 }
@@ -111,33 +113,33 @@ function nanoRow(state: SetupState["nano"]): SetupRow {
       return {
         id: "nano",
         state: "done",
-        description: "The local model is ready.",
+        description: t("setupLocalModelReady"),
       };
     case "downloading":
       return {
         id: "nano",
         state: "pending",
-        description: "The local model is downloading.",
+        description: t("setupLocalModelDownloading"),
         action: "nano",
       };
     case "downloadable":
       return {
         id: "nano",
         state: "needs-action",
-        description: "Download the local model.",
+        description: t("setupDownloadLocalModel"),
         action: "nano",
       };
     case "unavailable":
       return {
         id: "nano",
         state: "needs-action",
-        description: "The local model is not available on this device.",
+        description: t("setupLocalModelUnavailable"),
       };
     default:
       return {
         id: "nano",
         state: "pending",
-        description: "Checking the local model.",
+        description: t("setupCheckingLocalModel"),
       };
   }
 }
@@ -150,7 +152,7 @@ function premiumRow(
     return {
       id: "premium",
       state: "pending",
-      description: "Checking the optional models.",
+      description: t("setupCheckingOptionalModels"),
     };
   }
   const speechReady = speech === "ready" || speech === "active";
@@ -158,7 +160,7 @@ function premiumRow(
     return {
       id: "premium",
       state: "done",
-      description: "The optional models are ready.",
+      description: t("setupOptionalModelsReady"),
     };
   }
   if (
@@ -171,13 +173,13 @@ function premiumRow(
     return {
       id: "premium",
       state: "pending",
-      description: "An optional model is downloading.",
+      description: t("setupOptionalModelDownloading"),
     };
   }
   return {
     id: "premium",
     state: "needs-action",
-    description: "Download optional models for better speech and voice.",
+    description: t("setupDownloadOptionalModels"),
     action: voice === "ready" ? "premium-speech" : "premium-voice",
   };
 }

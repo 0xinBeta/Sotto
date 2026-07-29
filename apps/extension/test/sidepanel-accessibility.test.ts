@@ -51,7 +51,7 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("mic-meter")).toContain('aria-valuemax="100"');
     expect(openingTag("mic-meter")).toContain('aria-valuenow="0"');
     expect(openingTag("mic-meter")).toContain(
-      'aria-label="Microphone input level"',
+      'data-i18n-aria-label="microphoneInputLevel"',
     );
     expect(openingTag("pause-reading")).toContain('type="button"');
     expect(openingTag("skip-reading")).toContain('type="button"');
@@ -82,10 +82,10 @@ describe("side-panel accessibility structure", () => {
       'aria-live="polite"',
     );
     expect(openingTag("dismiss-setup")).toContain('type="button"');
-    expect(panelMarkup).toContain("Setup complete");
+    expect(panelMarkup).toContain('data-i18n-append="setupComplete"');
     expect(panelMarkup).not.toContain('class="onboarding"');
     expect(panelMarkup).toMatch(
-      /<label for="command-input">TYPE A COMMAND<\/label>/,
+      /<label for="command-input" data-i18n="typeCommand"><\/label>/,
     );
     expect(panelMarkup).toMatch(
       /<label class="voice-switch" for="premium-voice-enabled">/,
@@ -96,12 +96,14 @@ describe("side-panel accessibility structure", () => {
     expect(panelMarkup).toMatch(
       /class="quiet-switch"[\s\S]*for="quiet-mode"/,
     );
-    expect(panelMarkup).toContain('<label for="speech-rate">Rate</label>');
     expect(panelMarkup).toContain(
-      '<label for="speech-volume">Volume</label>',
+      '<label for="speech-rate" data-i18n="rate"></label>',
     );
     expect(panelMarkup).toContain(
-      '<label for="response-verbosity">Response length</label>',
+      '<label for="speech-volume" data-i18n="volume"></label>',
+    );
+    expect(panelMarkup).toContain(
+      '<label for="response-verbosity" data-i18n="responseLength"></label>',
     );
     expect(openingTag("speech-rate")).toContain('type="range"');
     expect(openingTag("speech-rate")).toContain('min="0.5"');
@@ -110,8 +112,12 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("speech-volume")).toContain('min="0"');
     expect(openingTag("speech-volume")).toContain('max="1"');
     expect(openingTag("response-verbosity")).toMatch(/^<select\b/);
-    expect(panelMarkup).toContain('<option value="normal">Normal</option>');
-    expect(panelMarkup).toContain('<option value="brief">Brief</option>');
+    expect(panelMarkup).toContain(
+      '<option value="normal" data-i18n="responseNormal"></option>',
+    );
+    expect(panelMarkup).toContain(
+      '<option value="brief" data-i18n="responseBrief"></option>',
+    );
     expect(openingTag("settings-backup-file")).toContain('type="file"');
     expect(openingTag("settings-backup-file")).toContain(
       'accept="application/json,.json"',

@@ -1,3 +1,5 @@
+import { t } from "./panel-i18n.js";
+
 export interface ExchangeTimings {
   readonly input: "voice" | "typed";
   readonly sttMs?: number;
@@ -267,24 +269,24 @@ export function formatExchangeTimings(
 
   const stages: string[] = [];
   if (timings.input === "typed") {
-    stages.push("typed");
+    stages.push(t("timingTyped"));
   } else if (timings.sttMs !== undefined) {
-    stages.push(`stt ${formatStage(timings.sttMs)}`);
+    stages.push(t("timingStt", formatStage(timings.sttMs)));
   }
   if (timings.parseMs !== undefined) {
-    stages.push(`parse ${formatStage(timings.parseMs)}`);
+    stages.push(t("timingParse", formatStage(timings.parseMs)));
   }
   if (timings.actionMs !== undefined) {
-    stages.push(`act ${formatStage(timings.actionMs)}`);
+    stages.push(t("timingAct", formatStage(timings.actionMs)));
   }
   if (timings.voiceMs !== undefined) {
-    stages.push(`voice ${formatStage(timings.voiceMs)}`);
+    stages.push(t("timingVoice", formatStage(timings.voiceMs)));
   }
 
   const totalMs = durations.reduce((sum, duration) => sum + duration, 0);
   return {
     stages: stages.join(" · "),
-    total: `total ${formatTotal(totalMs)}`,
+    total: t("timingTotal", formatTotal(totalMs)),
     totalMs,
     tone: timingTone(totalMs),
   };

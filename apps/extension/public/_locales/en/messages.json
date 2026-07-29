@@ -1,0 +1,956 @@
+{
+  "extensionName": {
+    "message": "Sotto"
+  },
+  "extensionDescription": {
+    "message": "Private, on-device voice commands for Chrome."
+  },
+  "panelEyebrow": {
+    "message": "ON-DEVICE VOICE UTILITY"
+  },
+  "statusCheckingHardware": {
+    "message": "Checking hardware"
+  },
+  "quietModeOff": {
+    "message": "Quiet mode off"
+  },
+  "quietModeOn": {
+    "message": "Quiet mode on"
+  },
+  "setupIndex": {
+    "message": "00 / SETUP"
+  },
+  "setupHeading": {
+    "message": "Set up Sotto."
+  },
+  "setupStepCount": {
+    "message": "4 STEPS"
+  },
+  "microphone": {
+    "message": "Microphone"
+  },
+  "screenCapture": {
+    "message": "Screen capture"
+  },
+  "geminiNano": {
+    "message": "Gemini Nano"
+  },
+  "premiumModels": {
+    "message": "Premium models"
+  },
+  "optional": {
+    "message": "Optional"
+  },
+  "setupPendingCheckingAccess": {
+    "message": "Pending. Checking access."
+  },
+  "setupPendingCheckingCapture": {
+    "message": "Pending. Checking the one-time grant."
+  },
+  "setupPendingCheckingLocalModel": {
+    "message": "Pending. Checking the local model."
+  },
+  "setupPendingCheckingOptionalModels": {
+    "message": "Pending. Checking the optional models."
+  },
+  "grantMicrophoneAccess": {
+    "message": "Grant microphone access"
+  },
+  "enableScreenCapture": {
+    "message": "Enable screen capture"
+  },
+  "prepareGeminiNano": {
+    "message": "Prepare Gemini Nano"
+  },
+  "downloadPremiumVoice": {
+    "message": "Download premium voice"
+  },
+  "setupComplete": {
+    "message": "Setup complete"
+  },
+  "dismiss": {
+    "message": "Dismiss"
+  },
+  "modelSetup": {
+    "message": "Model setup"
+  },
+  "moonshineSpeechModel": {
+    "message": "Moonshine speech model"
+  },
+  "localOutputVoiceIndex": {
+    "message": "LOCAL OUTPUT / AF_HEART"
+  },
+  "premiumVoice": {
+    "message": "Premium voice"
+  },
+  "stateAbsent": {
+    "message": "ABSENT"
+  },
+  "premiumVoiceAbsentCopy": {
+    "message": "Download the natural on-device voice when you are ready. Until then, Sotto uses your operating system voice instantly."
+  },
+  "usePremium": {
+    "message": "Use premium"
+  },
+  "chooseVoice": {
+    "message": "Choose a voice"
+  },
+  "previewDownloadsVoice": {
+    "message": "Preview downloads only that voice."
+  },
+  "kokoroVoiceModel": {
+    "message": "Kokoro voice model"
+  },
+  "localInputBetaIndex": {
+    "message": "LOCAL INPUT / BETA"
+  },
+  "highAccuracySpeechBeta": {
+    "message": "High accuracy speech (beta)"
+  },
+  "stateChecking": {
+    "message": "CHECKING"
+  },
+  "premiumSpeechCheckingCopy": {
+    "message": "Checking local speech hardware. Moonshine tiny remains available instantly."
+  },
+  "checkingHardwareEllipsis": {
+    "message": "Checking hardware…"
+  },
+  "useHighAccuracy": {
+    "message": "Use high accuracy"
+  },
+  "speechModel": {
+    "message": "Speech model"
+  },
+  "localStorageIndex": {
+    "message": "LOCAL STORAGE"
+  },
+  "models": {
+    "message": "Models"
+  },
+  "modelsTotal": {
+    "message": "Total: $1"
+  },
+  "modelsCopy": {
+    "message": "Sotto measures files in the local model cache. Chrome manages its built-in models."
+  },
+  "checkingLocalFiles": {
+    "message": "Checking local files."
+  },
+  "localOutputSettingsIndex": {
+    "message": "LOCAL OUTPUT / SETTINGS"
+  },
+  "speechSettings": {
+    "message": "Speech settings"
+  },
+  "speechSettingsCopy": {
+    "message": "Changes apply to the next spoken response."
+  },
+  "rate": {
+    "message": "Rate"
+  },
+  "volume": {
+    "message": "Volume"
+  },
+  "responseLength": {
+    "message": "Response length"
+  },
+  "responseNormal": {
+    "message": "Normal"
+  },
+  "responseBrief": {
+    "message": "Brief"
+  },
+  "copyDiagnosticReport": {
+    "message": "Copy diagnostic report"
+  },
+  "settingsBackupHeading": {
+    "message": "Settings and notes backup"
+  },
+  "settingsBackupCopy": {
+    "message": "Save your settings and notes in one JSON file."
+  },
+  "exportBackup": {
+    "message": "Export backup"
+  },
+  "importBackup": {
+    "message": "Import backup"
+  },
+  "import": {
+    "message": "Import"
+  },
+  "cancel": {
+    "message": "Cancel"
+  },
+  "transcriptIndex": {
+    "message": "01 / HEARD"
+  },
+  "stateIdle": {
+    "message": "IDLE"
+  },
+  "transcriptPlaceholder": {
+    "message": "Your words will appear here."
+  },
+  "voiceInput": {
+    "message": "Voice input"
+  },
+  "holdToTalk": {
+    "message": "Hold to talk"
+  },
+  "readThisPage": {
+    "message": "Read this page"
+  },
+  "microphoneInputLevel": {
+    "message": "Microphone input level"
+  },
+  "voiceUnavailable": {
+    "message": "Voice unavailable?"
+  },
+  "dictation": {
+    "message": "DICTATION"
+  },
+  "dictationActiveCopy": {
+    "message": "Speak your text. Say stop dictation to finish."
+  },
+  "resume": {
+    "message": "Resume"
+  },
+  "typeCommand": {
+    "message": "TYPE A COMMAND"
+  },
+  "commandPlaceholder": {
+    "message": "switch to the GitHub tab"
+  },
+  "runCommand": {
+    "message": "Run command"
+  },
+  "commandPipelineCopy": {
+    "message": "Uses the same private parse → validate → act pipeline."
+  },
+  "screenshotReady": {
+    "message": "SCREENSHOT READY"
+  },
+  "copyPngToContinue": {
+    "message": "Copy the PNG to continue."
+  },
+  "copyAndContinue": {
+    "message": "Copy & continue"
+  },
+  "page": {
+    "message": "PAGE"
+  },
+  "close": {
+    "message": "Close"
+  },
+  "textBeingRead": {
+    "message": "Text being read"
+  },
+  "readingProgress": {
+    "message": "Reading progress"
+  },
+  "pause": {
+    "message": "Pause"
+  },
+  "nextSentence": {
+    "message": "Next sentence"
+  },
+  "reminders": {
+    "message": "REMINDERS"
+  },
+  "noPendingReminders": {
+    "message": "No pending reminders."
+  },
+  "notesIndex": {
+    "message": "03 / NOTES"
+  },
+  "exportMarkdown": {
+    "message": "Export .md"
+  },
+  "searchNotes": {
+    "message": "Search notes"
+  },
+  "noNotesYet": {
+    "message": "No notes yet."
+  },
+  "logIndex": {
+    "message": "02 / DID"
+  },
+  "clear": {
+    "message": "Clear"
+  },
+  "latencyByStage": {
+    "message": "Latency by stage"
+  },
+  "stage": {
+    "message": "Stage"
+  },
+  "p50": {
+    "message": "p50"
+  },
+  "p95": {
+    "message": "p95"
+  },
+  "sampleCountAbbreviation": {
+    "message": "n"
+  },
+  "noCommandsYet": {
+    "message": "No commands yet."
+  },
+  "commandsIndex": {
+    "message": "04 /"
+  },
+  "commands": {
+    "message": "Commands"
+  },
+  "loadingCommands": {
+    "message": "Loading commands."
+  },
+  "speechRateTimes": {
+    "message": "$1 times"
+  },
+  "speechVolumePercent": {
+    "message": "$1 percent"
+  },
+  "logQuietMode": {
+    "message": "quiet mode"
+  },
+  "quietModeUnavailable": {
+    "message": "Quiet mode is unavailable."
+  },
+  "logSpeechSettings": {
+    "message": "speech settings"
+  },
+  "speechSettingsSaveFailed": {
+    "message": "Speech settings could not be saved."
+  },
+  "speechSettingsUnavailable": {
+    "message": "Speech settings are unavailable."
+  },
+  "logDiagnosticReport": {
+    "message": "diagnostic report"
+  },
+  "diagnosticReportCopied": {
+    "message": "Diagnostic report copied."
+  },
+  "diagnosticReportCopyFailed": {
+    "message": "The diagnostic report could not be copied."
+  },
+  "diagnosticReportInvalid": {
+    "message": "The diagnostic report is invalid."
+  },
+  "textClipboardUnavailable": {
+    "message": "Text clipboard writes are unavailable."
+  },
+  "logVoicePreview": {
+    "message": "voice preview"
+  },
+  "voicePreviewFailed": {
+    "message": "Voice preview failed."
+  },
+  "accentEnglish": {
+    "message": "$1 English"
+  },
+  "preview": {
+    "message": "Preview"
+  },
+  "previewVoice": {
+    "message": "Preview $1"
+  },
+  "dictationPaused": {
+    "message": "Dictation paused"
+  },
+  "stopDictation": {
+    "message": "Stop dictation"
+  },
+  "listeningEllipsis": {
+    "message": "Listening…"
+  },
+  "stateLive": {
+    "message": "LIVE"
+  },
+  "statusDictation": {
+    "message": "Dictation"
+  },
+  "statusListening": {
+    "message": "Listening"
+  },
+  "statusOnDevice": {
+    "message": "On device"
+  },
+  "dictationPausedCopy": {
+    "message": "Focus the same text field, then select Resume."
+  },
+  "dictationStoppedAnnouncement": {
+    "message": "Dictation stopped."
+  },
+  "dictationPausedAnnouncement": {
+    "message": "Dictation paused."
+  },
+  "dictationActiveAnnouncement": {
+    "message": "Dictation active."
+  },
+  "resumeReading": {
+    "message": "Resume reading"
+  },
+  "pauseReading": {
+    "message": "Pause reading"
+  },
+  "readingStoppedAnnouncement": {
+    "message": "Reading stopped."
+  },
+  "readingPausedAnnouncement": {
+    "message": "Reading paused."
+  },
+  "readingActiveAnnouncement": {
+    "message": "Reading active."
+  },
+  "setupStateDone": {
+    "message": "Done"
+  },
+  "setupStatePending": {
+    "message": "Pending"
+  },
+  "setupStateNeedsAction": {
+    "message": "Needs action"
+  },
+  "setupStateLine": {
+    "message": "$1. $2"
+  },
+  "reviewMicrophoneSettings": {
+    "message": "Review microphone settings"
+  },
+  "continueModelSetup": {
+    "message": "Continue model setup"
+  },
+  "retryVoiceDownload": {
+    "message": "Retry voice download"
+  },
+  "resumeSpeechDownload": {
+    "message": "Resume speech download"
+  },
+  "downloadSpeechModel": {
+    "message": "Download speech model"
+  },
+  "statusNanoUnavailable": {
+    "message": "Nano unavailable"
+  },
+  "statusNanoDownloading": {
+    "message": "Nano downloading"
+  },
+  "statusNanoSetup": {
+    "message": "Nano setup"
+  },
+  "useTextCommand": {
+    "message": "Use text command"
+  },
+  "statusMicrophoneBlocked": {
+    "message": "Microphone blocked"
+  },
+  "statusMicrophoneSetup": {
+    "message": "Microphone setup"
+  },
+  "chromeSummarizer": {
+    "message": "Chrome Summarizer"
+  },
+  "chromeTranslator": {
+    "message": "Chrome Translator"
+  },
+  "chromeRewriter": {
+    "message": "Chrome Rewriter"
+  },
+  "kokoroFileProgress": {
+    "message": "Kokoro · $1"
+  },
+  "speechFileProgress": {
+    "message": "Speech · $1"
+  },
+  "highAccuracySpeechModel": {
+    "message": "High accuracy speech model"
+  },
+  "modelFile": {
+    "message": "model"
+  },
+  "downloadProgressMegabytes": {
+    "message": "$1 of $2 MB"
+  },
+  "startingEllipsis": {
+    "message": "Starting…"
+  },
+  "deletingEllipsis": {
+    "message": "Deleting…"
+  },
+  "logModelStorage": {
+    "message": "model storage"
+  },
+  "logModelSetup": {
+    "message": "model setup"
+  },
+  "modelTaskFailed": {
+    "message": "The model task failed."
+  },
+  "download": {
+    "message": "Download"
+  },
+  "downloadNamed": {
+    "message": "Download $1"
+  },
+  "delete": {
+    "message": "Delete"
+  },
+  "deleteNamed": {
+    "message": "Delete $1"
+  },
+  "modelStateActive": {
+    "message": "active"
+  },
+  "modelStateCached": {
+    "message": "cached"
+  },
+  "modelStateAbsent": {
+    "message": "absent"
+  },
+  "modelStateDownloading": {
+    "message": "downloading"
+  },
+  "stateDownloading": {
+    "message": "DOWNLOADING"
+  },
+  "stateReady": {
+    "message": "READY"
+  },
+  "stateError": {
+    "message": "ERROR"
+  },
+  "stateNotDownloaded": {
+    "message": "NOT DOWNLOADED"
+  },
+  "stateValidating": {
+    "message": "VALIDATING"
+  },
+  "stateLoading": {
+    "message": "LOADING"
+  },
+  "stateWarming": {
+    "message": "WARMING"
+  },
+  "stateActive": {
+    "message": "ACTIVE"
+  },
+  "downloadingOnDevice": {
+    "message": "Downloading on device…"
+  },
+  "premiumVoiceDownloadingCopy": {
+    "message": "Sotto stays responsive while the model downloads. Spoken feedback continues through your operating system voice."
+  },
+  "premiumVoiceReady": {
+    "message": "$1 is ready at 24 kHz. The system voice stays available."
+  },
+  "premiumVoiceReadyWithBackend": {
+    "message": "$1 is ready at 24 kHz with $2. The system voice stays available."
+  },
+  "premiumVoiceDownloadFailed": {
+    "message": "The voice download failed. Select retry to use completed files from the local cache."
+  },
+  "parakeetModelCopy": {
+    "message": "Parakeet-TDT v3 uses a 409 MB pinned model with a WebGPU encoder."
+  },
+  "moonshineBaseModelCopy": {
+    "message": "This machine uses Moonshine base q8, a 63 MB WASM accuracy upgrade."
+  },
+  "resumeDownload": {
+    "message": "Resume download"
+  },
+  "download409Model": {
+    "message": "Download 409 MB model"
+  },
+  "download63Model": {
+    "message": "Download 63 MB model"
+  },
+  "premiumSpeechAbsentCopy": {
+    "message": "$1 Nothing downloads until you choose it; Moonshine tiny remains instant."
+  },
+  "premiumSpeechDownloadingCopy": {
+    "message": "$1 The files are validated before activation."
+  },
+  "validatingPinnedFiles": {
+    "message": "Validating pinned files…"
+  },
+  "premiumSpeechValidatingCopy": {
+    "message": "Sotto is checking the complete local model before loading it."
+  },
+  "loadingLocalModel": {
+    "message": "Loading local model…"
+  },
+  "premiumSpeechLoadingCopy": {
+    "message": "The model is compiling locally. Moonshine tiny stays available until validation finishes."
+  },
+  "runningHardwareCheck": {
+    "message": "Running hardware check…"
+  },
+  "premiumSpeechWarmingCopy": {
+    "message": "A bundled spoken-word fixture is checking recognition and warm latency."
+  },
+  "premiumSpeechReadyCopy": {
+    "message": "$1 It is ready but switched off; Moonshine tiny is active."
+  },
+  "premiumSpeechActiveCopy": {
+    "message": "$1 High accuracy is ON."
+  },
+  "premiumSpeechActiveReloadCopy": {
+    "message": "$1 High accuracy is ON and will reload from the local cache when needed."
+  },
+  "retryHighAccuracySetup": {
+    "message": "Retry high accuracy setup"
+  },
+  "premiumSpeechDownloadStopped": {
+    "message": "The download stopped. Select resume after the network is available."
+  },
+  "premiumSpeechStartFailed": {
+    "message": "High accuracy speech could not start. Moonshine tiny remains active."
+  },
+  "storageCount": {
+    "message": "$1 of $2"
+  },
+  "noNotesMatch": {
+    "message": "No notes match your search."
+  },
+  "savedNote": {
+    "message": "Saved note"
+  },
+  "deleteNote": {
+    "message": "Delete note: $1"
+  },
+  "logDeleteNote": {
+    "message": "delete note"
+  },
+  "deleteFailed": {
+    "message": "Delete failed"
+  },
+  "cancelReminder": {
+    "message": "Cancel reminder: $1"
+  },
+  "logCancelReminder": {
+    "message": "cancel reminder"
+  },
+  "reminderNotCancelled": {
+    "message": "The reminder was not cancelled."
+  },
+  "reminderBanner": {
+    "message": "Reminder: $1"
+  },
+  "reminderBannerNotificationsOff": {
+    "message": "Reminder: $1. Desktop notifications are off."
+  },
+  "latencySpeechInput": {
+    "message": "Speech input"
+  },
+  "latencyParse": {
+    "message": "Parse"
+  },
+  "latencyAct": {
+    "message": "Act"
+  },
+  "latencyVoice": {
+    "message": "Voice"
+  },
+  "latencyTotal": {
+    "message": "Total"
+  },
+  "latencySummary": {
+    "message": "p50 $1 · p95 $2 (n=$3)"
+  },
+  "actionLogEntry": {
+    "message": " → $1"
+  },
+  "actionLogAnnouncement": {
+    "message": "$1 $2"
+  },
+  "actionLogRepeated": {
+    "message": "$1 Repeated $2 times."
+  },
+  "extensionRequestFailed": {
+    "message": "Extension request failed"
+  },
+  "extensionWorkerUnavailable": {
+    "message": "Extension worker unavailable"
+  },
+  "statusNeedsAttention": {
+    "message": "Needs attention"
+  },
+  "logSystem": {
+    "message": "system"
+  },
+  "logExportNotes": {
+    "message": "export notes"
+  },
+  "exportFailed": {
+    "message": "Export failed"
+  },
+  "notesExportInvalid": {
+    "message": "Notes export returned invalid data"
+  },
+  "backupExported": {
+    "message": "Backup exported."
+  },
+  "backupExportFailed": {
+    "message": "Backup export failed."
+  },
+  "importConfirm": {
+    "message": "Import $1 notes and settings? This replaces your settings."
+  },
+  "invalidBackupFile": {
+    "message": "This backup file is not valid."
+  },
+  "importCanceled": {
+    "message": "Import canceled."
+  },
+  "importCompleteNoNotes": {
+    "message": "Import complete. Settings replaced. No notes added."
+  },
+  "importCompleteWithNotes": {
+    "message": "Import complete. Settings replaced. Added $1 notes."
+  },
+  "importFailed": {
+    "message": "Import failed. Nothing changed."
+  },
+  "statusPreparingNano": {
+    "message": "Preparing Nano"
+  },
+  "chromePromptApiAbsent": {
+    "message": "Chrome Prompt API is absent"
+  },
+  "nanoSetupFailed": {
+    "message": "Nano setup failed"
+  },
+  "premiumVoiceSetupStartFailed": {
+    "message": "Premium voice setup could not start. Sotto is still using your operating system voice."
+  },
+  "premiumSpeechSetupStartFailed": {
+    "message": "High accuracy speech setup could not start. Moonshine tiny is still available."
+  },
+  "quietModeSaveFailed": {
+    "message": "Quiet mode could not be saved."
+  },
+  "logScreenCapture": {
+    "message": "screen capture"
+  },
+  "capturePermissionNotGranted": {
+    "message": "Permission was not granted"
+  },
+  "copyPngThenOpen": {
+    "message": "Copy the PNG. Sotto will then open the destination."
+  },
+  "copyPngToClipboard": {
+    "message": "Copy the PNG to your clipboard."
+  },
+  "copyScreenshot": {
+    "message": "Copy screenshot"
+  },
+  "copyAndOpenClaude": {
+    "message": "Copy and open Claude"
+  },
+  "copyAndOpenChatGpt": {
+    "message": "Copy and open ChatGPT"
+  },
+  "copyAndOpenGemini": {
+    "message": "Copy and open Gemini"
+  },
+  "clipboardInactive": {
+    "message": "Chrome cannot copy while Sotto and the page are inactive. Select Copy."
+  },
+  "logCopyScreenshot": {
+    "message": "copy screenshot"
+  },
+  "logScreenQuestion": {
+    "message": "screen question"
+  },
+  "logScreenshot": {
+    "message": "screenshot"
+  },
+  "screenshotNotReady": {
+    "message": "Screenshot was not ready to copy"
+  },
+  "clipboardWriteFailed": {
+    "message": "Clipboard write failed"
+  },
+  "stateSpeech": {
+    "message": "SPEECH"
+  },
+  "logSpeechDiagnostic": {
+    "message": "speech / $1"
+  },
+  "rewriteNotInserted": {
+    "message": "REWRITE NOT INSERTED"
+  },
+  "logRewrite": {
+    "message": "rewrite"
+  },
+  "rewriteNotInsertedLog": {
+    "message": "The editor changed; generated text is shown without inserting it"
+  },
+  "enableScreenCaptureOneTime": {
+    "message": "Enable screen capture (one-time)"
+  },
+  "captureHostPermission": {
+    "message": "Sotto needs one-time access to capture $1."
+  },
+  "assignListenShortcut": {
+    "message": "Assign Listen in chrome://extensions/shortcuts."
+  },
+  "assignReadShortcut": {
+    "message": "Assign Read this page in chrome://extensions/shortcuts."
+  },
+  "unassigned": {
+    "message": "UNASSIGNED"
+  },
+  "logShortcut": {
+    "message": "shortcut"
+  },
+  "logReminder": {
+    "message": "reminder"
+  },
+  "reminderUnavailable": {
+    "message": "Reminder is unavailable"
+  },
+  "logNotes": {
+    "message": "notes"
+  },
+  "notesUnavailable": {
+    "message": "Notes are unavailable"
+  },
+  "logReminders": {
+    "message": "reminders"
+  },
+  "remindersUnavailable": {
+    "message": "Reminders are unavailable."
+  },
+  "setupAccessReady": {
+    "message": "Access is ready."
+  },
+  "setupCheckingAccess": {
+    "message": "Checking access."
+  },
+  "setupAccessBlocked": {
+    "message": "Access is blocked. Review Chrome settings."
+  },
+  "setupAllowAccess": {
+    "message": "Allow access to use voice commands."
+  },
+  "setupCaptureReady": {
+    "message": "The one-time grant is ready."
+  },
+  "setupCheckingCapture": {
+    "message": "Checking the one-time grant."
+  },
+  "setupEnableCapture": {
+    "message": "Enable the one-time grant for screen tasks."
+  },
+  "setupLocalModelReady": {
+    "message": "The local model is ready."
+  },
+  "setupLocalModelDownloading": {
+    "message": "The local model is downloading."
+  },
+  "setupDownloadLocalModel": {
+    "message": "Download the local model."
+  },
+  "setupLocalModelUnavailable": {
+    "message": "The local model is not available on this device."
+  },
+  "setupCheckingLocalModel": {
+    "message": "Checking the local model."
+  },
+  "setupCheckingOptionalModels": {
+    "message": "Checking the optional models."
+  },
+  "setupOptionalModelsReady": {
+    "message": "The optional models are ready."
+  },
+  "setupOptionalModelDownloading": {
+    "message": "An optional model is downloading."
+  },
+  "setupDownloadOptionalModels": {
+    "message": "Download optional models for better speech and voice."
+  },
+  "hintMicrophonePermission": {
+    "message": "Grant microphone access in setup."
+  },
+  "hintSpeakCloser": {
+    "message": "Speak closer to the microphone."
+  },
+  "hintQuieterPlace": {
+    "message": "Try again in a quieter place."
+  },
+  "hintSpeechModelBusy": {
+    "message": "The speech model is busy. Try again."
+  },
+  "hintFastModelUnavailable": {
+    "message": "The fast model is unavailable. Sotto uses the small model."
+  },
+  "hintPrepareNano": {
+    "message": "Open setup to prepare Gemini Nano."
+  },
+  "hintDifferentWords": {
+    "message": "Say the command in different words."
+  },
+  "hintEnableCapture": {
+    "message": "Enable screen capture in setup."
+  },
+  "hintDownloadFailure": {
+    "message": "Check the connection, then press Resume."
+  },
+  "hintSoundOutput": {
+    "message": "Check the sound output."
+  },
+  "timingTyped": {
+    "message": "typed"
+  },
+  "timingStt": {
+    "message": "stt $1"
+  },
+  "timingParse": {
+    "message": "parse $1"
+  },
+  "timingAct": {
+    "message": "act $1"
+  },
+  "timingVoice": {
+    "message": "voice $1"
+  },
+  "timingTotal": {
+    "message": "total $1"
+  },
+  "modelMoonshineTiny": {
+    "message": "Moonshine tiny"
+  },
+  "modelDefaultSpeechInput": {
+    "message": "Default speech input"
+  },
+  "modelParakeetV3": {
+    "message": "Parakeet v3"
+  },
+  "modelMoonshineBase": {
+    "message": "Moonshine base"
+  },
+  "modelHighAccuracyInput": {
+    "message": "High accuracy speech input"
+  },
+  "modelSpeechInputUpgrade": {
+    "message": "Speech input upgrade"
+  },
+  "modelKokoro": {
+    "message": "Kokoro"
+  },
+  "modelPremiumSpeechOutput": {
+    "message": "Premium speech output"
+  },
+  "modelKokoroVoice": {
+    "message": "Kokoro voice: $1"
+  },
+  "modelSummarizer": {
+    "message": "Summarizer"
+  },
+  "modelChromeManaged": {
+    "message": "Chrome manages this model."
+  }
+}

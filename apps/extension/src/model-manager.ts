@@ -1,3 +1,5 @@
+import { t } from "./panel-i18n.js";
+
 export type ManagedModelId =
   | "moonshine-tiny"
   | "moonshine-base"
@@ -238,7 +240,7 @@ function chromeRow(
   return {
     id,
     label,
-    detail: "Chrome manages this model.",
+    detail: t("modelChromeManaged"),
     state: chromeState(availability, active),
     readOnly: true,
     canDownload: false,
@@ -273,10 +275,10 @@ export function buildModelInventory(
   const rows: ModelInventoryRow[] = [
     managedRow(
       "moonshine-tiny",
-      "Moonshine tiny",
+      t("modelMoonshineTiny"),
       tinyBytes,
       tinyState,
-      "Default speech input",
+      t("modelDefaultSpeechInput"),
     ),
   ];
 
@@ -286,7 +288,9 @@ export function buildModelInventory(
     rows.push(
       managedRow(
         id,
-        id === "parakeet-v3" ? "Parakeet v3" : "Moonshine base",
+        id === "parakeet-v3"
+          ? t("modelParakeetV3")
+          : t("modelMoonshineBase"),
         bytes,
         deriveModelState({
           active: id === premiumSttId &&
@@ -295,8 +299,8 @@ export function buildModelInventory(
           downloading: id === premiumSttId && sttBusy,
         }),
         id === "parakeet-v3"
-          ? "High accuracy speech input"
-          : "Speech input upgrade",
+          ? t("modelHighAccuracyInput")
+          : t("modelSpeechInputUpgrade"),
       ),
     );
   }
@@ -307,14 +311,14 @@ export function buildModelInventory(
   rows.push(
     managedRow(
       "kokoro",
-      "Kokoro",
+      t("modelKokoro"),
       kokoroBytes,
       deriveModelState({
         active: kokoroActive,
         cached: kokoroBytes > 0,
         downloading: options.premiumTtsState === "downloading",
       }),
-      "Premium speech output",
+      t("modelPremiumSpeechOutput"),
     ),
   );
 
@@ -323,9 +327,10 @@ export function buildModelInventory(
     rows.push(
       managedRow(
         `kokoro-voice:${voice}`,
-        `Kokoro voice: ${
-          voiceName.charAt(0).toUpperCase() + voiceName.slice(1)
-        }`,
+        t(
+          "modelKokoroVoice",
+          voiceName.charAt(0).toUpperCase() + voiceName.slice(1),
+        ),
         bytes,
         deriveModelState({
           active: kokoroActive && voice === options.premiumTtsVoice,
@@ -338,11 +343,11 @@ export function buildModelInventory(
   rows.push(
     chromeRow(
       "gemini-nano",
-      "Gemini Nano",
+      t("geminiNano"),
       options.nano,
       options.nanoActive,
     ),
-    chromeRow("summarizer", "Summarizer", options.summarizer),
+    chromeRow("summarizer", t("modelSummarizer"), options.summarizer),
   );
   return { rows, totalBytes: totalModelBytes(rows) };
 }
