@@ -5,9 +5,24 @@ export const REMINDER_KEY_PREFIX = "reminder:";
 
 export const MIN_REMINDER_DELAY_MINUTES = 0.5;
 export const MAX_REMINDER_DELAY_MINUTES = 525_600;
-export const MAX_NOTE_BODY_LENGTH = 10_000;
+export const MAX_NOTES = 500;
+export const MAX_PENDING_REMINDERS = 100;
+export const MAX_NOTE_BODY_LENGTH = 5_000;
 export const MAX_REMINDER_TEXT_LENGTH = 1_000;
+export const NOTES_CAP_MESSAGE =
+  "You have 500 notes. Delete some first.";
+export const REMINDERS_CAP_MESSAGE =
+  "You have 100 pending reminders. Cancel some first.";
+export const STORAGE_FULL_MESSAGE =
+  "Storage is full. Delete some notes.";
 const REMINDER_DELIVERY_RETRY_MS = 30_000;
+
+export class NotesStorageUserError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NotesStorageUserError";
+  }
+}
 
 export interface NoteSource {
   readonly title: string;
@@ -152,6 +167,18 @@ function isOptionalInteger(value: unknown): boolean {
   return value === undefined || (Number.isInteger(value) && (value as number) >= 0);
 }
 
+function isQuotaBytesError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    /QUOTA_BYTES(?:_PER_ITEM)?/i.test(`${error.name} ${error.message}`) ||
+    error.name === "QuotaExceededError"
+  );
+}
+
+function recordsMatch(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function isNoteRecord(value: unknown): value is NoteRecord {
   if (!isRecord(value) || !hasOnlyKeys(value, NOTE_KEYS)) return false;
   if (
@@ -294,6 +321,76 @@ export class NotesReminderStore {
     return task;
   }
 
+  async #set(items: Record<string, unknown>): Promise<void> {
+    try {
+      await this.#storage.set(items);
+    } catch (error) {
+      if (isQuotaBytesError(error)) {
+        throw new NotesStorageUserError(STORAGE_FULL_MESSAGE);
+      }
+      throw error;
+    }
+  }
+
+  async #remove(keys: string | readonly string[]): Promise<void> {
+    try {
+      await this.#storage.remove(keys);
+    } catch (error) {
+      if (isQuotaBytesError(error)) {
+        throw new NotesStorageUserError(STORAGE_FULL_MESSAGE);
+      }
+      throw error;
+    }
+  }
+
+  async #createRecord(
+    key: string,
+    record: NoteRecord | ReminderRecord,
+  ): Promise<void> {
+    const before = await this.#storage.get([
+      NOTES_SCHEMA_VERSION_KEY,
+      key,
+    ]);
+    assertSchemaVersion(before, before[key] !== undefined);
+    if (before[key] !== undefined) {
+      throw new Error(`Record already exists at ${key}`);
+    }
+    const hadSchemaVersion =
+      before[NOTES_SCHEMA_VERSION_KEY] !== undefined;
+    const cleanupKeys = hadSchemaVersion
+      ? key
+      : [NOTES_SCHEMA_VERSION_KEY, key];
+
+    try {
+      await this.#set({
+        [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
+        [key]: record,
+      });
+    } catch (error) {
+      await this.#remove(cleanupKeys).catch(() => undefined);
+      throw error;
+    }
+
+    const saved = await this.#storage.get([
+      NOTES_SCHEMA_VERSION_KEY,
+      key,
+    ]);
+    if (
+      saved[NOTES_SCHEMA_VERSION_KEY] !== NOTES_SCHEMA_VERSION ||
+      !recordsMatch(saved[key], record)
+    ) {
+      await this.#remove(cleanupKeys);
+      throw new Error(`Storage did not save a complete record at ${key}`);
+    }
+  }
+
+  async #updateRecord(
+    key: string,
+    record: NoteRecord | ReminderRecord,
+  ): Promise<void> {
+    await this.#set({ [key]: record });
+  }
+
   async #unusedId(prefix: string): Promise<string> {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const id = validGeneratedId(this.#createId);
@@ -323,6 +420,10 @@ export class NotesReminderStore {
         "Note body",
         MAX_NOTE_BODY_LENGTH,
       );
+      const notes = readNotes(await this.#storage.get(null));
+      if (notes.length >= MAX_NOTES) {
+        throw new NotesStorageUserError(NOTES_CAP_MESSAGE);
+      }
       const id = await this.#unusedId(NOTE_KEY_PREFIX);
       const timestamp = this.#now().toISOString();
       const note: NoteRecord = input.source
@@ -338,10 +439,7 @@ export class NotesReminderStore {
           }
         : { id, body, createdAt: timestamp, updatedAt: timestamp };
 
-      await this.#storage.set({
-        [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
-        [`${NOTE_KEY_PREFIX}${id}`]: note,
-      });
+      await this.#createRecord(`${NOTE_KEY_PREFIX}${id}`, note);
       return note;
     });
   }
@@ -369,7 +467,7 @@ export class NotesReminderStore {
       if (!isNoteRecord(note) || note.id !== noteId) {
         throw new Error(`Invalid note record at ${key}`);
       }
-      await this.#storage.remove(key);
+      await this.#remove(key);
       return true;
     });
   }
@@ -382,7 +480,7 @@ export class NotesReminderStore {
       );
       const note = notes[0];
       if (!note) return undefined;
-      await this.#storage.remove(`${NOTE_KEY_PREFIX}${note.id}`);
+      await this.#remove(`${NOTE_KEY_PREFIX}${note.id}`);
       return note;
     });
   }
@@ -418,7 +516,7 @@ export class NotesReminderStore {
       }
       if (reminder.status !== "scheduled") return false;
 
-      await this.#storage.remove(key);
+      await this.#remove(key);
       try {
         await this.#alarms.clear(reminder.alarmName);
       } catch {
@@ -436,6 +534,12 @@ export class NotesReminderStore {
         "Reminder text",
         MAX_REMINDER_TEXT_LENGTH,
       );
+      const pendingCount = readReminders(
+        await this.#storage.get(null),
+      ).filter((reminder) => reminder.status === "scheduled").length;
+      if (pendingCount >= MAX_PENDING_REMINDERS) {
+        throw new NotesStorageUserError(REMINDERS_CAP_MESSAGE);
+      }
       const id = await this.#unusedId(REMINDER_KEY_PREFIX);
       const alarmName = `${REMINDER_KEY_PREFIX}${id}`;
       const dueAt = new Date(
@@ -461,24 +565,15 @@ export class NotesReminderStore {
 
       // Storage is authoritative, so persist before creating the disposable
       // alarm registry entry.
-      await this.#storage.set({
-        [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
-        [`${REMINDER_KEY_PREFIX}${id}`]: reminder,
-      });
+      const key = `${REMINDER_KEY_PREFIX}${id}`;
+      await this.#createRecord(key, reminder);
       try {
         await this.#alarms.create(alarmName, {
           when: Date.parse(reminder.dueAt),
         });
       } catch (error) {
-        // Do not leave an apparently failed command scheduled to surprise the
-        // user after a later worker restart.
-        await this.#storage.set({
-          [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
-          [`${REMINDER_KEY_PREFIX}${id}`]: {
-            ...reminder,
-            status: "dismissed",
-          } satisfies ReminderRecord,
-        });
+        // Do not leave a failed command scheduled for a later worker restart.
+        await this.#remove(key);
         throw error;
       }
       return reminder;
@@ -510,10 +605,10 @@ export class NotesReminderStore {
             ...reminder,
             status: "delivered",
           };
-          await this.#storage.set({
-            [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
-            [`${REMINDER_KEY_PREFIX}${reminder.id}`]: deliveredReminder,
-          });
+          await this.#updateRecord(
+            `${REMINDER_KEY_PREFIX}${reminder.id}`,
+            deliveredReminder,
+          );
           delivered.push(deliveredReminder);
           await this.#alarms.clear(reminder.alarmName);
           continue;
@@ -584,10 +679,7 @@ export class NotesReminderStore {
         ...raw,
         status: "delivered",
       };
-      await this.#storage.set({
-        [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
-        [alarmName]: delivered,
-      });
+      await this.#updateRecord(alarmName, delivered);
       return delivered;
     });
   }

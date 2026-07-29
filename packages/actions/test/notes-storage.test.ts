@@ -1,11 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  MAX_NOTE_BODY_LENGTH,
+  MAX_NOTES,
+  MAX_PENDING_REMINDERS,
   MAX_REMINDER_DELAY_MINUTES,
+  NOTES_CAP_MESSAGE,
   NOTES_SCHEMA_VERSION,
   NotesReminderStore,
   parseReminderDelayMinutes,
+  REMINDERS_CAP_MESSAGE,
   restrictNotesStorageAccess,
+  STORAGE_FULL_MESSAGE,
   type ReminderRecord,
 } from "../src/notes/storage.js";
 import {
@@ -86,7 +92,72 @@ describe("notes storage", () => {
     expect(second.id).toBe("second-id");
     expect(storage.values["note:same-id"]).toBeDefined();
     expect(storage.values["note:second-id"]).toBeDefined();
-    expect(storage.get).toHaveBeenCalledTimes(3);
+    expect(storage.get).toHaveBeenCalledWith([
+      "schemaVersion",
+      "note:same-id",
+    ]);
+  });
+
+  it("refuses a note before writing when the note cap is reached", async () => {
+    const notes = Object.fromEntries(
+      Array.from({ length: MAX_NOTES }, (_, index) => {
+        const id = `note-${index}`;
+        return [
+          `note:${id}`,
+          {
+            id,
+            body: `Note ${index}`,
+            createdAt: NOW.toISOString(),
+            updatedAt: NOW.toISOString(),
+          },
+        ];
+      }),
+    );
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      ...notes,
+    });
+    const { store } = makeStore(storage);
+
+    await expect(store.createNote({ body: "One more note" })).rejects.toThrow(
+      NOTES_CAP_MESSAGE,
+    );
+    expect(storage.set).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a quota error and removes a partially written note", async () => {
+    const storage = new MemoryStorageArea();
+    storage.set.mockImplementationOnce(async (items) => {
+      storage.values["note:record-1"] = items["note:record-1"];
+      throw new Error("QUOTA_BYTES quota exceeded");
+    });
+    const { store } = makeStore(storage);
+
+    await expect(store.createNote({ body: "Do not keep this" })).rejects.toThrow(
+      STORAGE_FULL_MESSAGE,
+    );
+    expect(storage.values).toEqual({});
+  });
+
+  it("enforces the note size at the storage boundary", async () => {
+    const accepted = makeStore();
+    await expect(
+      accepted.store.createNote({
+        body: "x".repeat(MAX_NOTE_BODY_LENGTH),
+      }),
+    ).resolves.toMatchObject({
+      body: "x".repeat(MAX_NOTE_BODY_LENGTH),
+    });
+
+    const rejected = makeStore();
+    await expect(
+      rejected.store.createNote({
+        body: "x".repeat(MAX_NOTE_BODY_LENGTH + 1),
+      }),
+    ).rejects.toThrow(
+      `Note body must contain at most ${MAX_NOTE_BODY_LENGTH} characters`,
+    );
+    expect(rejected.storage.set).not.toHaveBeenCalled();
   });
 
   it("rejects invalid persisted JSON instead of treating it as a note", async () => {
@@ -185,6 +256,56 @@ describe("reminder scheduling", () => {
     ]);
   });
 
+  it("refuses a reminder before writing when the pending cap is reached", async () => {
+    const reminders = Object.fromEntries(
+      Array.from({ length: MAX_PENDING_REMINDERS }, (_, index) => {
+        const record = reminder(
+          `pending-${index}`,
+          "2026-07-28T12:30:00.000Z",
+        );
+        return [`reminder:${record.id}`, record];
+      }),
+    );
+    const delivered = reminder(
+      "delivered-extra",
+      "2026-07-28T12:05:00.000Z",
+      "delivered",
+    );
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      ...reminders,
+      "reminder:delivered-extra": delivered,
+    });
+    const { store, alarms } = makeStore(storage);
+
+    await expect(
+      store.scheduleReminder({
+        text: "One more reminder",
+        delayMinutes: 1,
+      }),
+    ).rejects.toThrow(REMINDERS_CAP_MESSAGE);
+    expect(storage.set).not.toHaveBeenCalled();
+    expect(alarms.create).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a reminder quota error before it creates an alarm", async () => {
+    const storage = new MemoryStorageArea();
+    storage.set.mockRejectedValueOnce(
+      new Error("QUOTA_BYTES quota exceeded"),
+    );
+    const alarms = new MemoryAlarmStore();
+    const { store } = makeStore(storage, alarms);
+
+    await expect(
+      store.scheduleReminder({
+        text: "Do not schedule this",
+        delayMinutes: 1,
+      }),
+    ).rejects.toThrow(STORAGE_FULL_MESSAGE);
+    expect(storage.values).toEqual({});
+    expect(alarms.create).not.toHaveBeenCalled();
+  });
+
   it("removes storage before clearing an alarm and reconciles a stray", async () => {
     const record = reminder("cancel", "2026-07-28T12:10:00.000Z");
     const storage = new MemoryStorageArea({
@@ -267,7 +388,7 @@ describe("reminder scheduling", () => {
     });
   });
 
-  it("dismisses a persisted reminder when its alarm cannot be created", async () => {
+  it("removes a persisted reminder when its alarm cannot be created", async () => {
     const storage = new MemoryStorageArea();
     const alarms = new MemoryAlarmStore();
     alarms.create.mockRejectedValue(new Error("alarm unavailable"));
@@ -279,10 +400,8 @@ describe("reminder scheduling", () => {
         delayMinutes: 1,
       }),
     ).rejects.toThrow("alarm unavailable");
-    expect(storage.values["reminder:record-1"]).toMatchObject({
-      text: "Do not surprise me later",
-      status: "dismissed",
-    });
+    expect(storage.values["reminder:record-1"]).toBeUndefined();
+    expect(storage.remove).toHaveBeenCalledWith("reminder:record-1");
   });
 
   it("retries duplicate reminder ids without overwriting the first record", async () => {

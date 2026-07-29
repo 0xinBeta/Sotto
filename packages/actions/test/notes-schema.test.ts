@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { validateSchema } from "@sotto/core";
 import notesAction, { notesSchema } from "../src/notes/index.js";
+import {
+  MAX_NOTES,
+  NOTES_CAP_MESSAGE,
+  STORAGE_FULL_MESSAGE,
+} from "../src/notes/storage.js";
 
 describe("notes action schema", () => {
   it.each([
@@ -71,6 +76,75 @@ describe("notes action schema", () => {
     expect(
       notesAction.confirm({ action: "notes", operation: "read" }),
     ).toBe(false);
+  });
+
+  it("returns the note cap refusal as the spoken result", async () => {
+    const values = Object.fromEntries(
+      Array.from({ length: MAX_NOTES }, (_, index) => {
+        const id = `note-${index}`;
+        return [
+          `note:${id}`,
+          {
+            id,
+            body: `Note ${index}`,
+            createdAt: "2026-07-28T12:00:00.000Z",
+            updatedAt: "2026-07-28T12:00:00.000Z",
+          },
+        ];
+      }),
+    );
+    const set = vi.fn();
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ schemaVersion: 1, ...values })),
+          set,
+          remove: vi.fn(),
+        },
+      },
+    });
+
+    try {
+      await expect(
+        notesAction.execute({
+          action: "notes",
+          operation: "create",
+          body: "One more note",
+        }, {}),
+      ).resolves.toEqual({ spoken: NOTES_CAP_MESSAGE });
+      expect(set).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("returns a storage quota error as the spoken result", async () => {
+    vi.stubGlobal("crypto", {
+      randomUUID: vi.fn(() => "quota-note"),
+    });
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => {
+            throw new Error("QUOTA_BYTES quota exceeded");
+          }),
+          remove: vi.fn(async () => undefined),
+        },
+      },
+    });
+
+    try {
+      await expect(
+        notesAction.execute({
+          action: "notes",
+          operation: "create",
+          body: "Save this note",
+        }, {}),
+      ).resolves.toEqual({ spoken: STORAGE_FULL_MESSAGE });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("returns notes in the long-form speech path, newest first", async () => {

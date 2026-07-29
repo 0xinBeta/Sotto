@@ -445,7 +445,10 @@
         aria-labelledby="reminders-heading"
       >
         <div class="section-heading">
-          <h2 class="section-index" id="reminders-heading">REMINDERS</h2>
+          <h2 class="section-index" id="reminders-heading">
+            REMINDERS
+            <span class="storage-count" id="reminders-count" hidden></span>
+          </h2>
         </div>
         <ul class="notes-list" id="reminders-list" aria-live="polite">
           <li class="empty-notes">No pending reminders.</li>
@@ -454,7 +457,10 @@
 
       <section class="notes-panel" id="notes-panel" aria-labelledby="notes-heading">
         <div class="section-heading">
-          <h2 class="section-index" id="notes-heading">03 / NOTES</h2>
+          <h2 class="section-index" id="notes-heading">
+            03 / NOTES
+            <span class="storage-count" id="notes-count" hidden></span>
+          </h2>
           <button class="link-button" id="export-notes" type="button" disabled>Export .md</button>
         </div>
         <label class="sr-only" for="notes-search">Search notes</label>

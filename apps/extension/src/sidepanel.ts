@@ -3,6 +3,11 @@ import type {
   ClipboardWorkflow,
   ScreenshotPermissionWorkflow,
 } from "@sotto/core";
+import {
+  MAX_NOTE_BODY_LENGTH,
+  MAX_NOTES,
+  MAX_PENDING_REMINDERS,
+} from "@sotto/actions/notes/storage";
 import { performClipboardWorkflow } from "@sotto/destinations";
 import type { TtsProgressEventType } from "@sotto/tts";
 import {
@@ -123,7 +128,7 @@ function isPanelNote(value: unknown): value is PanelNote {
   if (!isRecord(value)) return false;
   return (
     isBoundedString(value.id, 128, 1) &&
-    isBoundedString(value.body, 10_000, 1) &&
+    isBoundedString(value.body, MAX_NOTE_BODY_LENGTH, 1) &&
     isBoundedString(value.createdAt, 35, 1) &&
     isBoundedString(value.updatedAt, 35, 1) &&
     Number.isFinite(Date.parse(value.createdAt)) &&
@@ -723,8 +728,11 @@ const skipReading = requiredElement<HTMLButtonElement>("#skip-reading");
 const notesList = requiredElement<HTMLUListElement>("#notes-list");
 const notesSearch = requiredElement<HTMLInputElement>("#notes-search");
 const exportNotes = requiredElement<HTMLButtonElement>("#export-notes");
+const notesCount = requiredElement<HTMLElement>("#notes-count");
 const remindersList =
   requiredElement<HTMLUListElement>("#reminders-list");
+const remindersCount =
+  requiredElement<HTMLElement>("#reminders-count");
 const reminderBanner = requiredElement<HTMLElement>("#reminder-banner");
 const commandReference =
   requiredElement<HTMLDetailsElement>("#command-reference");
@@ -1708,7 +1716,17 @@ function showPageText(text: string, title: string): void {
   pageTextCard.hidden = false;
 }
 
+function renderStorageCount(
+  element: HTMLElement,
+  count: number,
+  maximum: number,
+): void {
+  element.textContent = `${count} of ${maximum}`;
+  element.hidden = count <= maximum * 0.8;
+}
+
 function renderNoteList(): void {
+  renderStorageCount(notesCount, panelNotes.length, MAX_NOTES);
   notesList.replaceChildren();
   const query = notesSearch.value.trim().toLocaleLowerCase();
   const notes = query
@@ -1780,6 +1798,11 @@ function renderNotes(notes: readonly PanelNote[]): void {
 }
 
 function renderReminderList(): void {
+  renderStorageCount(
+    remindersCount,
+    panelReminders.length,
+    MAX_PENDING_REMINDERS,
+  );
   remindersList.replaceChildren();
   if (panelReminders.length === 0) {
     const empty = document.createElement("li");

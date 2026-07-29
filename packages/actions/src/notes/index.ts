@@ -5,6 +5,7 @@ import {
   MAX_REMINDER_DELAY_MINUTES,
   MAX_REMINDER_TEXT_LENGTH,
   MIN_REMINDER_DELAY_MINUTES,
+  NotesStorageUserError,
   notesReminderStore,
 } from "./storage.js";
 
@@ -218,119 +219,126 @@ const notesAction = defineAction<NotesCommand>({
     (command as NotesCommand).operation === "delete-last" ||
     (command as NotesCommand).operation === "cancel-reminder",
   async execute(command) {
-    switch (command.operation) {
-      case "create": {
-        const note = await notesReminderStore.createNote({
-          body: command.body,
-        });
-        return {
-          spoken: "Saved your note.",
-          data: {
-            note: {
-              id: note.id,
-              body: note.body,
-              createdAt: note.createdAt,
-              updatedAt: note.updatedAt,
+    try {
+      switch (command.operation) {
+        case "create": {
+          const note = await notesReminderStore.createNote({
+            body: command.body,
+          });
+          return {
+            spoken: "Saved your note.",
+            data: {
+              note: {
+                id: note.id,
+                body: note.body,
+                createdAt: note.createdAt,
+                updatedAt: note.updatedAt,
+              },
             },
-          },
-        };
-      }
-      case "list": {
-        const notes = await notesReminderStore.listNotes();
-        return {
-          spoken:
-            notes.length === 0
-              ? "You have no notes."
-              : `You have ${notes.length} ${notes.length === 1 ? "note" : "notes"}.`,
-          data: {
-            notes: notes.map((note) => ({
-              id: note.id,
-              body: note.body,
-              createdAt: note.createdAt,
-              updatedAt: note.updatedAt,
-              ...(note.source ? { source: { ...note.source } } : {}),
-            })),
-          },
-        };
-      }
-      case "read": {
-        const notes = await notesReminderStore.listNotes();
-        if (notes.length === 0) {
-          return { spoken: "You have no notes." };
+          };
         }
-        return {
-          spoken: "Reading your notes.",
-          pageText: {
-            text: notes
-              .map((note, index) => `Note ${index + 1}. ${note.body}`)
-              .join("\n\n"),
-            title: "NOTES",
-            speech: "long",
-          },
-        };
-      }
-      case "delete-last": {
-        const note = await notesReminderStore.deleteLastNote();
-        return {
-          spoken: note ? "Deleted the note." : "You have no notes.",
-        };
-      }
-      case "remind": {
-        const [activeTab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
-        const reminder = await notesReminderStore.scheduleReminder({
-          text: command.text,
-          delayMinutes: command.delayMinutes,
-          ...(activeTab?.id === undefined
-            ? {}
-            : { sourceTabId: activeTab.id }),
-          ...(activeTab?.windowId === undefined
-            ? {}
-            : { sourceWindowId: activeTab.windowId }),
-        });
-        return {
-          spoken: "Set your reminder.",
-          data: {
-            reminder: {
-              id: reminder.id,
-              text: reminder.text,
-              dueAt: reminder.dueAt,
-              status: reminder.status,
-              alarmName: reminder.alarmName,
+        case "list": {
+          const notes = await notesReminderStore.listNotes();
+          return {
+            spoken:
+              notes.length === 0
+                ? "You have no notes."
+                : `You have ${notes.length} ${notes.length === 1 ? "note" : "notes"}.`,
+            data: {
+              notes: notes.map((note) => ({
+                id: note.id,
+                body: note.body,
+                createdAt: note.createdAt,
+                updatedAt: note.updatedAt,
+                ...(note.source ? { source: { ...note.source } } : {}),
+              })),
             },
-          },
-        };
-      }
-      case "list-reminders": {
-        const reminders = await notesReminderStore.listPendingReminders();
-        return {
-          spoken: reminders.length === 0
-            ? "You have no pending reminders."
-            : reminders
-              .map((reminder) =>
-                `${formatReminderTime(reminder.dueAt)}: ${reminder.text}`
-              )
-              .join(". "),
-        };
-      }
-      case "cancel-reminder": {
-        const reminders = await notesReminderStore.listPendingReminders();
-        const reminder = reminders[0];
-        if (!reminder) {
-          return { spoken: "You have no pending reminders." };
+          };
         }
-        if (reminders.length > 1) {
-          return { spoken: "Which reminder do you want to cancel?" };
+        case "read": {
+          const notes = await notesReminderStore.listNotes();
+          if (notes.length === 0) {
+            return { spoken: "You have no notes." };
+          }
+          return {
+            spoken: "Reading your notes.",
+            pageText: {
+              text: notes
+                .map((note, index) => `Note ${index + 1}. ${note.body}`)
+                .join("\n\n"),
+              title: "NOTES",
+              speech: "long",
+            },
+          };
         }
-        const cancelled = await notesReminderStore.cancelReminder(reminder.id);
-        return {
-          spoken: cancelled
-            ? "Cancelled the reminder."
-            : "That reminder is no longer pending.",
-        };
+        case "delete-last": {
+          const note = await notesReminderStore.deleteLastNote();
+          return {
+            spoken: note ? "Deleted the note." : "You have no notes.",
+          };
+        }
+        case "remind": {
+          const [activeTab] = await chrome.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
+          const reminder = await notesReminderStore.scheduleReminder({
+            text: command.text,
+            delayMinutes: command.delayMinutes,
+            ...(activeTab?.id === undefined
+              ? {}
+              : { sourceTabId: activeTab.id }),
+            ...(activeTab?.windowId === undefined
+              ? {}
+              : { sourceWindowId: activeTab.windowId }),
+          });
+          return {
+            spoken: "Set your reminder.",
+            data: {
+              reminder: {
+                id: reminder.id,
+                text: reminder.text,
+                dueAt: reminder.dueAt,
+                status: reminder.status,
+                alarmName: reminder.alarmName,
+              },
+            },
+          };
+        }
+        case "list-reminders": {
+          const reminders = await notesReminderStore.listPendingReminders();
+          return {
+            spoken: reminders.length === 0
+              ? "You have no pending reminders."
+              : reminders
+                .map((reminder) =>
+                  `${formatReminderTime(reminder.dueAt)}: ${reminder.text}`
+                )
+                .join(". "),
+          };
+        }
+        case "cancel-reminder": {
+          const reminders = await notesReminderStore.listPendingReminders();
+          const reminder = reminders[0];
+          if (!reminder) {
+            return { spoken: "You have no pending reminders." };
+          }
+          if (reminders.length > 1) {
+            return { spoken: "Which reminder do you want to cancel?" };
+          }
+          const cancelled = await notesReminderStore.cancelReminder(reminder.id);
+          return {
+            spoken: cancelled
+              ? "Cancelled the reminder."
+              : "That reminder is no longer pending.",
+          };
+        }
       }
+    } catch (error) {
+      if (error instanceof NotesStorageUserError) {
+        return { spoken: error.message };
+      }
+      throw error;
     }
   },
 });

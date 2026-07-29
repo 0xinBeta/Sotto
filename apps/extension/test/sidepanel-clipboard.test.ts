@@ -229,7 +229,9 @@ const elementIds = [
   "notes-list",
   "notes-search",
   "export-notes",
+  "notes-count",
   "reminders-list",
+  "reminders-count",
   "reminder-banner",
   "command-reference",
   "command-reference-list",
@@ -1268,6 +1270,49 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["notes-list"].textContent).toBe(
       "No notes match your search.",
     );
+  });
+
+  it("shows storage counters only above eighty percent", async () => {
+    const { elements, onMessage } = await installSidepanel();
+    const notes = Array.from({ length: 401 }, (_, index) => ({
+      id: `note-${index}`,
+      body: `Note ${index}`,
+      createdAt: "2026-07-28T12:00:00.000Z",
+      updatedAt: "2026-07-28T12:00:00.000Z",
+    }));
+    const reminders = Array.from({ length: 81 }, (_, index) => ({
+      id: `reminder-${index}`,
+      text: `Reminder ${index}`,
+      dueAt: "2026-07-28T12:30:00.000Z",
+    }));
+
+    onMessage({
+      target: "sidepanel",
+      type: "notes-updated",
+      notes: notes.slice(0, 400),
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "reminders-updated",
+      reminders: reminders.slice(0, 80),
+    });
+    expect(elements["notes-count"].hidden).toBe(true);
+    expect(elements["reminders-count"].hidden).toBe(true);
+
+    onMessage({
+      target: "sidepanel",
+      type: "notes-updated",
+      notes,
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "reminders-updated",
+      reminders,
+    });
+    expect(elements["notes-count"].hidden).toBe(false);
+    expect(elements["notes-count"].textContent).toBe("401 of 500");
+    expect(elements["reminders-count"].hidden).toBe(false);
+    expect(elements["reminders-count"].textContent).toBe("81 of 100");
   });
 
   it("deletes one note after a deliberate panel click", async () => {
