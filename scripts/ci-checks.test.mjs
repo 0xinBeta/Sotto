@@ -7,7 +7,21 @@ import {
   MINIMUM_EVAL_CASES,
   evaluateEvalCases,
 } from "./check-evals-count.mjs";
+import { scanChromeFloor } from "./check-chrome-floor.mjs";
 import { generateReleaseNotes } from "./generate-release-notes.mjs";
+
+const chromeFloorTokens = [
+  {
+    token: "chrome.future.first",
+    minVersion: 140,
+    sourceUrl: "https://developer.chrome.com/first",
+  },
+  {
+    token: "chrome.future.second",
+    minVersion: 141,
+    sourceUrl: "https://developer.chrome.com/second",
+  },
+];
 
 describe("dist size check", () => {
   it("accepts a bundle at the limit", () => {
@@ -28,6 +42,66 @@ describe("eval count check", () => {
   it("rejects a count below the current case floor", () => {
     const cases = Array.from({ length: MINIMUM_EVAL_CASES - 1 });
     expect(evaluateEvalCases(cases).passes).toBe(false);
+  });
+});
+
+describe("Chrome floor check", () => {
+  it("reports a token hit from injected file contents", () => {
+    const hits = scanChromeFloor(
+      [
+        {
+          path: "packages/example/src/index.ts",
+          contents: "chrome.future.first();",
+        },
+      ],
+      chromeFloorTokens,
+    );
+
+    expect(hits).toEqual([
+      expect.objectContaining({
+        path: "packages/example/src/index.ts",
+        line: 1,
+        column: 1,
+        token: "chrome.future.first",
+        minVersion: 140,
+      }),
+    ]);
+  });
+
+  it("accepts allow comments on the same or previous line", () => {
+    const hits = scanChromeFloor(
+      [
+        {
+          path: "apps/extension/src/example.ts",
+          contents: [
+            "// chrome-floor-allow: chrome.future.first feature detected",
+            "chrome.future.first();",
+            "chrome.future.second(); // chrome-floor-allow: chrome.future.second guarded",
+          ].join("\n"),
+        },
+      ],
+      chromeFloorTokens,
+    );
+
+    expect(hits).toEqual([]);
+  });
+
+  it("reports each token on a multi-token line", () => {
+    const hits = scanChromeFloor(
+      [
+        {
+          path: "packages/example/src/index.ts",
+          contents:
+            "chrome.future.first(); chrome.future.second();",
+        },
+      ],
+      chromeFloorTokens,
+    );
+
+    expect(hits.map(({ token }) => token)).toEqual([
+      "chrome.future.first",
+      "chrome.future.second",
+    ]);
   });
 });
 
