@@ -10,10 +10,10 @@ import {
   NotesReminderStore,
   parseReminderDelayMinutes,
   REMINDERS_CAP_MESSAGE,
-  restrictNotesStorageAccess,
   STORAGE_FULL_MESSAGE,
   type ReminderRecord,
 } from "../src/notes/storage.js";
+import { restrictNotesStorageAccess } from "../src/notes/storage-access.js";
 import {
   MemoryAlarmStore,
   MemoryStorageArea,

@@ -10,8 +10,6 @@ import type { MediaCommand } from "@sotto/actions/media";
 import type { SummarizeCommand } from "@sotto/actions/summarize";
 import {
   isReminderRecord,
-  notesReminderStore,
-  restrictNotesStorageAccess,
   type NoteRecord,
   type ReminderRecord,
 } from "@sotto/actions/notes/storage";
@@ -46,6 +44,10 @@ import {
   type TtsLongSpeakOptions,
   type TtsSpeakOptions,
 } from "@sotto/tts";
+import {
+  notesReminderStore,
+  restrictNotesStorageAccess,
+} from "./notes-worker-store.js";
 import {
   isKokoroVoiceId,
   KOKORO_VOICES,
@@ -303,6 +305,7 @@ function actionContext(): ActionContext {
     dictation: dictationActionServices,
     find: findActionServices,
     media: mediaActionServices,
+    notes: notesReminderStore,
     settings: {
       get: async () => ({
         ...await speechSettings.get(),

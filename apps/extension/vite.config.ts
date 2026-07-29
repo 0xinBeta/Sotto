@@ -226,10 +226,6 @@ function verifyPremiumEngineChunks(): Plugin {
       if (Buffer.byteLength(offscreen.code) >= 1024 * 1024) {
         throw new Error("The offscreen entry chunk must stay under 1 MiB");
       }
-      if (/\bchrome\s*\.\s*storage\b/.test(offscreen.code)) {
-        throw new Error("The offscreen entry chunk must not use chrome.storage");
-      }
-
       const staticChunks = new Set<string>();
       const visitStaticChunk = (fileName: string): void => {
         if (staticChunks.has(fileName)) return;
@@ -239,6 +235,18 @@ function verifyPremiumEngineChunks(): Plugin {
         for (const imported of asset.imports) visitStaticChunk(imported);
       };
       visitStaticChunk(offscreen.fileName);
+
+      for (const fileName of staticChunks) {
+        const asset = bundle[fileName];
+        if (
+          asset?.type === "chunk" &&
+          /\bchrome\s*\.\s*storage\b/.test(asset.code)
+        ) {
+          throw new Error(
+            `The offscreen static import graph uses chrome.storage in ${fileName}`,
+          );
+        }
+      }
 
       for (const [engine, patterns] of Object.entries(engineModules)) {
         const chunks = Object.values(bundle).filter(

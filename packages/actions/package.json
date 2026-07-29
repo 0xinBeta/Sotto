@@ -58,6 +58,10 @@
       "types": "./dist/notes/storage.d.ts",
       "import": "./dist/notes/storage.js"
     },
+    "./notes/storage-access": {
+      "types": "./dist/notes/storage-access.d.ts",
+      "import": "./dist/notes/storage-access.js"
+    },
     "./notes/markdown": {
       "types": "./dist/notes/markdown.d.ts",
       "import": "./dist/notes/markdown.js"

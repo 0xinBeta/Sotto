@@ -285,6 +285,43 @@ export interface SpeechSettingsActionServices {
   setVerbosity(verbosity: SpeechSettingsVerbosity): Promise<void>;
 }
 
+export interface NotesActionNote {
+  readonly id: string;
+  readonly body: string;
+  readonly tag?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly source?: {
+    readonly title: string;
+    readonly url: string;
+  };
+}
+
+export interface NotesActionReminder {
+  readonly id: string;
+  readonly text: string;
+  readonly dueAt: string;
+  readonly status: "scheduled" | "delivered" | "dismissed";
+  readonly alarmName: string;
+}
+
+export interface NotesActionServices {
+  createNote(input: {
+    readonly body: string;
+    readonly tag?: string;
+  }): Promise<NotesActionNote>;
+  listNotes(): Promise<readonly NotesActionNote[]>;
+  deleteLastNote(): Promise<NotesActionNote | undefined>;
+  scheduleReminder(input: {
+    readonly text: string;
+    readonly delayMinutes: number;
+    readonly sourceTabId?: number;
+    readonly sourceWindowId?: number;
+  }): Promise<NotesActionReminder>;
+  listPendingReminders(): Promise<readonly NotesActionReminder[]>;
+  cancelReminder(id: string): Promise<boolean>;
+}
+
 export interface ActionCatalog {
   list(): readonly ActionDefinition[];
 }
@@ -308,6 +345,8 @@ export interface ActionContext {
   readonly find?: FindActionServices;
   /** Worker-owned bridge to media on the active page. */
   readonly media?: MediaActionServices;
+  /** Worker-owned notes and reminder storage. */
+  readonly notes?: NotesActionServices;
   /** Worker-owned bridge from a visible-tab image to an isolated screen model. */
   readonly screen?: ScreenQuestionServices;
   /** Worker-owned access to the closed set of speech settings. */

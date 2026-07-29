@@ -1,12 +1,15 @@
 import { defineAction } from "@sotto/core";
-import type { JsonSchema } from "@sotto/core";
+import type {
+  ActionContext,
+  JsonSchema,
+  NotesActionServices,
+} from "@sotto/core";
 import {
   MAX_NOTE_BODY_LENGTH,
   MAX_REMINDER_DELAY_MINUTES,
   MAX_REMINDER_TEXT_LENGTH,
   MIN_REMINDER_DELAY_MINUTES,
   NotesStorageUserError,
-  notesReminderStore,
 } from "./storage.js";
 import {
   filterNotesByTag,
@@ -48,6 +51,13 @@ export type NotesCommand =
       readonly action: "notes";
       readonly operation: "list-reminders" | "cancel-reminder";
     };
+
+function notesStore(context: ActionContext): NotesActionServices {
+  if (!context.notes) {
+    throw new Error("Notes require worker storage services");
+  }
+  return context.notes;
+}
 
 export const notesSchema = {
   oneOf: [
@@ -286,11 +296,12 @@ const notesAction = defineAction<NotesCommand>({
   confirm: (command) =>
     (command as NotesCommand).operation === "delete-last" ||
     (command as NotesCommand).operation === "cancel-reminder",
-  async execute(command) {
+  async execute(command, context) {
+    const store = notesStore(context);
     try {
       switch (command.operation) {
         case "create": {
-          const note = await notesReminderStore.createNote({
+          const note = await store.createNote({
             body: command.body,
             ...(command.tag === undefined ? {} : { tag: command.tag }),
           });
@@ -308,7 +319,7 @@ const notesAction = defineAction<NotesCommand>({
           };
         }
         case "list": {
-          const notes = await notesReminderStore.listNotes();
+          const notes = await store.listNotes();
           return {
             spoken:
               notes.length === 0
@@ -327,7 +338,7 @@ const notesAction = defineAction<NotesCommand>({
           };
         }
         case "read": {
-          const allNotes = await notesReminderStore.listNotes();
+          const allNotes = await store.listNotes();
           const notes = command.tag === undefined
             ? allNotes
             : filterNotesByTag(allNotes, command.tag);
@@ -350,7 +361,7 @@ const notesAction = defineAction<NotesCommand>({
           };
         }
         case "delete-last": {
-          const note = await notesReminderStore.deleteLastNote();
+          const note = await store.deleteLastNote();
           return {
             spoken: note ? "Deleted the note." : "You have no notes.",
           };
@@ -360,7 +371,7 @@ const notesAction = defineAction<NotesCommand>({
             active: true,
             currentWindow: true,
           });
-          const reminder = await notesReminderStore.scheduleReminder({
+          const reminder = await store.scheduleReminder({
             text: command.text,
             delayMinutes: command.delayMinutes,
             ...(activeTab?.id === undefined
@@ -384,7 +395,7 @@ const notesAction = defineAction<NotesCommand>({
           };
         }
         case "list-reminders": {
-          const reminders = await notesReminderStore.listPendingReminders();
+          const reminders = await store.listPendingReminders();
           return {
             spoken: reminders.length === 0
               ? "You have no pending reminders."
@@ -398,7 +409,7 @@ const notesAction = defineAction<NotesCommand>({
         case "snooze":
           return { spoken: "Sorry, say that again?" };
         case "cancel-reminder": {
-          const reminders = await notesReminderStore.listPendingReminders();
+          const reminders = await store.listPendingReminders();
           const reminder = reminders[0];
           if (!reminder) {
             return { spoken: "You have no pending reminders." };
@@ -406,7 +417,7 @@ const notesAction = defineAction<NotesCommand>({
           if (reminders.length > 1) {
             return { spoken: "Which reminder do you want to cancel?" };
           }
-          const cancelled = await notesReminderStore.cancelReminder(reminder.id);
+          const cancelled = await store.cancelReminder(reminder.id);
           return {
             spoken: cancelled
               ? "Cancelled the reminder."

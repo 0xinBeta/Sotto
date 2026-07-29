@@ -76,9 +76,6 @@ export interface StorageAreaLike {
   ): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
   remove(keys: string | readonly string[]): Promise<void>;
-  setAccessLevel?(options: {
-    readonly accessLevel: "TRUSTED_CONTEXTS";
-  }): Promise<void>;
 }
 
 export interface AlarmStoreLike {
@@ -94,8 +91,8 @@ export interface AlarmStoreLike {
 export interface NotesReminderStoreDependencies {
   readonly storage: StorageAreaLike;
   readonly alarms: AlarmStoreLike;
-  readonly now: () => Date;
-  readonly createId: () => string;
+  readonly now?: () => Date;
+  readonly createId?: () => string;
 }
 
 export interface ReminderDeliveryOptions {
@@ -133,28 +130,6 @@ const REMINDER_KEYS = [
   "sourceTabId",
   "sourceWindowId",
 ] as const;
-
-function defaultStorage(): StorageAreaLike {
-  return {
-    get: async (keys) => {
-      if (keys === undefined) return chrome.storage.local.get(null);
-      return chrome.storage.local.get(keys as string | string[] | null);
-    },
-    set: (items) => chrome.storage.local.set(items),
-    remove: (keys) => chrome.storage.local.remove(keys as string | string[]),
-    setAccessLevel: (options) =>
-      chrome.storage.local.setAccessLevel(options),
-  };
-}
-
-function defaultAlarms(): AlarmStoreLike {
-  return {
-    get: (name) => chrome.alarms.get(name),
-    getAll: () => chrome.alarms.getAll(),
-    create: (name, alarmInfo) => chrome.alarms.create(name, alarmInfo),
-    clear: (name) => chrome.alarms.clear(name),
-  };
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -326,10 +301,10 @@ export class NotesReminderStore {
   #mutationTail: Promise<void> = Promise.resolve();
 
   constructor(
-    dependencies: Partial<NotesReminderStoreDependencies> = {},
+    dependencies: NotesReminderStoreDependencies,
   ) {
-    this.#storage = dependencies.storage ?? defaultStorage();
-    this.#alarms = dependencies.alarms ?? defaultAlarms();
+    this.#storage = dependencies.storage;
+    this.#alarms = dependencies.alarms;
     this.#now = dependencies.now ?? (() => new Date());
     this.#createId =
       dependencies.createId ?? (() => crypto.randomUUID());
@@ -771,14 +746,3 @@ export class NotesReminderStore {
     });
   }
 }
-
-export async function restrictNotesStorageAccess(
-  storage: StorageAreaLike = defaultStorage(),
-): Promise<void> {
-  if (!storage.setAccessLevel) {
-    throw new Error("Storage area does not support access-level restriction");
-  }
-  await storage.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
-}
-
-export const notesReminderStore = new NotesReminderStore();

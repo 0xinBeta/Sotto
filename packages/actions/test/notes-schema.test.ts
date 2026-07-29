@@ -1,12 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { validateSchema } from "@sotto/core";
+import { validateSchema, type ActionContext } from "@sotto/core";
 import notesAction, { notesSchema } from "../src/notes/index.js";
 import {
   MAX_NOTES,
   NOTES_CAP_MESSAGE,
+  NotesReminderStore,
   STORAGE_FULL_MESSAGE,
+  type StorageAreaLike,
 } from "../src/notes/storage.js";
+import { MemoryAlarmStore } from "./notes-chrome-stub.js";
+
+function notesContext(): ActionContext {
+  return {
+    notes: new NotesReminderStore({
+      storage: chrome.storage.local as unknown as StorageAreaLike,
+      alarms: new MemoryAlarmStore(),
+    }),
+  };
+}
 
 describe("notes action schema", () => {
   it.each([
@@ -128,7 +140,7 @@ describe("notes action schema", () => {
           action: "notes",
           operation: "create",
           body: "One more note",
-        }, {}),
+        }, notesContext()),
       ).resolves.toEqual({ spoken: NOTES_CAP_MESSAGE });
       expect(set).not.toHaveBeenCalled();
     } finally {
@@ -158,7 +170,7 @@ describe("notes action schema", () => {
           action: "notes",
           operation: "create",
           body: "Save this note",
-        }, {}),
+        }, notesContext()),
       ).resolves.toEqual({ spoken: STORAGE_FULL_MESSAGE });
     } finally {
       vi.unstubAllGlobals();
@@ -194,7 +206,7 @@ describe("notes action schema", () => {
       await expect(
         notesAction.execute(
           { action: "notes", operation: "read" },
-          {},
+          notesContext(),
         ),
       ).resolves.toEqual({
         spoken: "Reading your notes.",
@@ -240,7 +252,7 @@ describe("notes action schema", () => {
       await expect(
         notesAction.execute(
           { action: "notes", operation: "read", tag: "project apolo" },
-          {},
+          notesContext(),
         ),
       ).resolves.toEqual({
         spoken: "Reading your notes.",
@@ -253,7 +265,7 @@ describe("notes action schema", () => {
       await expect(
         notesAction.execute(
           { action: "notes", operation: "read", tag: "zeus" },
-          {},
+          notesContext(),
         ),
       ).resolves.toEqual({ spoken: "No notes match zeus." });
     } finally {
@@ -299,7 +311,7 @@ describe("notes action schema", () => {
       await expect(
         notesAction.execute(
           { action: "notes", operation: "list-reminders" },
-          {},
+          notesContext(),
         ),
       ).resolves.toEqual({
         spoken:
