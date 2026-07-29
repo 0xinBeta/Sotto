@@ -201,6 +201,7 @@ const elementIds = [
   "pause-reading",
   "skip-reading",
   "notes-list",
+  "notes-search",
   "export-notes",
   "reminder-banner",
   "command-reference",
@@ -271,6 +272,9 @@ async function installSidepanel(options: {
             ? { spoken: "Screenshot ready.", workflow: options.retryWorkflow }
             : undefined,
         };
+      }
+      if (message.type === "delete-note") {
+        return { ok: true, value: true };
       }
       return { ok: true };
     },
@@ -802,6 +806,73 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["notes-list"].firstElementChild?.textContent).toContain(
       untrusted,
     );
+  });
+
+  it("filters notes by text without a worker request", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "notes-updated",
+      notes: [
+        {
+          id: "note-1",
+          body: "Buy oat milk",
+          createdAt: "2026-07-28T12:00:00.000Z",
+          updatedAt: "2026-07-28T12:00:00.000Z",
+        },
+        {
+          id: "note-2",
+          body: "Check the build",
+          createdAt: "2026-07-28T11:00:00.000Z",
+          updatedAt: "2026-07-28T11:00:00.000Z",
+        },
+      ],
+    });
+    sendMessage.mockClear();
+
+    elements["notes-search"].value = "MILK";
+    await elements["notes-search"].emit("input");
+    expect(elements["notes-list"].children).toHaveLength(1);
+    expect(elements["notes-list"].textContent).toContain("Buy oat milk");
+    expect(elements["notes-list"].textContent).not.toContain(
+      "Check the build",
+    );
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    elements["notes-search"].value = "missing";
+    await elements["notes-search"].emit("input");
+    expect(elements["notes-list"].textContent).toBe(
+      "No notes match your search.",
+    );
+  });
+
+  it("deletes one note after a deliberate panel click", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "notes-updated",
+      notes: [
+        {
+          id: "note-1",
+          body: "Buy oat milk",
+          createdAt: "2026-07-28T12:00:00.000Z",
+          updatedAt: "2026-07-28T12:00:00.000Z",
+        },
+      ],
+    });
+    const note = elements["notes-list"].firstElementChild;
+    const details = note?.children[1] as FakeElement | undefined;
+    const deleteButton = details?.children[1] as FakeElement | undefined;
+    if (!deleteButton) throw new Error("Delete button was not rendered");
+
+    await deleteButton.emit("click");
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "delete-note",
+      noteId: "note-1",
+    });
+    expect(elements["notes-list"].textContent).toBe("No notes yet.");
   });
 
   it("opens and scrolls to the command reference on request", async () => {

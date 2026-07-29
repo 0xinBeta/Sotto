@@ -229,7 +229,9 @@ export interface ActionDefinition<
   readonly permissions: readonly string[];
   readonly schema: JsonSchema;
   readonly examples: readonly ActionExample<TCommand>[];
-  readonly confirm: boolean;
+  readonly confirm:
+    | boolean
+    | ((command: ActionCommand) => boolean);
   execute(command: TCommand, context: ActionContext): Promise<ActionResult>;
 }
 

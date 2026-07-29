@@ -375,6 +375,56 @@
     "expected": { "action": "notes", "operation": "list" }
   },
   {
+    "id": "notes-read-01",
+    "transcript": "read my notes",
+    "expected": { "action": "notes", "operation": "read" }
+  },
+  {
+    "id": "notes-read-02",
+    "transcript": "read all my notes aloud",
+    "expected": { "action": "notes", "operation": "read" }
+  },
+  {
+    "id": "notes-delete-last-01",
+    "transcript": "delete my last note",
+    "expected": { "action": "notes", "operation": "delete-last" }
+  },
+  {
+    "id": "notes-delete-last-02",
+    "transcript": "remove my most recent note",
+    "expected": { "action": "notes", "operation": "delete-last" }
+  },
+  {
+    "id": "confirmation-yes-01",
+    "transcript": "yes",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "confirmation-yes-02",
+    "transcript": "yes please",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "confirmation-yes-03",
+    "transcript": "do it",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "confirmation-no-01",
+    "transcript": "no",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "confirmation-no-02",
+    "transcript": "no thanks",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "confirmation-no-03",
+    "transcript": "cancel that",
+    "expected": { "action": "unknown" }
+  },
+  {
     "id": "notes-remind-01",
     "transcript": "remind me in 20 minutes to check the build",
     "expected": { "action": "notes", "operation": "remind", "text": "Check the build", "delayMinutes": 20 }

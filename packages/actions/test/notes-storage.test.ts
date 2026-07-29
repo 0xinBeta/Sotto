@@ -115,6 +115,51 @@ describe("notes storage", () => {
       accessLevel: "TRUSTED_CONTEXTS",
     });
   });
+
+  it("deletes the most recent note first", async () => {
+    const older = {
+      id: "older",
+      body: "Older note",
+      createdAt: "2026-07-28T10:00:00.000Z",
+      updatedAt: "2026-07-28T10:00:00.000Z",
+    };
+    const newer = {
+      id: "newer",
+      body: "Newer note",
+      createdAt: "2026-07-28T11:00:00.000Z",
+      updatedAt: "2026-07-28T11:00:00.000Z",
+    };
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      "note:older": older,
+      "note:newer": newer,
+    });
+    const { store } = makeStore(storage);
+
+    await expect(store.deleteLastNote()).resolves.toEqual(newer);
+    await expect(store.listNotes()).resolves.toEqual([older]);
+    expect(storage.remove).toHaveBeenCalledWith("note:newer");
+  });
+
+  it("deletes one note by its validated id", async () => {
+    const note = {
+      id: "target",
+      body: "Delete this note",
+      createdAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+    };
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      "note:target": note,
+    });
+    const { store } = makeStore(storage);
+
+    await expect(store.deleteNote("target")).resolves.toBe(true);
+    await expect(store.deleteNote("missing")).resolves.toBe(false);
+    await expect(store.deleteNote("../bad")).rejects.toThrow(
+      "A valid note id is required",
+    );
+  });
 });
 
 describe("reminder scheduling", () => {

@@ -900,6 +900,23 @@ progress::-webkit-progress-value {
   margin-bottom: 30px;
 }
 
+.notes-search {
+  width: 100%;
+  height: 38px;
+  margin-top: 12px;
+  padding: 0 10px;
+  border: 1px solid var(--input-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--paper);
+  font: inherit;
+  font-size: 12px;
+}
+
+.notes-search::placeholder {
+  color: var(--input-placeholder);
+}
+
 .notes-list {
   display: grid;
   gap: 0;
@@ -921,12 +938,37 @@ progress::-webkit-progress-value {
   white-space: pre-wrap;
 }
 
-.notes-list time {
-  display: block;
+.note-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-top: 6px;
+}
+
+.notes-list time {
   color: var(--paper-dim);
   font-family: "SFMono-Regular", "Cascadia Mono", monospace;
   font-size: 8px;
+}
+
+.note-delete {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: transparent;
+  color: var(--paper-dim);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.note-delete:hover {
+  color: var(--acid);
+}
+
+.note-delete:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .notes-list .empty-notes {

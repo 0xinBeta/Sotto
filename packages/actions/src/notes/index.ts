@@ -20,6 +20,14 @@ export type NotesCommand =
     }
   | {
       readonly action: "notes";
+      readonly operation: "read";
+    }
+  | {
+      readonly action: "notes";
+      readonly operation: "delete-last";
+    }
+  | {
+      readonly action: "notes";
       readonly operation: "remind";
       readonly text: string;
       readonly delayMinutes: number;
@@ -47,6 +55,24 @@ export const notesSchema = {
       properties: {
         action: { const: "notes" },
         operation: { const: "list" },
+      },
+      required: ["action", "operation"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        action: { const: "notes" },
+        operation: { const: "read" },
+      },
+      required: ["action", "operation"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        action: { const: "notes" },
+        operation: { const: "delete-last" },
       },
       required: ["action", "operation"],
       additionalProperties: false,
@@ -102,6 +128,14 @@ const notesAction = defineAction<NotesCommand>({
       emit: { action: "notes", operation: "list" },
     },
     {
+      say: "read my notes",
+      emit: { action: "notes", operation: "read" },
+    },
+    {
+      say: "delete my last note",
+      emit: { action: "notes", operation: "delete-last" },
+    },
+    {
       say: "remind me to stretch in thirty seconds",
       emit: {
         action: "notes",
@@ -129,7 +163,8 @@ const notesAction = defineAction<NotesCommand>({
       },
     },
   ],
-  confirm: false,
+  confirm: (command) =>
+    (command as NotesCommand).operation === "delete-last",
   async execute(command) {
     switch (command.operation) {
       case "create": {
@@ -153,7 +188,7 @@ const notesAction = defineAction<NotesCommand>({
         return {
           spoken:
             notes.length === 0
-              ? "You don't have any notes."
+              ? "You have no notes."
               : `You have ${notes.length} ${notes.length === 1 ? "note" : "notes"}.`,
           data: {
             notes: notes.map((note) => ({
@@ -164,6 +199,28 @@ const notesAction = defineAction<NotesCommand>({
               ...(note.source ? { source: { ...note.source } } : {}),
             })),
           },
+        };
+      }
+      case "read": {
+        const notes = await notesReminderStore.listNotes();
+        if (notes.length === 0) {
+          return { spoken: "You have no notes." };
+        }
+        return {
+          spoken: "Reading your notes.",
+          pageText: {
+            text: notes
+              .map((note, index) => `Note ${index + 1}. ${note.body}`)
+              .join("\n\n"),
+            title: "NOTES",
+            speech: "long",
+          },
+        };
+      }
+      case "delete-last": {
+        const note = await notesReminderStore.deleteLastNote();
+        return {
+          spoken: note ? "Deleted the note." : "You have no notes.",
         };
       }
       case "remind": {

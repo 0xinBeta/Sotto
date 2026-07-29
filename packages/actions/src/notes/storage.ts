@@ -53,6 +53,7 @@ export interface StorageAreaLike {
     keys?: string | readonly string[] | null,
   ): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
+  remove(keys: string | readonly string[]): Promise<void>;
   setAccessLevel?(options: {
     readonly accessLevel: "TRUSTED_CONTEXTS";
   }): Promise<void>;
@@ -110,6 +111,7 @@ function defaultStorage(): StorageAreaLike {
       return chrome.storage.local.get(keys as string | string[] | null);
     },
     set: (items) => chrome.storage.local.set(items),
+    remove: (keys) => chrome.storage.local.remove(keys as string | string[]),
     setAccessLevel: (options) =>
       chrome.storage.local.setAccessLevel(options),
   };
@@ -347,6 +349,40 @@ export class NotesReminderStore {
     return notes.sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt),
     );
+  }
+
+  deleteNote(noteId: string): Promise<boolean> {
+    return this.#enqueueMutation(async () => {
+      if (!isId(noteId)) {
+        throw new TypeError("A valid note id is required");
+      }
+      const key = `${NOTE_KEY_PREFIX}${noteId}`;
+      const values = await this.#storage.get([
+        NOTES_SCHEMA_VERSION_KEY,
+        key,
+      ]);
+      assertSchemaVersion(values, values[key] !== undefined);
+      const note = values[key];
+      if (note === undefined) return false;
+      if (!isNoteRecord(note) || note.id !== noteId) {
+        throw new Error(`Invalid note record at ${key}`);
+      }
+      await this.#storage.remove(key);
+      return true;
+    });
+  }
+
+  deleteLastNote(): Promise<NoteRecord | undefined> {
+    return this.#enqueueMutation(async () => {
+      const notes = readNotes(await this.#storage.get(null));
+      notes.sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt),
+      );
+      const note = notes[0];
+      if (!note) return undefined;
+      await this.#storage.remove(`${NOTE_KEY_PREFIX}${note.id}`);
+      return note;
+    });
   }
 
   async listReminders(): Promise<readonly ReminderRecord[]> {

@@ -17,6 +17,7 @@ import {
   CommandValidationError,
   DestinationRegistry,
   type ActionCommand,
+  type ActionContext,
   type ActionResult,
   type ClipboardWorkflow,
   type DestinationFollowUp,
@@ -57,6 +58,7 @@ import {
   DictationTargetSession,
   type DictationTarget,
 } from "./dictation.js";
+import { ConfirmationSession } from "./confirmation.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -66,6 +68,7 @@ interface WorkerMessage {
   readonly transcript?: unknown;
   readonly completion?: unknown;
   readonly reminderId?: unknown;
+  readonly noteId?: unknown;
   readonly utteranceId?: unknown;
   readonly state?: unknown;
   readonly enabled?: unknown;
@@ -93,6 +96,7 @@ const speechSettings = new SpeechSettingsStore({
   set: async (values) => await chrome.storage.local.set(values),
 });
 const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
+const confirmationSession = new ConfirmationSession();
 
 let creatingOffscreen: Promise<void> | undefined;
 let commandGeneration = 0;
@@ -100,6 +104,17 @@ let readingActive = false;
 let readingPaused = false;
 let lastSpokenResponse: string | undefined;
 const dictationSession = new DictationTargetSession();
+
+function actionContext(): ActionContext {
+  return {
+    dispatchDestination: (id, input) =>
+      destinationRegistry.dispatch(id, input),
+    page: pageActionServices,
+    type: editableActionServices,
+    dictation: dictationActionServices,
+    actionCatalog: actionRegistry,
+  };
+}
 
 async function speakResponse(
   text: string,
@@ -295,6 +310,47 @@ async function publishNotes(): Promise<readonly NoteRecord[]> {
     notes: notes.map(panelNote),
   });
   return notes;
+}
+
+function firstWords(text: string, maximum = 8): string {
+  const words = text.trim().split(/\s+/u);
+  const wordPreview = words
+    .slice(0, maximum)
+    .join(" ")
+    .replace(/[.!?]+$/u, "");
+  const preview = wordPreview.slice(0, 80).trimEnd();
+  return words.length > maximum || preview.length < wordPreview.length
+    ? `${preview}…`
+    : preview;
+}
+
+async function confirmationResult(
+  command: ActionCommand,
+): Promise<{ readonly result: ActionResult; readonly pending: boolean }> {
+  if (
+    command.action === "notes" &&
+    (command as { readonly operation?: unknown }).operation === "delete-last"
+  ) {
+    const note = (await notesReminderStore.listNotes())[0];
+    if (!note) {
+      return {
+        result: { spoken: "You have no notes." },
+        pending: false,
+      };
+    }
+    return {
+      result: {
+        spoken: `Delete the note: ${firstWords(note.body)}? Say yes.`,
+      },
+      pending: true,
+    };
+  }
+
+  const title = actionRegistry.get(command.action)?.title ?? command.action;
+  return {
+    result: { spoken: `Run ${title}? Say yes.` },
+    pending: true,
+  };
 }
 
 async function deliverReminder(reminder: ReminderRecord): Promise<void> {
@@ -1375,6 +1431,47 @@ async function executeCommand(
   let generation = commandGeneration;
   let generationStarted = false;
   try {
+    const confirmation = confirmationSession.resolve(transcript);
+    if (confirmation.kind === "cancelled") {
+      generation = beginCommandGeneration();
+      generationStarted = true;
+      const result = { spoken: "Cancelled." };
+      await publishActionResult(
+        transcript,
+        { action: "unknown" },
+        result,
+        generation,
+        timings,
+      );
+      return result;
+    }
+    if (confirmation.kind === "confirmed") {
+      generation = beginCommandGeneration();
+      generationStarted = true;
+      const actionStartedAt = performance.now();
+      let result: ActionResult;
+      try {
+        result = await commandRouter.routeConfirmed(
+          confirmation.command,
+          actionContext(),
+        );
+      } finally {
+        completedTimings = {
+          ...timings,
+          actionMs: Math.max(0, performance.now() - actionStartedAt),
+        };
+      }
+      if (!commandIsCurrent(generation)) return undefined;
+      await publishActionResult(
+        transcript,
+        confirmation.command,
+        result,
+        generation,
+        completedTimings,
+      );
+      return result;
+    }
+
     const validated = commandRouter.parse(command);
     if (validated.action === "playback") {
       const operation = (validated as { readonly operation?: unknown })
@@ -1393,14 +1490,13 @@ async function executeCommand(
     const actionStartedAt = performance.now();
     let result: ActionResult;
     try {
-      result = await commandRouter.route(validated, {
-        dispatchDestination: (id, input) =>
-          destinationRegistry.dispatch(id, input),
-        page: pageActionServices,
-        type: editableActionServices,
-        dictation: dictationActionServices,
-        actionCatalog: actionRegistry,
-      });
+      if (commandRouter.requiresConfirmation(validated)) {
+        const request = await confirmationResult(validated);
+        if (request.pending) confirmationSession.request(validated);
+        result = request.result;
+      } else {
+        result = await commandRouter.route(validated, actionContext());
+      }
     } finally {
       completedTimings = {
         ...timings,
@@ -1497,6 +1593,17 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
     }
     case "get-notes":
       return (await publishNotes()).map(panelNote);
+    case "delete-note": {
+      if (
+        typeof message.noteId !== "string" ||
+        !REMINDER_ID_PATTERN.test(message.noteId)
+      ) {
+        throw new TypeError("A valid note id is required");
+      }
+      const deleted = await notesReminderStore.deleteNote(message.noteId);
+      await publishNotes();
+      return deleted;
+    }
     case "get-command-reference":
       return createCommandReference(actionRegistry);
     case "get-reminder": {

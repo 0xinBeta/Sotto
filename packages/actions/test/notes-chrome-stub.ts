@@ -28,6 +28,13 @@ export class MemoryStorageArea implements StorageAreaLike {
       Object.assign(this.values, items);
     },
   );
+  readonly remove = vi.fn(
+    async (keys: string | readonly string[]): Promise<void> => {
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        delete this.values[key];
+      }
+    },
+  );
 
   constructor(initial: Record<string, unknown> = {}) {
     this.values = { ...initial };
@@ -44,4 +51,3 @@ export class MemoryAlarmStore implements AlarmStoreLike {
   );
   readonly clear = vi.fn(async (name: string) => this.alarms.delete(name));
 }
-

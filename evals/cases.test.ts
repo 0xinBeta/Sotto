@@ -50,6 +50,24 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps notes management and confirmation phrase cases", () => {
+    const management = cases.filter((testCase) =>
+      testCase.id.startsWith("notes-read-") ||
+      testCase.id.startsWith("notes-delete-last-")
+    );
+    const confirmations = cases.filter((testCase) =>
+      testCase.id.startsWith("confirmation-")
+    );
+
+    expect(management).toHaveLength(4);
+    expect(confirmations.length).toBeGreaterThanOrEqual(6);
+    expect(
+      confirmations.every(
+        (testCase) => testCase.expected.action === "unknown",
+      ),
+    ).toBe(true);
+  });
+
   it("keeps at least six start and six stop dictation cases", () => {
     const dictationCases = cases.filter(
       (testCase) => testCase.expected.action === "dictation",

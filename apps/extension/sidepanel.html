@@ -324,8 +324,16 @@
       <section class="notes-panel" id="notes-panel" aria-labelledby="notes-heading">
         <div class="section-heading">
           <h2 class="section-index" id="notes-heading">03 / NOTES</h2>
-          <button class="link-button" id="export-notes" type="button">Export .md</button>
+          <button class="link-button" id="export-notes" type="button" disabled>Export .md</button>
         </div>
+        <label class="sr-only" for="notes-search">Search notes</label>
+        <input
+          class="notes-search"
+          id="notes-search"
+          type="search"
+          placeholder="Search notes"
+          autocomplete="off"
+        />
         <p class="reminder-banner" id="reminder-banner" hidden></p>
         <ul class="notes-list" id="notes-list">
           <li class="empty-notes">No notes yet.</li>

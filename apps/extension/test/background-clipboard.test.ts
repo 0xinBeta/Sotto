@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const worker = vi.hoisted(() => ({
   route: vi.fn(),
+  routeConfirmed: vi.fn(),
+  requiresConfirmation: vi.fn(() => false),
   followUp: vi.fn(),
   pause: vi.fn(() => true),
   resume: vi.fn(() => true),
@@ -20,6 +22,14 @@ vi.mock("@sotto/core", () => ({
 
     route(command: unknown, context: unknown) {
       return worker.route(command, context);
+    }
+
+    routeConfirmed(command: unknown, context: unknown) {
+      return worker.routeConfirmed(command, context);
+    }
+
+    requiresConfirmation(command: unknown) {
+      return worker.requiresConfirmation(command);
     }
   },
   CommandValidationError: class CommandValidationError extends Error {},
@@ -174,6 +184,11 @@ async function installBackground(
           );
         }),
         set: storageSet,
+        remove: vi.fn(async (keys: string | readonly string[]) => {
+          for (const key of Array.isArray(keys) ? keys : [keys]) {
+            delete storageValues[key];
+          }
+        }),
         setAccessLevel: vi.fn(),
       },
     },
@@ -213,6 +228,9 @@ async function installBackground(
 
 afterEach(() => {
   worker.route.mockReset();
+  worker.routeConfirmed.mockReset();
+  worker.requiresConfirmation.mockReset();
+  worker.requiresConfirmation.mockReturnValue(false);
   worker.followUp.mockReset();
   worker.pause.mockClear();
   worker.resume.mockClear();
@@ -225,6 +243,110 @@ afterEach(() => {
 });
 
 describe("background screenshot clipboard injection", () => {
+  it("holds a confirm-tier command until yes executes it", async () => {
+    const note = {
+      id: "note-1",
+      body: "Buy oat milk before the local market closes tonight please",
+      createdAt: "2026-07-28T12:00:00.000Z",
+      updatedAt: "2026-07-28T12:00:00.000Z",
+    };
+    const deleteCommand = {
+      action: "notes",
+      operation: "delete-last",
+    };
+    const deleteResult = { spoken: "Deleted the note." };
+    worker.requiresConfirmation.mockImplementation(
+      (command) =>
+        (command as { readonly operation?: unknown }).operation ===
+          "delete-last",
+    );
+    worker.routeConfirmed.mockResolvedValue(deleteResult);
+    const harness = await installBackground(
+      { id: 4, url: "https://example.com/current" },
+      {
+        schemaVersion: 1,
+        "note:note-1": note,
+      },
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "delete my last note",
+        command: deleteCommand,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        spoken:
+          "Delete the note: Buy oat milk before the local market closes…? Say yes.",
+      },
+    });
+    expect(worker.route).not.toHaveBeenCalled();
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "yes please",
+        command: { action: "unknown" },
+      }),
+    ).resolves.toEqual({ ok: true, value: deleteResult });
+    expect(worker.routeConfirmed).toHaveBeenCalledWith(
+      deleteCommand,
+      expect.objectContaining({
+        actionCatalog: expect.anything(),
+      }),
+    );
+  });
+
+  it("cancels a held command when the next command is not yes", async () => {
+    const note = {
+      id: "note-1",
+      body: "Buy oat milk",
+      createdAt: "2026-07-28T12:00:00.000Z",
+      updatedAt: "2026-07-28T12:00:00.000Z",
+    };
+    worker.requiresConfirmation.mockImplementation(
+      (command) =>
+        (command as { readonly operation?: unknown }).operation ===
+          "delete-last",
+    );
+    const harness = await installBackground(
+      { id: 4, url: "https://example.com/current" },
+      {
+        schemaVersion: 1,
+        "note:note-1": note,
+      },
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "delete my last note",
+      command: { action: "notes", operation: "delete-last" },
+    });
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "show my notes",
+        command: { action: "notes", operation: "list" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Cancelled." },
+    });
+
+    expect(worker.routeConfirmed).not.toHaveBeenCalled();
+    expect(worker.route).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-result",
+        transcript: "show my notes",
+        result: { spoken: "Cancelled." },
+      }),
+    );
+  });
+
   it("sends the help workflow to the command reference", async () => {
     const helpResult = {
       spoken: "Sotto supports 7 commands; open the panel for the list.",

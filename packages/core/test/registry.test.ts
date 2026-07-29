@@ -331,6 +331,39 @@ describe("CommandRouter", () => {
       router.route({ action: "count", amount: 1 }),
     ).rejects.toThrow("Action requires confirmation before execution: count");
     expect(execute).not.toHaveBeenCalled();
+
+    await expect(
+      router.routeConfirmed({ action: "count", amount: 1 }),
+    ).resolves.toEqual({ spoken: "Should not run." });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("supports confirmation for one command in an action", async () => {
+    const execute = vi.fn(
+      async (command: CountCommand) => ({
+        spoken: `Counted ${command.amount}.`,
+      }),
+    );
+    const conditional = defineAction<CountCommand>({
+      ...countAction(execute),
+      confirm: (command) =>
+        (command as CountCommand).amount > 1,
+    });
+    const router = new CommandRouter(new ActionRegistry([conditional]));
+
+    expect(router.requiresConfirmation({ action: "count", amount: 1 }))
+      .toBe(false);
+    expect(router.requiresConfirmation({ action: "count", amount: 2 }))
+      .toBe(true);
+    await expect(
+      router.route({ action: "count", amount: 1 }),
+    ).resolves.toEqual({ spoken: "Counted 1." });
+    await expect(
+      router.route({ action: "count", amount: 2 }),
+    ).rejects.toThrow("Action requires confirmation before execution: count");
+    await expect(
+      router.routeConfirmed({ action: "count", amount: 2 }),
+    ).resolves.toEqual({ spoken: "Counted 2." });
   });
 
   it("revalidates against the merged registry schema at the execution boundary", async () => {

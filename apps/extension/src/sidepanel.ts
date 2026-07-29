@@ -469,6 +469,7 @@ const readingControls = requiredElement<HTMLElement>("#reading-controls");
 const pauseReading = requiredElement<HTMLButtonElement>("#pause-reading");
 const skipReading = requiredElement<HTMLButtonElement>("#skip-reading");
 const notesList = requiredElement<HTMLUListElement>("#notes-list");
+const notesSearch = requiredElement<HTMLInputElement>("#notes-search");
 const exportNotes = requiredElement<HTMLButtonElement>("#export-notes");
 const reminderBanner = requiredElement<HTMLElement>("#reminder-banner");
 const commandReference =
@@ -481,6 +482,7 @@ let isReading = false;
 let isReadingPaused = false;
 let isDictating = false;
 let isDictationPaused = false;
+let panelNotes: readonly PanelNote[] = [];
 let pendingScreenshot: ClipboardWorkflow | undefined;
 let pendingScreenshotPermission: ScreenshotPermissionWorkflow | undefined;
 let newestLogEntry: LogEntry | undefined;
@@ -1092,21 +1094,30 @@ function showPageText(text: string, title: string): void {
   pageTextCard.hidden = false;
 }
 
-function renderNotes(notes: readonly PanelNote[]): void {
+function renderNoteList(): void {
   notesList.replaceChildren();
+  const query = notesSearch.value.trim().toLocaleLowerCase();
+  const notes = query
+    ? panelNotes.filter((note) =>
+        note.body.toLocaleLowerCase().includes(query)
+      )
+    : panelNotes;
   if (notes.length === 0) {
     const empty = document.createElement("li");
     empty.className = "empty-notes";
-    empty.textContent = "No notes yet.";
+    empty.textContent =
+      panelNotes.length === 0 ? "No notes yet." : "No notes match your search.";
     notesList.append(empty);
-    exportNotes.disabled = true;
+    exportNotes.disabled = panelNotes.length === 0;
     return;
   }
   exportNotes.disabled = false;
   for (const note of notes) {
     const item = document.createElement("li");
     const body = document.createElement("p");
+    const details = document.createElement("div");
     const time = document.createElement("time");
+    const deleteButton = document.createElement("button");
     body.textContent = note.body;
     const created = new Date(note.createdAt);
     time.dateTime = note.createdAt;
@@ -1116,9 +1127,42 @@ function renderNotes(notes: readonly PanelNote[]): void {
           dateStyle: "medium",
           timeStyle: "short",
         });
-    item.append(body, time);
+    details.className = "note-details";
+    deleteButton.className = "note-delete";
+    deleteButton.type = "button";
+    deleteButton.textContent = "Delete";
+    deleteButton.setAttribute(
+      "aria-label",
+      `Delete note: ${note.body.slice(0, 80)}`,
+    );
+    deleteButton.addEventListener("click", async () => {
+      deleteButton.disabled = true;
+      try {
+        const deleted = await requestWorker<boolean>({
+          type: "delete-note",
+          noteId: note.id,
+        });
+        if (deleted) {
+          panelNotes = panelNotes.filter((item) => item.id !== note.id);
+          renderNoteList();
+        }
+      } catch (error) {
+        appendLog(
+          "delete note",
+          error instanceof Error ? error.message : "Delete failed",
+        );
+        deleteButton.disabled = false;
+      }
+    });
+    details.append(time, deleteButton);
+    item.append(body, details);
     notesList.append(item);
   }
+}
+
+function renderNotes(notes: readonly PanelNote[]): void {
+  panelNotes = notes;
+  renderNoteList();
 }
 
 function showCommandReference(): void {
@@ -1378,6 +1422,8 @@ closePageText.addEventListener("click", () => {
   }
 });
 
+notesSearch.addEventListener("input", renderNoteList);
+
 exportNotes.addEventListener("click", async () => {
   exportNotes.disabled = true;
   try {
@@ -1406,7 +1452,7 @@ exportNotes.addEventListener("click", async () => {
       error instanceof Error ? error.message : "Export failed",
     );
   } finally {
-    exportNotes.disabled = notesList.querySelector(".empty-notes") !== null;
+    exportNotes.disabled = panelNotes.length === 0;
   }
 });
 

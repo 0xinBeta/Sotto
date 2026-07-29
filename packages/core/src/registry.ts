@@ -188,9 +188,39 @@ export class CommandRouter {
     return candidate as ActionCommand;
   }
 
+  requiresConfirmation(commandJson: string | unknown): boolean {
+    const command = this.parse(commandJson);
+    if (command.action === "unknown") return false;
+
+    const action = this.registry.get(command.action);
+    if (!action) {
+      throw new CommandValidationError(
+        `Action is not registered: ${command.action}`,
+      );
+    }
+    return typeof action.confirm === "function"
+      ? action.confirm(command)
+      : action.confirm;
+  }
+
   async route(
     commandJson: string | unknown,
     context: ActionContext = {},
+  ): Promise<ActionResult> {
+    return this.#route(commandJson, context, false);
+  }
+
+  async routeConfirmed(
+    commandJson: string | unknown,
+    context: ActionContext = {},
+  ): Promise<ActionResult> {
+    return this.#route(commandJson, context, true);
+  }
+
+  async #route(
+    commandJson: string | unknown,
+    context: ActionContext,
+    confirmed: boolean,
   ): Promise<ActionResult> {
     const command = this.parse(commandJson);
     if (command.action === "unknown") {
@@ -205,7 +235,10 @@ export class CommandRouter {
         `Action is not registered: ${command.action}`,
       );
     }
-    if (action.confirm) {
+    const requiresConfirmation = typeof action.confirm === "function"
+      ? action.confirm(command)
+      : action.confirm;
+    if (requiresConfirmation && !confirmed) {
       throw new CommandValidationError(
         `Action requires confirmation before execution: ${command.action}`,
       );
