@@ -68,6 +68,11 @@ import {
   type SessionHistoryEntry,
   type SessionHistoryState,
 } from "./session-history.js";
+import {
+  wakeWordIndicatorVisible,
+  type WakeWordPanelState,
+  type WakeWordRuntimeState,
+} from "./wake-word-settings.js";
 import "./styles.css";
 
 localizePanel();
@@ -80,7 +85,8 @@ type ModelProgressKind =
   | "translator"
   | "rewriter"
   | "premium-tts"
-  | "premium-stt";
+  | "premium-stt"
+  | "wake-word";
 type PremiumTtsState = PremiumVoiceSetupState;
 type PremiumSttState = PremiumSpeechSetupState;
 type PremiumSttTier = "parakeet" | "moonshine-base";
@@ -94,6 +100,7 @@ type PanelModelId =
   | "moonshine-base"
   | "parakeet-v3"
   | "kokoro"
+  | "wake-word"
   | `kokoro-voice:${string}`
   | "gemini-nano"
   | "summarizer";
@@ -205,6 +212,7 @@ function isPanelModelId(value: unknown): value is PanelModelId {
     value === "moonshine-base" ||
     value === "parakeet-v3" ||
     value === "kokoro" ||
+    value === "wake-word" ||
     value === "gemini-nano" ||
     value === "summarizer" ||
     (typeof value === "string" &&
@@ -251,6 +259,12 @@ type PanelMessage =
     }
   | { target: "sidepanel"; type: "listening-state"; listening: boolean }
   | { target: "sidepanel"; type: "quiet-mode-state"; enabled: boolean }
+  | {
+      target: "sidepanel";
+      type: "wake-word-state";
+      enabled: boolean;
+      state: WakeWordRuntimeState;
+    }
   | { target: "sidepanel"; type: "speech-start" }
   | { target: "sidepanel"; type: "speech-end" }
   | { target: "sidepanel"; type: "mic-level"; level: number }
@@ -403,6 +417,18 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
       );
     case "quiet-mode-state":
       return typeof message.enabled === "boolean";
+    case "wake-word-state":
+      return (
+        typeof message.enabled === "boolean" &&
+        (
+          message.state === "disarmed" ||
+          message.state === "arming" ||
+          message.state === "armed" ||
+          message.state === "suspended" ||
+          message.state === "error"
+        ) &&
+        (message.enabled || message.state === "disarmed")
+      );
     case "action-log":
       return (
         isBoundedString(message.heard, 2_000, 1) &&
@@ -545,7 +571,8 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           message.model === "translator" ||
           message.model === "rewriter" ||
           message.model === "premium-tts" ||
-          message.model === "premium-stt") &&
+          message.model === "premium-stt" ||
+          message.model === "wake-word") &&
         typeof message.progress === "number" &&
         Number.isFinite(message.progress) &&
         message.progress >= 0 &&
@@ -666,6 +693,10 @@ function requiredElement<T extends Element>(selector: string): T {
 
 const statusChip = requiredElement<HTMLElement>("#status-chip");
 const statusLabel = requiredElement<HTMLElement>("#status-label");
+const wakeWordIndicator =
+  requiredElement<HTMLElement>("#wake-word-indicator");
+const wakeWordIndicatorLabel =
+  requiredElement<HTMLElement>("#wake-word-indicator-label");
 const quietModeControl =
   requiredElement<HTMLElement>("#quiet-mode-control");
 const quietModeToggle =
@@ -738,6 +769,16 @@ const liveTranscriptPreviewSetting =
   requiredElement<HTMLElement>("#live-transcript-preview-setting");
 const liveTranscriptPreview =
   requiredElement<HTMLInputElement>("#live-transcript-preview");
+const wakeWordEnabled =
+  requiredElement<HTMLInputElement>("#wake-word-enabled");
+const wakeWordProgressCard =
+  requiredElement<HTMLElement>("#wake-word-progress-card");
+const wakeWordProgress =
+  requiredElement<HTMLProgressElement>("#wake-word-progress");
+const wakeWordProgressValue =
+  requiredElement<HTMLOutputElement>("#wake-word-progress-value");
+const wakeWordProgressLabel =
+  requiredElement<HTMLElement>("#wake-word-progress-label");
 const sessionHistoryEnabled =
   requiredElement<HTMLInputElement>("#session-history-enabled");
 const sessionHistoryPanel =
@@ -866,6 +907,10 @@ const commandReferenceList =
 
 let isListening = false;
 let isQuietMode = false;
+let currentWakeWordState: WakeWordPanelState = {
+  enabled: false,
+  state: "disarmed",
+};
 let isReading = false;
 let isReadingPaused = false;
 let readingView:
@@ -906,7 +951,12 @@ let meterAccessibleTimer: number | undefined;
 let pendingMeterAccessibleValue: number | undefined;
 let lastMeterAccessibleUpdate = Number.NEGATIVE_INFINITY;
 const progressHideTimers:
-  Partial<Record<"nano" | "stt" | "premium-tts" | "premium-stt", number>> = {};
+  Partial<
+    Record<
+      "nano" | "stt" | "premium-tts" | "premium-stt" | "wake-word",
+      number
+    >
+  > = {};
 const METER_ACCESSIBLE_INTERVAL_MS = 500;
 const MAX_SETTINGS_BACKUP_FILE_BYTES = 20 * 1024 * 1024;
 
@@ -1052,6 +1102,27 @@ function showQuietMode(enabled: boolean): void {
   quietModeControl.dataset.state = enabled ? "on" : "off";
   quietModeLabel.textContent =
     enabled ? t("quietModeOn") : t("quietModeOff");
+}
+
+function showWakeWordState(
+  enabled: boolean,
+  state: WakeWordRuntimeState,
+): void {
+  currentWakeWordState = { enabled, state };
+  wakeWordEnabled.checked = enabled;
+  wakeWordEnabled.disabled = state === "arming";
+  wakeWordIndicator.hidden = !wakeWordIndicatorVisible(
+    currentWakeWordState,
+  );
+  wakeWordIndicator.dataset.state = state;
+  wakeWordIndicatorLabel.textContent =
+    state === "armed"
+      ? t("wakePhraseArmed")
+      : state === "arming"
+        ? t("wakePhraseArming")
+        : state === "error"
+          ? t("wakePhraseError")
+          : t("wakePhraseSuspended");
 }
 
 async function loadQuietMode(): Promise<void> {
@@ -1648,30 +1719,38 @@ function updateProgress(
         ? "premium-tts"
         : model === "premium-stt"
           ? "premium-stt"
-          : "nano";
+          : model === "wake-word"
+            ? "wake-word"
+            : "nano";
   const card =
     progressKind === "nano"
       ? nanoProgressCard
       : progressKind === "stt"
         ? sttProgressCard
-        : progressKind === "premium-tts"
-          ? premiumProgressCard
-          : premiumSttProgressCard;
+      : progressKind === "premium-tts"
+        ? premiumProgressCard
+        : progressKind === "premium-stt"
+          ? premiumSttProgressCard
+          : wakeWordProgressCard;
   const bar =
     progressKind === "nano"
       ? nanoProgress
       : progressKind === "stt"
         ? sttProgress
-        : progressKind === "premium-tts"
-          ? premiumProgress
-          : premiumSttProgress;
+      : progressKind === "premium-tts"
+        ? premiumProgress
+        : progressKind === "premium-stt"
+          ? premiumSttProgress
+          : wakeWordProgress;
   const output = progressKind === "nano"
     ? nanoProgressValue
     : progressKind === "stt"
       ? sttProgressValue
-      : progressKind === "premium-tts"
-        ? premiumProgressValue
-        : premiumSttProgressValue;
+    : progressKind === "premium-tts"
+      ? premiumProgressValue
+      : progressKind === "premium-stt"
+        ? premiumSttProgressValue
+        : wakeWordProgressValue;
   if (progressKind === "nano") {
     nanoProgressLabel.textContent =
       model === "summarizer"
@@ -1697,6 +1776,14 @@ function updateProgress(
           file.split("/").at(-1) ?? t("modelFile"),
         )
       : t("highAccuracySpeechModel");
+  }
+  if (progressKind === "wake-word") {
+    wakeWordProgressLabel.textContent = file
+      ? t(
+          "wakeModelFileProgress",
+          file.split("/").at(-1) ?? t("modelFile"),
+        )
+      : t("modelWakePhrase");
   }
   card.hidden = false;
   if (file) card.title = file;
@@ -2891,6 +2978,27 @@ premiumVoiceEnabled.addEventListener("change", async () => {
   premiumVoiceEnabled.disabled = false;
 });
 
+wakeWordEnabled.addEventListener("change", async () => {
+  const requested = wakeWordEnabled.checked;
+  wakeWordEnabled.disabled = true;
+  if (
+    !(await send({
+      type: "set-wake-word-enabled",
+      enabled: requested,
+    }))
+  ) {
+    showWakeWordState(
+      currentWakeWordState.enabled,
+      currentWakeWordState.state,
+    );
+    appendLog(
+      t("wakePhraseExperimental"),
+      t("wakePhraseSaveFailed"),
+    );
+  }
+  wakeWordEnabled.disabled = currentWakeWordState.state === "arming";
+});
+
 for (const slider of [speechRate, speechVolume]) {
   slider.addEventListener("input", () => {
     void saveSpeechSettings();
@@ -3216,6 +3324,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
     case "quiet-mode-state":
       showQuietMode(message.enabled);
       break;
+    case "wake-word-state":
+      showWakeWordState(message.enabled, message.state);
+      break;
     case "speech-start":
       listeningMark.textContent = isDictating
         ? t("dictation")
@@ -3249,7 +3360,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
           ? message.status === "ready"
           : message.model === "premium-stt"
             ? message.status === "ready"
-            : message.progress >= 1,
+            : message.model === "wake-word"
+              ? message.status === "ready"
+              : message.progress >= 1,
         message.file,
         message.loaded,
         message.total,
@@ -3435,6 +3548,7 @@ async function loadLatencyStatistics(): Promise<void> {
 }
 
 showTranscript("");
+showWakeWordState(false, "disarmed");
 modelsTotal.value = t("modelsTotal", "0 B");
 modelsTotal.textContent = modelsTotal.value;
 micMeter.dataset.state = "idle";

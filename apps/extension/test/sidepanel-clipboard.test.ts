@@ -156,6 +156,8 @@ class FakeText {
 const elementIds = [
   "status-chip",
   "status-label",
+  "wake-word-indicator",
+  "wake-word-indicator-label",
   "quiet-mode-control",
   "quiet-mode",
   "quiet-mode-label",
@@ -202,6 +204,11 @@ const elementIds = [
   "clear-log",
   "live-transcript-preview-setting",
   "live-transcript-preview",
+  "wake-word-enabled",
+  "wake-word-progress-card",
+  "wake-word-progress",
+  "wake-word-progress-value",
+  "wake-word-progress-label",
   "session-history-enabled",
   "session-history-panel",
   "session-history-list",
@@ -881,6 +888,40 @@ describe("side-panel screenshot clipboard fallback", () => {
     });
     expect(elements["quiet-mode-label"].textContent).toBe("Quiet mode off");
     expect(elements["quiet-mode-control"].dataset.state).toBe("off");
+  });
+
+  it("keeps the actual wake phrase visible while the microphone is armed", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "wake-word-state",
+      enabled: true,
+      state: "armed",
+    });
+
+    expect(elements["wake-word-enabled"].checked).toBe(true);
+    expect(elements["wake-word-indicator"].hidden).toBe(false);
+    expect(elements["wake-word-indicator"].dataset.state).toBe("armed");
+    expect(elements["wake-word-indicator-label"].textContent).toBe(
+      'Wake phrase: "Hey Jarvis" (experimental) — Armed',
+    );
+
+    elements["wake-word-enabled"].checked = false;
+    await elements["wake-word-enabled"].emit("change");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "set-wake-word-enabled",
+      enabled: false,
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "wake-word-state",
+      enabled: false,
+      state: "disarmed",
+    });
+    expect(elements["wake-word-indicator"].hidden).toBe(true);
   });
 
   it("shows, appends, clears, and disables session history", async () => {

@@ -43,6 +43,7 @@ export interface DiagnosticOffscreenState {
   readonly nanoAvailability: ChromeAvailability;
   readonly summarizerAvailability: ChromeAvailability;
   readonly micPermission: PermissionState | "unknown";
+  readonly wakeWord: "armed" | "disarmed";
 }
 
 /**
@@ -214,6 +215,7 @@ export function buildDiagnosticReport(
     `Blocked sites: ${input.blockedSiteCount}`,
     `Session history: ${input.sessionHistoryEnabled ? "enabled" : "disabled"}`,
     `Session history entries: ${input.sessionHistoryCount}`,
+    `Wake phrase "Hey Jarvis": ${input.wakeWord}`,
     "",
     "## Chrome AI",
     `Gemini Nano: ${input.nanoAvailability}`,

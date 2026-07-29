@@ -35,6 +35,7 @@ type ReportField =
   | "nanoAvailability"
   | "summarizerAvailability"
   | "micPermission"
+  | "wakeWord"
   | "rate"
   | "volume"
   | "blockedSiteCount"
@@ -89,6 +90,7 @@ function reportInput(): DiagnosticReportInput {
     nanoAvailability: "available",
     summarizerAvailability: "downloadable",
     micPermission: "granted",
+    wakeWord: "armed",
     rate: 1.2,
     volume: 0.8,
     blockedSiteCount: 2,
@@ -155,6 +157,7 @@ describe("diagnostic report", () => {
         "Blocked sites: 2",
         "Session history: enabled",
         "Session history entries: 3",
+        'Wake phrase "Hey Jarvis": armed',
         "",
         "## Chrome AI",
         "Gemini Nano: available",

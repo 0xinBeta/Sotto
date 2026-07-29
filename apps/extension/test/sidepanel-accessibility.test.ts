@@ -25,6 +25,8 @@ function openingTag(id: string): string {
 describe("side-panel accessibility structure", () => {
   it("provides live regions and control semantics", () => {
     expect(openingTag("status-chip")).toContain('role="status"');
+    expect(openingTag("wake-word-indicator")).toContain('role="status"');
+    expect(openingTag("wake-word-indicator")).toContain('aria-live="polite"');
     expect(openingTag("transcript")).toContain('aria-live="polite"');
     expect(openingTag("pipeline-error")).toContain('role="alert"');
     expect(openingTag("settings-backup-status")).toContain(
@@ -49,6 +51,10 @@ describe("side-panel accessibility structure", () => {
       'aria-labelledby="quiet-mode-label"',
     );
     expect(openingTag("live-transcript-preview")).toContain('role="switch"');
+    expect(openingTag("wake-word-enabled")).toContain('role="switch"');
+    expect(openingTag("wake-word-enabled")).toContain(
+      'aria-describedby="wake-word-license wake-word-warning"',
+    );
     expect(openingTag("session-history-enabled")).toContain('role="switch"');
     expect(openingTag("session-history-enabled")).toContain(
       'aria-describedby="session-history-note"',
@@ -117,6 +123,15 @@ describe("side-panel accessibility structure", () => {
     );
     expect(panelMarkup).toMatch(
       /<label class="voice-switch" for="live-transcript-preview">/,
+    );
+    expect(panelMarkup).toMatch(
+      /<label class="voice-switch" for="wake-word-enabled">/,
+    );
+    expect(panelMarkup).toContain(
+      'data-i18n="wakePhraseWarning"',
+    );
+    expect(panelMarkup).toContain(
+      'data-i18n="wakeModelsLicense"',
     );
     expect(panelMarkup).toMatch(
       /class="quiet-switch"[\s\S]*for="quiet-mode"/,

@@ -32,5 +32,10 @@ Models (downloaded on demand, pinned revisions; not distributed in this repo)
 - Kokoro-82M (onnx-community/Kokoro-82M-v1.0-ONNX) — Apache-2.0 — https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX
 - Parakeet-TDT 0.6B v3 (NVIDIA; efederici INT4 ONNX export) — CC-BY-4.0 — https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
 - Gemini Nano — provided and managed by Chrome's built-in AI; not distributed by Sotto
+- openWakeWord pretrained models (melspectrogram, embedding, hey_jarvis) —
+  CC BY-NC-SA 4.0 — https://github.com/dscripka/openWakeWord
+  Not distributed with Sotto. The optional wake-word feature downloads these
+  files on demand after an explicit opt-in, for personal, non-commercial use.
+  The openWakeWord code itself is Apache-2.0.
 
 If a notice here is inaccurate or incomplete, please open an issue.

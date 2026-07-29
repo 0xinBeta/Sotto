@@ -270,6 +270,52 @@ h2 {
   background: var(--danger);
 }
 
+.wake-word-indicator {
+  position: sticky;
+  z-index: 20;
+  top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: -24px 0 24px;
+  border: 1px solid var(--danger-border);
+  padding: 10px 12px;
+  color: var(--paper);
+  background: var(--ink-soft);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wake-word-indicator-dot {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.wake-word-indicator[data-state="armed"] .wake-word-indicator-dot {
+  animation: signal 1.8s ease-out infinite;
+}
+
+.wake-word-indicator[data-state="arming"],
+.wake-word-indicator[data-state="suspended"] {
+  border-color: var(--rule);
+  color: var(--paper-dim);
+}
+
+.wake-word-indicator[data-state="arming"] .wake-word-indicator-dot,
+.wake-word-indicator[data-state="suspended"] .wake-word-indicator-dot {
+  background: var(--paper-dim);
+  box-shadow: none;
+}
+
 .quiet-switch {
   display: inline-flex;
   align-items: center;

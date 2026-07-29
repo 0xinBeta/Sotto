@@ -102,6 +102,21 @@ import {
   loadKokoroTtsEngine,
   loadParakeetSttEngine,
 } from "./premium-engine-loaders.js";
+import {
+  BrowserWakeAudioCapture,
+  OpenWakeWordModel,
+  WakeSpeechConfirmGuard,
+  WakeWordController,
+} from "./wake-word.js";
+import {
+  WakeWordModelStore,
+  type WakeWordModelProgress,
+} from "./wake-word-models.js";
+import {
+  normalizeWakeWordEnabled,
+  WAKE_WORD_ENABLED_KEY,
+  type WakeWordRuntimeState,
+} from "./wake-word-settings.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -126,6 +141,7 @@ interface OffscreenMessage {
   readonly modelId?: unknown;
   readonly preview?: unknown;
   readonly timings?: unknown;
+  readonly playbackId?: unknown;
 }
 
 interface MessageEnvelope<T> {
@@ -144,6 +160,7 @@ const modelLru = new ModelResidencyLru();
 const modelCache = new ModelCacheStore(
   typeof caches === "undefined" ? undefined : caches,
 );
+const wakeWordModels = new WakeWordModelStore();
 const speechContext = new SpeechContextRing();
 const followUpMemory = new FollowUpMemory();
 
@@ -191,6 +208,16 @@ let pipelineWarmup: AbortController | undefined;
 let lastPipelineWarmupAt = Number.NEGATIVE_INFINITY;
 let lastExchangeAt = Number.NEGATIVE_INFINITY;
 let dictationState: DictationState = "inactive";
+let wakeWordController: WakeWordController | undefined;
+let wakeWordEnabled = false;
+let wakeWordState: WakeWordRuntimeState = "disarmed";
+let wakeWordModelDownloading = false;
+let wakeWordSettingReady: Promise<void> | undefined;
+let wakeTriggeredSession = false;
+let discardWakeSession = false;
+let activeSpeechPipelines = 0;
+const wakePlaybackIds = new Set<string>();
+const wakeSpeechConfirm = new WakeSpeechConfirmGuard();
 
 const PIPELINE_WARM_IDLE_MS = 30_000;
 const dictationSilenceTimer = new DictationSilenceTimer(() => {
@@ -331,6 +358,7 @@ async function sendPanel(message: Record<string, unknown>): Promise<void> {
       message.type === "earcon" &&
       await askWorker<boolean>({ type: "get-quiet-mode" })
     ) {
+      // Quiet mode silences output. It does not disable wake listening.
       return;
     }
     await chrome.runtime.sendMessage({ target: "sidepanel", ...message });
@@ -369,6 +397,143 @@ async function askWorker<T>(
     throw new Error(response.error?.message ?? "Service worker request failed");
   }
   return response.value;
+}
+
+async function publishWakeWordStatus(): Promise<void> {
+  await sendPanel({
+    type: "wake-word-state",
+    enabled: wakeWordEnabled,
+    state: wakeWordState,
+  });
+}
+
+function handleWakeWordModelProgress(
+  progress: WakeWordModelProgress,
+): void {
+  const downloading = progress.status !== "ready";
+  if (wakeWordModelDownloading !== downloading) {
+    wakeWordModelDownloading = downloading;
+    if (!downloading) modelCache.invalidate();
+    queueModelInventoryPublish();
+  }
+  void sendPanel({
+    type: "model-progress",
+    model: "wake-word",
+    progress: Math.max(0, Math.min(1, progress.progress)),
+    status: progress.status,
+    ...(progress.file === undefined ? {} : { file: progress.file }),
+    loaded: progress.loaded,
+    total: progress.total,
+  });
+}
+
+function getWakeWordController(): WakeWordController {
+  wakeWordController ??= new WakeWordController({
+    createModel: async () =>
+      OpenWakeWordModel.create(
+        await wakeWordModels.load(handleWakeWordModelProgress),
+      ),
+    createCapture: () => new BrowserWakeAudioCapture(),
+    async onDetected() {
+      // Log the event only. Wake audio never enters logs or messages.
+      console.info("Sotto wake phrase detected", {
+        event: "wake-phrase-detected",
+      });
+      wakeTriggeredSession = true;
+      discardWakeSession = false;
+      try {
+        await startListening("wake");
+      } catch (error) {
+        wakeTriggeredSession = false;
+        wakeSpeechConfirm.cancel();
+        await releaseWakeSession();
+        throw error;
+      }
+    },
+    async onStateChange(enabled, state) {
+      wakeWordEnabled = enabled;
+      wakeWordState = state;
+      await publishWakeWordStatus();
+      queueModelInventoryPublish();
+    },
+  });
+  return wakeWordController;
+}
+
+async function ensureWakeWordSetting(): Promise<void> {
+  wakeWordSettingReady ??= (async () => {
+    const localStorage = chrome.storage?.local;
+    const [stored, playbackActive] = await Promise.all([
+      localStorage?.get(WAKE_WORD_ENABLED_KEY) ?? Promise.resolve({}),
+      askWorker<boolean>({ type: "get-wake-playback-active" }).catch(
+        () => false,
+      ),
+    ]);
+    const controller = getWakeWordController();
+    if (playbackActive) {
+      await controller.setSuspended("playback", true);
+    }
+    const enabled = normalizeWakeWordEnabled(stored);
+    wakeWordEnabled = enabled;
+    try {
+      await controller.setEnabled(enabled);
+    } catch (error) {
+      wakeWordEnabled = false;
+      await controller.setEnabled(false).catch(() => undefined);
+      await localStorage?.set({ [WAKE_WORD_ENABLED_KEY]: false })
+        .catch(() => undefined);
+      throw error;
+    }
+  })();
+  try {
+    await wakeWordSettingReady;
+  } catch (error) {
+    wakeWordSettingReady = undefined;
+    throw error;
+  }
+}
+
+async function setWakeWordEnabled(enabled: boolean): Promise<void> {
+  const localStorage = chrome.storage?.local;
+  if (!localStorage) throw new Error("Local settings are unavailable");
+  const controller = getWakeWordController();
+  if (!enabled) {
+    wakeWordEnabled = false;
+    await controller.setEnabled(false);
+    await localStorage.set({ [WAKE_WORD_ENABLED_KEY]: false });
+    return;
+  }
+  wakeWordEnabled = true;
+  try {
+    await controller.setEnabled(true);
+    await localStorage.set({ [WAKE_WORD_ENABLED_KEY]: true });
+  } catch (error) {
+    wakeWordEnabled = false;
+    await controller.setEnabled(false).catch(() => undefined);
+    await localStorage.set({ [WAKE_WORD_ENABLED_KEY]: false })
+      .catch(() => undefined);
+    throw error;
+  }
+}
+
+async function setWakeSessionActive(active: boolean): Promise<void> {
+  await ensureWakeWordSetting();
+  await getWakeWordController().setSuspended("session", active);
+}
+
+async function releaseWakeSession(): Promise<void> {
+  if (
+    listening ||
+    starting ||
+    activeSpeechPipelines > 0 ||
+    dictationState !== "inactive"
+  ) {
+    return;
+  }
+  wakeSpeechConfirm.cancel();
+  const controller = getWakeWordController();
+  await controller.setSuspended("session", false);
+  await controller.resumeAfterDetection();
 }
 
 async function permissionState(): Promise<PermissionState | "unknown"> {
@@ -453,6 +618,9 @@ async function currentModelInventory(
     premiumTtsState,
     premiumTtsEnabled,
     premiumTtsVoice,
+    wakeWordEnabled,
+    wakeWordState,
+    wakeWordDownloading: wakeWordModelDownloading,
     nano: nanoAvailability,
     nanoActive: parserSession !== undefined || responderSession !== undefined,
     summarizer,
@@ -488,6 +656,7 @@ async function refreshModelInventory(): Promise<void> {
 }
 
 async function diagnosticState(): Promise<DiagnosticOffscreenState> {
+  await ensureWakeWordSetting().catch(() => undefined);
   const [nextNano, summarizer, micPermission, runtime] = await Promise.all([
     getNanoAvailability(),
     getSummarizerAvailability(),
@@ -536,10 +705,14 @@ async function diagnosticState(): Promise<DiagnosticOffscreenState> {
     nanoAvailability,
     summarizerAvailability: summarizer,
     micPermission,
+    wakeWord: wakeWordState === "armed" ? "armed" : "disarmed",
   };
 }
 
 async function publishStatus(error?: string): Promise<void> {
+  await ensureWakeWordSetting().catch((wakeError: unknown) => {
+    console.warn("Sotto could not arm wake detection", wakeError);
+  });
   await Promise.all([
     ensurePremiumSettings(),
     ensurePremiumSttSettings(),
@@ -572,6 +745,7 @@ async function publishStatus(error?: string): Promise<void> {
   await publishPremiumSttStatus();
   await publishLiveTranscriptPreviewStatus();
   await publishModelInventory();
+  await publishWakeWordStatus();
 }
 
 function progressRatioFromKokoro(
@@ -888,6 +1062,11 @@ async function downloadManagedModel(id: ManagedModelId): Promise<void> {
   if (id.startsWith("kokoro-voice:")) {
     throw new TypeError("Choose this voice in the voice list");
   }
+  if (id === "wake-word") {
+    await wakeWordModels.load(handleWakeWordModelProgress);
+    await refreshModelInventory();
+    return;
+  }
   if (id === "kokoro") {
     await ensurePremiumTts();
     await refreshModelInventory();
@@ -939,6 +1118,7 @@ async function deleteManagedModelCache(id: ManagedModelId): Promise<void> {
     : undefined;
   const isCurrentStt = id === currentSttId;
   const isKokoro = id === "kokoro" || id.startsWith("kokoro-voice:");
+  const isWakeWord = id === "wake-word";
   const activeStt = isCurrentStt &&
     premiumSttStatus?.state === "active";
   const activeTts = isKokoro &&
@@ -946,27 +1126,31 @@ async function deleteManagedModelCache(id: ManagedModelId): Promise<void> {
     premiumTtsEnabled &&
     (id === "kokoro" ||
       id === `kokoro-voice:${premiumTtsVoice}`);
+  const activeWakeWord = isWakeWord && wakeWordEnabled;
   if (
     (isCurrentStt &&
       (premiumSttStatus?.state === "downloading" ||
         premiumSttStatus?.state === "validating" ||
         premiumSttStatus?.state === "loading" ||
         premiumSttStatus?.state === "warming")) ||
-    (isKokoro && premiumTtsState === "downloading")
+    (isKokoro && premiumTtsState === "downloading") ||
+    (isWakeWord && wakeWordModelDownloading)
   ) {
     throw new Error("Wait for the model task to finish");
   }
 
   await deleteManagedModel({
     id,
-    active: activeStt || activeTts,
+    active: activeStt || activeTts || activeWakeWord,
     fallback: async () => {
       if (activeStt) {
         await premiumStt!.setEnabled(false);
         await persistPremiumSttStatus();
         await publishPremiumSttStatus();
-      } else {
+      } else if (activeTts) {
         await fallbackFromPremiumTts();
+      } else {
+        await setWakeWordEnabled(false);
       }
     },
     release: async () => {
@@ -978,7 +1162,8 @@ async function deleteManagedModelCache(id: ManagedModelId): Promise<void> {
       }
       return true;
     },
-    clear: () => modelCache.delete(id),
+    clear: () =>
+      isWakeWord ? wakeWordModels.clear() : modelCache.delete(id),
   });
 
   if (isCurrentStt) {
@@ -2072,7 +2257,22 @@ function startMicLevelMeter(stream: MediaStream): void {
   }
 }
 
-async function startListening(): Promise<void> {
+async function handleWakeNoSpeech(): Promise<void> {
+  if (!wakeTriggeredSession) return;
+  discardWakeSession = true;
+  wakeTriggeredSession = false;
+  try {
+    await stopListeningNow();
+  } finally {
+    discardWakeSession = false;
+    await releaseWakeSession();
+  }
+}
+
+async function startListening(
+  source: "manual" | "wake" = "manual",
+): Promise<void> {
+  await setWakeSessionActive(true);
   premiumTts?.stop();
   if (starting) {
     stopRequested = false;
@@ -2118,35 +2318,69 @@ async function startListening(): Promise<void> {
         ort.env.wasm.numThreads = 1;
       },
       onSpeechStart() {
+        if (discardWakeSession) return;
         speechContext.onSpeechStart();
         liveTranscriptPreview.start();
         if (dictationState === "active") dictationSilenceTimer.reset();
         void sendPanel({ type: "speech-start" });
       },
+      onSpeechRealStart() {
+        if (discardWakeSession) return;
+        if (wakeTriggeredSession) wakeSpeechConfirm.confirmSpeech();
+      },
       onVADMisfire() {
+        if (discardWakeSession || wakeTriggeredSession) return;
         speechContext.onVADMisfire();
         liveTranscriptPreview.finish();
         void sendPanel({ type: "speech-end" });
         void publishSttDiagnostic("vad-rejected", micLevelPeak);
       },
       onFrameProcessed(_probabilities, frame) {
+        if (discardWakeSession) return;
         speechContext.onFrame(frame);
         liveTranscriptPreview.addFrame(frame);
       },
       onSpeechEnd(audio) {
+        if (discardWakeSession) return;
         liveTranscriptPreview.finish();
         cancelPipelineWarmup();
         const sttStartedAt = performance.now();
         const input = speechContext.onSpeechEnd(audio);
         const observedMicLevel = micLevelPeak;
+        const stopWakeSession = wakeTriggeredSession;
+        wakeTriggeredSession = false;
+        wakeSpeechConfirm.cancel();
+        activeSpeechPipelines += 1;
         void sendPanel({ type: "speech-end" });
         transcriptPipeline = transcriptPipeline
-          .then(() => processSpeech(input, observedMicLevel, sttStartedAt))
+          .then(async () => {
+            try {
+              await processSpeech(input, observedMicLevel, sttStartedAt);
+            } finally {
+              activeSpeechPipelines = Math.max(
+                0,
+                activeSpeechPipelines - 1,
+              );
+              await releaseWakeSession();
+            }
+          })
           .catch((error: unknown) => {
             console.warn("Speech pipeline failed", error);
           });
+        if (stopWakeSession) {
+          void stopListeningNow().catch((error: unknown) => {
+            console.warn("Sotto could not close wake listening", error);
+          });
+        }
       },
     });
+    if (source === "wake") {
+      wakeSpeechConfirm.begin(() => {
+        void handleWakeNoSpeech().catch((error: unknown) => {
+          console.warn("Sotto could not reset silent wake detection", error);
+        });
+      });
+    }
     await vad.start();
     listening = true;
     starting = false;
@@ -2160,15 +2394,21 @@ async function startListening(): Promise<void> {
     stopMicLevelMeter();
     micStream?.getTracks().forEach((track) => track.stop());
     micStream = undefined;
+    wakeSpeechConfirm.cancel();
+    if (source === "wake") wakeTriggeredSession = false;
+    await releaseWakeSession();
     await publishStatus(message);
     throw error;
   } finally {
     starting = false;
+    if (!listening) await releaseWakeSession();
   }
 }
 
 async function stopListeningNow(): Promise<void> {
   stopTimer = undefined;
+  wakeSpeechConfirm.cancel();
+  wakeTriggeredSession = false;
   liveTranscriptPreview.cancel();
   const activeVad = vad;
   vad = undefined;
@@ -2181,6 +2421,7 @@ async function stopListeningNow(): Promise<void> {
     micStream?.getTracks().forEach((track) => track.stop());
     micStream = undefined;
     await sendPanel({ type: "listening-state", listening: false });
+    await releaseWakeSession();
   }
 }
 
@@ -2332,6 +2573,33 @@ async function handleOffscreenMessage(
       return;
     case "get-diagnostic-state":
       return diagnosticState();
+    case "set-wake-word-enabled":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError("A wake phrase setting is required");
+      }
+      await setWakeWordEnabled(message.enabled);
+      await publishWakeWordStatus();
+      return;
+    case "wake-playback-start":
+    case "wake-playback-end": {
+      if (
+        typeof message.playbackId !== "string" ||
+        !/^[A-Za-z0-9_-]{1,100}$/.test(message.playbackId)
+      ) {
+        throw new TypeError("A valid playback id is required");
+      }
+      if (message.type === "wake-playback-start") {
+        wakePlaybackIds.add(message.playbackId);
+      } else {
+        wakePlaybackIds.delete(message.playbackId);
+      }
+      await ensureWakeWordSetting().catch(() => undefined);
+      await getWakeWordController().setSuspended(
+        "playback",
+        wakePlaybackIds.size > 0,
+      );
+      return;
+    }
     case "refresh-permissions":
       await publishStatus();
       return;
@@ -2598,9 +2866,14 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
+void ensureWakeWordSetting().catch((error: unknown) => {
+  console.warn("Sotto could not restore wake detection", error);
+});
+
 window.addEventListener("unload", () => {
   cancelActiveModelTask();
   liveTranscriptPreview.cancel();
+  wakeSpeechConfirm.cancel();
   dictationSilenceTimer.clear();
   followUpMemory.clear();
   stopMicLevelMeter();
@@ -2618,5 +2891,8 @@ window.addEventListener("unload", () => {
   });
   void premiumTts?.dispose().catch((error: unknown) => {
     console.warn("Kokoro cleanup failed", error);
+  });
+  void wakeWordController?.dispose().catch((error: unknown) => {
+    console.warn("Wake detector cleanup failed", error);
   });
 });

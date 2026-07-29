@@ -164,6 +164,30 @@
   "liveTranscriptPreview": {
     "message": "Live transcript preview"
   },
+  "wakePhraseExperimental": {
+    "message": "Wake phrase: \"Hey Jarvis\" (experimental)"
+  },
+  "wakeModelsLicense": {
+    "message": "The wake models are CC BY-NC-SA 4.0 — free for personal, non-commercial use."
+  },
+  "wakePhraseWarning": {
+    "message": "The microphone stays open while this is on. Audio never leaves this device."
+  },
+  "wakePhraseArming": {
+    "message": "Wake phrase: \"Hey Jarvis\" (experimental) — Starting"
+  },
+  "wakePhraseArmed": {
+    "message": "Wake phrase: \"Hey Jarvis\" (experimental) — Armed"
+  },
+  "wakePhraseSuspended": {
+    "message": "Wake phrase: \"Hey Jarvis\" (experimental) — Paused"
+  },
+  "wakePhraseError": {
+    "message": "Wake phrase: \"Hey Jarvis\" (experimental) — Needs attention"
+  },
+  "wakePhraseSaveFailed": {
+    "message": "Sotto could not change the wake phrase setting."
+  },
   "keepSessionHistory": {
     "message": "Keep session history"
   },
@@ -1006,6 +1030,15 @@
   },
   "modelKokoroVoice": {
     "message": "Kokoro voice: $1"
+  },
+  "modelWakePhrase": {
+    "message": "Wake phrase models"
+  },
+  "modelWakePhraseDetail": {
+    "message": "Hey Jarvis"
+  },
+  "wakeModelFileProgress": {
+    "message": "Wake model: $1"
   },
   "modelSummarizer": {
     "message": "Summarizer"

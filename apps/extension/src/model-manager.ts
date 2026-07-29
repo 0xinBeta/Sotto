@@ -1,10 +1,15 @@
 import { t } from "./panel-i18n.js";
+import {
+  WAKE_WORD_CACHE_HASH_HEADER,
+  WAKE_WORD_MODEL_ID,
+} from "./wake-word-models.js";
 
 export type ManagedModelId =
   | "moonshine-tiny"
   | "moonshine-base"
   | "parakeet-v3"
   | "kokoro"
+  | "wake-word"
   | `kokoro-voice:${string}`;
 
 export type ChromeModelId = "gemini-nano" | "summarizer";
@@ -51,6 +56,14 @@ export interface BuildModelInventoryOptions {
   readonly premiumTtsState: "absent" | "downloading" | "ready" | "error";
   readonly premiumTtsEnabled: boolean;
   readonly premiumTtsVoice: string;
+  readonly wakeWordEnabled: boolean;
+  readonly wakeWordState:
+    | "disarmed"
+    | "arming"
+    | "armed"
+    | "suspended"
+    | "error";
+  readonly wakeWordDownloading?: boolean;
   readonly nano: ChromeAvailability;
   readonly nanoActive?: boolean;
   readonly summarizer: ChromeAvailability;
@@ -67,6 +80,7 @@ export function isManagedModelId(value: unknown): value is ManagedModelId {
     value === "moonshine-base" ||
     value === "parakeet-v3" ||
     value === "kokoro" ||
+    value === "wake-word" ||
     (typeof value === "string" &&
       /^kokoro-voice:[a-z]{2}_[a-z]+$/.test(value));
 }
@@ -76,6 +90,7 @@ const EMPTY_BYTES: ModelCacheMeasurement["bytes"] = {
   "moonshine-base": 0,
   "parakeet-v3": 0,
   kokoro: 0,
+  "wake-word": 0,
 };
 
 const MODEL_REPOSITORIES = {
@@ -83,6 +98,7 @@ const MODEL_REPOSITORIES = {
   "moonshine-base": "onnx-community/moonshine-base-ONNX",
   "parakeet-v3": "efederici/parakeet-tdt-0.6b-v3-onnx-int4",
   kokoro: "onnx-community/Kokoro-82M-v1.0-ONNX",
+  "wake-word": WAKE_WORD_MODEL_ID,
 } as const;
 
 interface CacheMatch {
@@ -102,7 +118,9 @@ function modelForUrl(url: string): CacheMatch | undefined {
   }
 
   if (!url.includes(`/${MODEL_REPOSITORIES.kokoro}/resolve/`)) {
-    return undefined;
+    return url.includes(`/${MODEL_REPOSITORIES["wake-word"]}/resolve/`)
+      ? { id: "wake-word" }
+      : undefined;
   }
   const voice = /\/voices\/([a-z]{2}_[a-z]+)\.bin(?:[?#]|$)/.exec(url)?.[1];
   return voice
@@ -177,6 +195,12 @@ export class ModelCacheStore {
         if (!match) continue;
         const response = await cache.match(request);
         if (!response) continue;
+        if (
+          match.id === "wake-word" &&
+          response.headers.get(WAKE_WORD_CACHE_HASH_HEADER) === null
+        ) {
+          continue;
+        }
         const size = await responseBytes(response).catch(() => 0);
         if (match.voice) {
           voices[match.voice] = (voices[match.voice] ?? 0) + size;
@@ -339,6 +363,27 @@ export function buildModelInventory(
       ),
     );
   }
+
+  const wakeBytes = options.cache.bytes["wake-word"];
+  rows.push(
+    managedRow(
+      "wake-word",
+      t("modelWakePhrase"),
+      wakeBytes,
+      deriveModelState({
+        active: options.wakeWordEnabled &&
+          (
+            options.wakeWordState === "armed" ||
+            options.wakeWordState === "suspended"
+        ),
+        cached: wakeBytes > 0,
+        ...(options.wakeWordDownloading === undefined
+          ? {}
+          : { downloading: options.wakeWordDownloading }),
+      }),
+      t("modelWakePhraseDetail"),
+    ),
+  );
 
   rows.push(
     chromeRow(

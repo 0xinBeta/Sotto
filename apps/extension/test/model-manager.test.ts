@@ -7,6 +7,7 @@ import {
   ModelCacheStore,
   totalModelBytes,
 } from "../src/model-manager.js";
+import { WAKE_WORD_CACHE_HASH_HEADER } from "../src/wake-word-models.js";
 
 function cacheStorage(
   entries: ReadonlyArray<readonly [string, Response]>,
@@ -61,12 +62,24 @@ describe("model manager", () => {
         "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/revision/voices/af_heart.bin",
         new Response(new Uint8Array(7)),
       ],
+      [
+        "https://huggingface.co/harvestsu/openwakeword-onnx/resolve/revision/melspectrogram.onnx",
+        new Response(new Uint8Array(5), {
+          headers: {
+            [WAKE_WORD_CACHE_HASH_HEADER]: "verified",
+          },
+        }),
+      ],
     ]));
 
     const measurement = await store.measure();
     expect(measurement.bytes["moonshine-tiny"]).toBe(120);
     expect(measurement.bytes.kokoro).toBe(30);
+    expect(measurement.bytes["wake-word"]).toBe(5);
     expect(measurement.voices.af_heart).toBe(7);
+
+    await store.delete("wake-word");
+    expect((await store.measure()).bytes["wake-word"]).toBe(0);
 
     expect(
       totalModelBytes([
@@ -127,6 +140,7 @@ describe("model manager", () => {
           "moonshine-base": 20,
           "parakeet-v3": 0,
           kokoro: 30,
+          "wake-word": 3_685_906,
         },
         voices: {},
       },
@@ -135,6 +149,8 @@ describe("model manager", () => {
       premiumTtsState: "ready",
       premiumTtsEnabled: false,
       premiumTtsVoice: "af_heart",
+      wakeWordEnabled: true,
+      wakeWordState: "armed",
       nano: "available",
       summarizer: "downloadable",
     });
@@ -150,6 +166,58 @@ describe("model manager", () => {
         canDelete: false,
       });
     }
+    expect(
+      inventory.rows.find((row) => row.id === "wake-word"),
+    ).toMatchObject({
+      label: "Wake phrase models",
+      state: "active",
+      bytes: 3_685_906,
+      canDownload: false,
+      canDelete: true,
+    });
+  });
+
+  it("shows wake model download and absent states", () => {
+    const base = {
+      cache: {
+        bytes: {
+          "moonshine-tiny": 10,
+          "moonshine-base": 0,
+          "parakeet-v3": 0,
+          kokoro: 0,
+          "wake-word": 0,
+        },
+        voices: {},
+      },
+      premiumSttTier: "moonshine-base" as const,
+      premiumSttState: "ready" as const,
+      premiumTtsState: "absent" as const,
+      premiumTtsEnabled: false,
+      premiumTtsVoice: "af_heart",
+      wakeWordEnabled: false,
+      wakeWordState: "disarmed" as const,
+      nano: "available" as const,
+      summarizer: "available" as const,
+    };
+    expect(
+      buildModelInventory(base).rows.find(
+        (row) => row.id === "wake-word",
+      ),
+    ).toMatchObject({
+      state: "absent",
+      canDownload: true,
+      canDelete: false,
+    });
+    expect(
+      buildModelInventory({
+        ...base,
+        wakeWordDownloading: true,
+      }).rows.find((row) => row.id === "wake-word"),
+    ).toMatchObject({
+      state: "downloading",
+      canDownload: false,
+      canDelete: false,
+    });
   });
 
   it("rejects direct deletion of the floor model", async () => {

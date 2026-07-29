@@ -108,6 +108,7 @@ interface WorkerMessage {
   readonly operation?: unknown;
   readonly backup?: unknown;
   readonly hostname?: unknown;
+  readonly playbackId?: unknown;
 }
 
 const actionRegistry = new ActionRegistry(actions);
@@ -163,6 +164,8 @@ let readingActive = false;
 let readingPaused = false;
 let lastSpokenResponse: string | undefined;
 let pendingReminderConfirmationId: string | undefined;
+let wakePlaybackSequence = 0;
+const activeWakePlaybackIds = new Set<string>();
 const dictationSession = new DictationTargetSession();
 const pipelineErrors = new PipelineErrorBuffer();
 const exchangeTimings = new ExchangeTimingBuffer();
@@ -271,7 +274,7 @@ async function speakResponse(
     }
     return;
   }
-  await tts.speak(text, options);
+  await withWakePlayback(() => tts.speak(text, options));
   if (remember) lastSpokenResponse = text;
 }
 
@@ -291,8 +294,34 @@ async function speakLongResponse(
     }
     return;
   }
-  await tts.speakLong(text, options);
+  await withWakePlayback(() => tts.speakLong(text, options));
   lastSpokenResponse = text;
+}
+
+async function withWakePlayback<T>(task: () => Promise<T>): Promise<T> {
+  wakePlaybackSequence += 1;
+  const playbackId =
+    `tts-${Date.now().toString(36)}-${wakePlaybackSequence.toString(36)}`;
+  activeWakePlaybackIds.add(playbackId);
+  await notifyWakePlayback("wake-playback-start", playbackId);
+  try {
+    return await task();
+  } finally {
+    activeWakePlaybackIds.delete(playbackId);
+    await notifyWakePlayback("wake-playback-end", playbackId);
+  }
+}
+
+async function notifyWakePlayback(
+  type: "wake-playback-start" | "wake-playback-end",
+  playbackId: string,
+): Promise<void> {
+  if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
+  await sendOffscreen({ type, playbackId }).catch((error: unknown) => {
+    if (typeof chrome !== "undefined") {
+      console.warn("Sotto could not update wake detection for speech", error);
+    }
+  });
 }
 
 function beginCommandGeneration(): number {
@@ -434,6 +463,7 @@ async function publishQuietMode(enabled?: boolean): Promise<void> {
 
 async function setQuietMode(enabled: boolean): Promise<boolean> {
   if (enabled) tts.stop();
+  // Quiet mode controls sound only. Wake listening stays available.
   const saved = await quietMode.update(enabled);
   await publishQuietMode(saved);
   return saved;
@@ -507,6 +537,7 @@ async function createDiagnosticReport(): Promise<string> {
     nanoAvailability: state.nanoAvailability,
     summarizerAvailability: state.summarizerAvailability,
     micPermission: state.micPermission,
+    wakeWord: state.wakeWord,
     rate: settings.rate,
     volume: settings.volume,
     blockedSiteCount: blockedHostnames.length,
@@ -2389,6 +2420,16 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
   switch (message.type) {
     case "get-status":
       return sendOffscreen({ type: "get-status" });
+    case "get-wake-playback-active":
+      return activeWakePlaybackIds.size > 0;
+    case "set-wake-word-enabled":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError("A wake phrase setting is required");
+      }
+      return sendOffscreen({
+        type: "set-wake-word-enabled",
+        enabled: message.enabled,
+      });
     case "get-quiet-mode":
       return quietMode.get();
     case "set-quiet-mode":
@@ -2739,10 +2780,12 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
             });
             return;
           }
-          await ttsRouter.preview(
-            text,
-            previewVoice,
-            await speechSettings.get(),
+          await withWakePlayback(async () =>
+            await ttsRouter.preview(
+              text,
+              previewVoice,
+              await speechSettings.get(),
+            )
           );
         },
       });

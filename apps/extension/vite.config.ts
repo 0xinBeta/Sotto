@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
@@ -159,6 +159,31 @@ function inlineExtractPageRuntime(): Plugin {
   };
 }
 
+function verifyWakeModelsNotBundled(): Plugin {
+  const forbidden = new Set([
+    "melspectrogram.onnx",
+    "embedding_model.onnx",
+    "hey_jarvis_v0.1.onnx",
+  ]);
+  return {
+    name: "sotto-verify-wake-models-not-bundled",
+    closeBundle() {
+      const files = readdirSync(resolve(extensionRoot, "dist"), {
+        recursive: true,
+        withFileTypes: true,
+      });
+      const bundled = files
+        .filter((entry) => entry.isFile() && forbidden.has(entry.name))
+        .map((entry) => entry.name);
+      if (bundled.length > 0) {
+        throw new Error(
+          `The extension bundle contains wake models: ${bundled.join(", ")}`,
+        );
+      }
+    },
+  };
+}
+
 function verifyPremiumEngineChunks(): Plugin {
   const engineModules = {
     kokoro: [
@@ -281,6 +306,7 @@ export default defineConfig({
     }),
     inlineExtractPageRuntime(),
     verifyPremiumEngineChunks(),
+    verifyWakeModelsNotBundled(),
   ],
   build: {
     outDir: "dist",

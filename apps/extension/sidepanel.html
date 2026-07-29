@@ -67,6 +67,18 @@
           </label>
         </div>
       </header>
+      <div
+        class="wake-word-indicator"
+        id="wake-word-indicator"
+        data-state="armed"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        hidden
+      >
+        <span class="wake-word-indicator-dot" aria-hidden="true"></span>
+        <span id="wake-word-indicator-label" data-i18n="wakePhraseArmed"></span>
+      </div>
       <p class="sr-only" id="pipeline-error" role="alert" aria-atomic="true"></p>
 
       <section
@@ -350,6 +362,39 @@
             />
             <span class="voice-switch-track" aria-hidden="true"></span>
           </label>
+        </div>
+        <div class="history-setting wake-word-setting">
+          <p id="wake-word-license" data-i18n="wakeModelsLicense"></p>
+          <label class="voice-switch" for="wake-word-enabled">
+            <span data-i18n="wakePhraseExperimental"></span>
+            <input
+              id="wake-word-enabled"
+              type="checkbox"
+              role="switch"
+              aria-describedby="wake-word-license wake-word-warning"
+            />
+            <span class="voice-switch-track" aria-hidden="true"></span>
+          </label>
+          <p id="wake-word-warning" data-i18n="wakePhraseWarning"></p>
+          <div
+            class="premium-progress"
+            id="wake-word-progress-card"
+            hidden
+          >
+            <div class="progress-copy">
+              <span
+                id="wake-word-progress-label"
+                data-i18n="modelWakePhrase"
+              ></span>
+              <output id="wake-word-progress-value">0%</output>
+            </div>
+            <progress
+              id="wake-word-progress"
+              max="1"
+              value="0"
+              aria-labelledby="wake-word-progress-label"
+            ></progress>
+          </div>
         </div>
         <div class="history-setting">
           <label class="voice-switch" for="session-history-enabled">
