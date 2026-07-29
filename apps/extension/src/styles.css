@@ -150,6 +150,7 @@ a:focus-visible {
 .progress-copy,
 .command-row,
 .clipboard-card,
+.dictation-card,
 .premium-voice-heading,
 .premium-voice-actions {
   display: flex;
@@ -848,7 +849,8 @@ progress::-webkit-progress-value {
   text-transform: none;
 }
 
-.clipboard-card {
+.clipboard-card,
+.dictation-card {
   align-items: flex-end;
   margin: -12px 0 28px;
   padding: 15px;
@@ -856,7 +858,8 @@ progress::-webkit-progress-value {
   background: var(--accent-card-fill);
 }
 
-.clipboard-card p:not(.section-index) {
+.clipboard-card p:not(.section-index),
+.dictation-card p:not(.section-index) {
   margin: 6px 0 0;
   color: var(--paper-dim);
   font-size: 12px;
@@ -1175,7 +1178,8 @@ progress::-webkit-progress-value {
     margin-top: 12px;
   }
 
-  .clipboard-card {
+  .clipboard-card,
+  .dictation-card {
     align-items: stretch;
     flex-direction: column;
   }

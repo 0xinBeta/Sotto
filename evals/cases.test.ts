@@ -50,6 +50,22 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps at least six start and six stop dictation cases", () => {
+    const dictationCases = cases.filter(
+      (testCase) => testCase.expected.action === "dictation",
+    );
+    expect(
+      dictationCases.filter(
+        (testCase) => testCase.expected.operation === "start",
+      ).length,
+    ).toBeGreaterThanOrEqual(6);
+    expect(
+      dictationCases.filter(
+        (testCase) => testCase.expected.operation === "stop",
+      ).length,
+    ).toBeGreaterThanOrEqual(6);
+  });
+
   it("keeps at least five repeat cases", () => {
     expect(
       cases.filter((testCase) => testCase.expected.action === "repeat")

@@ -30,6 +30,10 @@
       "types": "./dist/type/bridge.d.ts",
       "import": "./dist/type/bridge.js"
     },
+    "./dictation": {
+      "types": "./dist/dictation/index.d.ts",
+      "import": "./dist/dictation/index.js"
+    },
     "./notes": {
       "types": "./dist/notes/index.d.ts",
       "import": "./dist/notes/index.js"

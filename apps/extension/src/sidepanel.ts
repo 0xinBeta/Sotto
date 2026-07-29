@@ -151,6 +151,12 @@ type PanelMessage =
     }
   | {
       target: "sidepanel";
+      type: "dictation-state";
+      active: boolean;
+      paused: boolean;
+    }
+  | {
+      target: "sidepanel";
       type: "notes-updated";
       notes: readonly PanelNote[];
     }
@@ -244,6 +250,12 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         message.current <= message.total
       );
     case "reading-state":
+      return (
+        typeof message.active === "boolean" &&
+        typeof message.paused === "boolean" &&
+        (!message.paused || message.active)
+      );
+    case "dictation-state":
       return (
         typeof message.active === "boolean" &&
         typeof message.paused === "boolean" &&
@@ -385,6 +397,10 @@ const shortcutLabel = requiredElement<HTMLElement>("#shortcut-label");
 const grantMic = requiredElement<HTMLButtonElement>("#grant-mic");
 const commandForm = requiredElement<HTMLFormElement>("#command-form");
 const commandInput = requiredElement<HTMLInputElement>("#command-input");
+const dictationCard = requiredElement<HTMLElement>("#dictation-card");
+const dictationCopy = requiredElement<HTMLElement>("#dictation-copy");
+const resumeDictation =
+  requiredElement<HTMLButtonElement>("#resume-dictation");
 const clipboardCard = requiredElement<HTMLElement>("#clipboard-card");
 const clipboardCopy = requiredElement<HTMLElement>("#clipboard-copy");
 const copyScreenshot = requiredElement<HTMLButtonElement>("#copy-screenshot");
@@ -463,6 +479,8 @@ const commandReferenceList =
 let isListening = false;
 let isReading = false;
 let isReadingPaused = false;
+let isDictating = false;
+let isDictationPaused = false;
 let pendingScreenshot: ClipboardWorkflow | undefined;
 let pendingScreenshotPermission: ScreenshotPermissionWorkflow | undefined;
 let newestLogEntry: LogEntry | undefined;
@@ -628,15 +646,50 @@ function setStatus(
 function setListening(listening: boolean): void {
   isListening = listening;
   listenButton.setAttribute("aria-pressed", String(listening));
-  listenLabel.textContent = listening ? "Listening…" : "Hold to talk";
-  listeningMark.textContent = listening ? "LIVE" : "IDLE";
-  listeningMark.dataset.active = String(listening);
+  listenLabel.textContent = isDictating
+    ? isDictationPaused
+      ? "Dictation paused"
+      : "Stop dictation"
+    : listening
+      ? "Listening…"
+      : "Hold to talk";
+  listeningMark.textContent = isDictating
+    ? "DICTATION"
+    : listening
+      ? "LIVE"
+      : "IDLE";
+  listeningMark.dataset.active = String(listening || isDictating);
   micMeter.dataset.state = listening ? "listening" : "idle";
   if (!listening) {
     micMeterFill.style.transform = "scaleX(0)";
     updateMeterAccessibleValue(0);
   }
-  setStatus(listening ? "listening" : "ready", listening ? "Listening" : "On device");
+  setStatus(
+    isDictating || listening ? "listening" : "ready",
+    isDictating
+      ? isDictationPaused
+        ? "Dictation paused"
+        : "Dictation"
+      : listening
+        ? "Listening"
+        : "On device",
+  );
+}
+
+function showDictationState(active: boolean, paused: boolean): void {
+  isDictating = active;
+  isDictationPaused = paused;
+  dictationCard.hidden = !active;
+  resumeDictation.hidden = !paused;
+  dictationCopy.textContent = paused
+    ? "Focus the same text field, then select Resume."
+    : "Speak your text. Say stop dictation to finish.";
+  setListening(isListening);
+  actionLogAnnouncer.textContent = !active
+    ? "Dictation stopped."
+    : paused
+      ? "Dictation paused."
+      : "Dictation active.";
 }
 
 function commitMeterAccessibleValue(value: number): void {
@@ -1223,18 +1276,25 @@ async function stopListening(): Promise<void> {
 }
 
 listenButton.addEventListener("pointerdown", (event) => {
+  if (isDictating) {
+    pointerIsDown = false;
+    void send({ type: "stop-dictation" });
+    return;
+  }
   pointerIsDown = true;
   listenButton.setPointerCapture(event.pointerId);
   void startListening();
 });
 
 listenButton.addEventListener("pointerup", (event) => {
+  if (!pointerIsDown) return;
   pointerIsDown = false;
   listenButton.releasePointerCapture(event.pointerId);
   void stopListening();
 });
 
 listenButton.addEventListener("pointercancel", () => {
+  if (!pointerIsDown) return;
   pointerIsDown = false;
   void stopListening();
 });
@@ -1242,11 +1302,16 @@ listenButton.addEventListener("pointercancel", () => {
 listenButton.addEventListener("keydown", (event) => {
   if ((event.key === " " || event.key === "Enter") && !event.repeat && !pointerIsDown) {
     event.preventDefault();
+    if (isDictating) {
+      void send({ type: "stop-dictation" });
+      return;
+    }
     void startListening();
   }
 });
 
 listenButton.addEventListener("keyup", (event) => {
+  if (isDictating) return;
   if (event.key === " " || event.key === "Enter") {
     event.preventDefault();
     void stopListening();
@@ -1256,9 +1321,17 @@ listenButton.addEventListener("keyup", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || !document.hasFocus()) return;
   event.preventDefault();
+  if (isDictating) {
+    void send({ type: "stop-dictation" });
+    return;
+  }
   if (isListening) void stopListening();
   showReadingState(false, false);
   void send({ type: "stop-reading" });
+});
+
+resumeDictation.addEventListener("click", () => {
+  void send({ type: "resume-dictation" });
 });
 
 pauseReading.addEventListener("click", () => {
@@ -1588,13 +1661,13 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       setListening(message.listening);
       break;
     case "speech-start":
-      listeningMark.textContent = "SPEECH";
+      listeningMark.textContent = isDictating ? "DICTATION" : "SPEECH";
       listeningMark.dataset.active = "true";
       micMeter.dataset.state = "speech";
       break;
     case "speech-end":
       if (isListening) {
-        listeningMark.textContent = "LIVE";
+        listeningMark.textContent = isDictating ? "DICTATION" : "LIVE";
         listeningMark.dataset.active = "true";
         micMeter.dataset.state = "listening";
       }
@@ -1641,6 +1714,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       break;
     case "reading-state":
       showReadingState(message.active, message.paused);
+      break;
+    case "dictation-state":
+      showDictationState(message.active, message.paused);
       break;
     case "notes-updated":
       renderNotes(message.notes);

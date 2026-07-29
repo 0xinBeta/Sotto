@@ -324,10 +324,23 @@ function assertCurrentTarget(snapshot: Snapshot): void {
 
 export class EditorSnapshotSession {
   readonly #snapshots = new Map<string, Snapshot>();
+  readonly #targetIds = new WeakMap<Element, string>();
+  readonly #sessionId =
+    globalThis.crypto?.randomUUID?.() ??
+    `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   #lastDictated: LastDictatedRange | undefined;
   #sequence = 0;
+  #targetSequence = 0;
 
   constructor(readonly document: Document) {}
+
+  #targetId(target: Element): string {
+    const existing = this.#targetIds.get(target);
+    if (existing) return existing;
+    const targetId = `${this.#sessionId}:target-${++this.#targetSequence}`;
+    this.#targetIds.set(target, targetId);
+    return targetId;
+  }
 
   capture(options: EditorCaptureOptions): EditorCapture {
     if (
@@ -463,7 +476,12 @@ export class EditorSnapshotSession {
     // Only the newest command may own a live DOM snapshot.
     this.#snapshots.clear();
     this.#snapshots.set(snapshotId, snapshot);
-    return { snapshotId, selectedText: snapshot.selectedText, source };
+    return {
+      snapshotId,
+      targetId: this.#targetId(target),
+      selectedText: snapshot.selectedText,
+      source,
+    };
   }
 
   commit(

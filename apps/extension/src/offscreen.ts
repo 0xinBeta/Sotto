@@ -69,6 +69,11 @@ import {
   clampSpeechRate,
   clampSpeechVolume,
 } from "./speech-settings.js";
+import {
+  DictationSilenceTimer,
+  routeTranscriptForMode,
+  type DictationState,
+} from "./dictation.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -146,8 +151,14 @@ let parserSessionPromiseIsWarmup = false;
 let pipelineWarmup: AbortController | undefined;
 let lastPipelineWarmupAt = Number.NEGATIVE_INFINITY;
 let lastExchangeAt = Number.NEGATIVE_INFINITY;
+let dictationState: DictationState = "inactive";
 
 const PIPELINE_WARM_IDLE_MS = 30_000;
+const dictationSilenceTimer = new DictationSilenceTimer(() => {
+  void exitDictation("silence").catch((error: unknown) => {
+    console.warn("Sotto could not end silent dictation", error);
+  });
+});
 
 modelLru.register("premium-stt", async () => {
   await premiumStt?.releasePremium();
@@ -308,6 +319,11 @@ async function publishStatus(error?: string): Promise<void> {
     listening,
     mic: await permissionState(),
     ...(error === undefined ? {} : { error }),
+  });
+  await sendPanel({
+    type: "dictation-state",
+    active: dictationState !== "inactive",
+    paused: dictationState === "paused",
   });
   await publishPremiumStatus();
   await publishPremiumSttStatus();
@@ -1222,15 +1238,10 @@ async function runRewriteTask(
   );
 }
 
-async function processTranscript(
-  rawTranscript: string,
+async function processCommandTranscript(
+  transcript: string,
   timings: ExchangeTimings,
 ): Promise<void> {
-  const transcript = cleanTranscript(rawTranscript);
-  if (!transcript) return;
-  lastExchangeAt = Date.now();
-
-  await sendPanel({ type: "transcript", text: transcript });
   const memory = followUpMemory.recent();
   let parseMs = 0;
   const command = await inferenceMutex.run(async () => {
@@ -1264,6 +1275,72 @@ async function processTranscript(
   if (result && isActionResult(result)) {
     followUpMemory.record(transcript, resolvedCommand);
   }
+}
+
+async function pauseDictation(): Promise<void> {
+  if (dictationState === "inactive") return;
+  dictationState = "paused";
+  dictationSilenceTimer.clear();
+  await stopListeningForDictation();
+  await sendPanel({
+    type: "dictation-state",
+    active: true,
+    paused: true,
+  });
+  await speak("The text field changed. Dictation is paused.");
+}
+
+async function exitDictation(
+  operation: "voice" | "silence",
+): Promise<void> {
+  if (dictationState === "inactive") return;
+  dictationState = "inactive";
+  dictationSilenceTimer.clear();
+  await stopListeningForDictation();
+  await sendPanel({
+    type: "dictation-state",
+    active: false,
+    paused: false,
+  });
+  await askWorker({
+    type: "dictation-exit",
+    operation,
+  });
+}
+
+async function insertDictationTranscript(text: string): Promise<void> {
+  const result = await askWorker<{ readonly status?: unknown }>({
+    type: "dictation-insert",
+    text,
+  });
+  if (result?.status !== "inserted") {
+    await pauseDictation();
+    return;
+  }
+  dictationSilenceTimer.reset();
+}
+
+async function processTranscript(
+  rawTranscript: string,
+  timings: ExchangeTimings,
+): Promise<void> {
+  const transcript = cleanTranscript(rawTranscript);
+  if (!transcript) return;
+  lastExchangeAt = Date.now();
+  await sendPanel({ type: "transcript", text: transcript });
+
+  await routeTranscriptForMode(dictationState, transcript, {
+    parse: async () => processCommandTranscript(transcript, timings),
+    insert: insertDictationTranscript,
+    exit: async () => exitDictation("voice"),
+    stopPlayback: async () => {
+      await askWorker({
+        type: "playback-control",
+        operation: "stop",
+      });
+      dictationSilenceTimer.reset();
+    },
+  });
 }
 
 async function processSpeech(
@@ -1412,7 +1489,8 @@ async function startListening(): Promise<void> {
   }
   starting = true;
   stopRequested = false;
-  beginPipelineWarmup();
+  if (dictationState === "inactive") beginPipelineWarmup();
+  else cancelPipelineWarmup();
 
   try {
     const stream = await openMicrophone();
@@ -1439,6 +1517,7 @@ async function startListening(): Promise<void> {
       },
       onSpeechStart() {
         speechContext.onSpeechStart();
+        if (dictationState === "active") dictationSilenceTimer.reset();
         void sendPanel({ type: "speech-start" });
       },
       onVADMisfire() {
@@ -1496,6 +1575,18 @@ async function stopListeningNow(): Promise<void> {
     micStream = undefined;
     await sendPanel({ type: "listening-state", listening: false });
   }
+}
+
+async function stopListeningForDictation(): Promise<void> {
+  if (starting) {
+    stopRequested = true;
+    return;
+  }
+  if (stopTimer !== undefined) {
+    window.clearTimeout(stopTimer);
+    stopTimer = undefined;
+  }
+  if (listening) await stopListeningNow();
 }
 
 function stopListening(): void {
@@ -1705,6 +1796,28 @@ async function handleOffscreenMessage(
       cancelActiveModelTask();
       await startListening();
       return;
+    case "dictation-start":
+    case "dictation-resume":
+      cancelActiveModelTask();
+      dictationState = "active";
+      dictationSilenceTimer.reset();
+      await sendPanel({
+        type: "dictation-state",
+        active: true,
+        paused: false,
+      });
+      await startListening();
+      return;
+    case "dictation-stop":
+      dictationState = "inactive";
+      dictationSilenceTimer.clear();
+      await stopListeningForDictation();
+      await sendPanel({
+        type: "dictation-state",
+        active: false,
+        paused: false,
+      });
+      return;
     case "stop-listening":
       stopListening();
       return;
@@ -1798,6 +1911,7 @@ chrome.runtime.onMessage.addListener(
 
 window.addEventListener("unload", () => {
   cancelActiveModelTask();
+  dictationSilenceTimer.clear();
   followUpMemory.clear();
   stopMicLevelMeter();
   modelLru.dispose();

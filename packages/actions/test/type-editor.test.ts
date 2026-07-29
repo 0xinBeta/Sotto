@@ -442,6 +442,28 @@ describe("text-control commits", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("inserts dictation line breaks as text and never submits", () => {
+    const { document, control, submit } = textControl({
+      value: "FirstSecond",
+      selectionStart: 5,
+      selectionEnd: 5,
+    });
+    const session = new EditorSnapshotSession(document);
+    const capture = session.capture({
+      requireSelection: false,
+      allowLastDictated: false,
+    });
+
+    session.commit(capture.snapshotId, "\n\n", "insertText", true);
+
+    expect(control.value).toBe("First\n\nSecond");
+    expect(control.events.map((event) => event.type)).toEqual([
+      "beforeinput",
+      "input",
+    ]);
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("fails closed if beforeinput is cancelled", () => {
     const { document, control } = textControl({
       value: "hello",

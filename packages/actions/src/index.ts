@@ -1,4 +1,5 @@
 import askPageAction from "./ask-page/index.js";
+import dictationAction from "./dictation/index.js";
 import helpAction from "./help/index.js";
 import navigateAction from "./navigate/index.js";
 import notesAction from "./notes/index.js";
@@ -12,6 +13,14 @@ import typeAction from "./type/index.js";
 
 export { default as askPageAction } from "./ask-page/index.js";
 export type { AskPageCommand } from "./ask-page/index.js";
+export {
+  default as dictationAction,
+  dictationSchema,
+} from "./dictation/index.js";
+export type {
+  DictationCommand,
+  DictationOperation,
+} from "./dictation/index.js";
 export {
   default as helpAction,
   HELP_SUMMARY_MAX_CHARACTERS,
@@ -100,6 +109,7 @@ export const actions = [
   playbackAction,
   repeatAction,
   typeAction,
+  dictationAction,
   helpAction,
 ] as const;
 export default actions;

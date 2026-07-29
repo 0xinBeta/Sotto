@@ -213,6 +213,67 @@
   },
 
   {
+    "id": "dictation-start-01",
+    "transcript": "start dictation",
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "dictation-start-02",
+    "transcript": "begin dictation",
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "dictation-start-03",
+    "transcript": "turn on dictation",
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "dictation-start-04",
+    "transcript": "start voice dictation",
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "dictation-start-05",
+    "transcript": "enter dictation mode",
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "dictation-start-06",
+    "transcript": "I want to dictate text",
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "dictation-stop-01",
+    "transcript": "stop dictation",
+    "expected": { "action": "dictation", "operation": "stop" }
+  },
+  {
+    "id": "dictation-stop-02",
+    "transcript": "end dictation",
+    "expected": { "action": "dictation", "operation": "stop" }
+  },
+  {
+    "id": "dictation-stop-03",
+    "transcript": "exit dictation",
+    "expected": { "action": "dictation", "operation": "stop" }
+  },
+  {
+    "id": "dictation-stop-04",
+    "transcript": "finish dictation",
+    "expected": { "action": "dictation", "operation": "stop" }
+  },
+  {
+    "id": "dictation-stop-05",
+    "transcript": "turn off dictation",
+    "expected": { "action": "dictation", "operation": "stop" }
+  },
+  {
+    "id": "dictation-stop-06",
+    "transcript": "leave dictation mode",
+    "expected": { "action": "dictation", "operation": "stop" }
+  },
+
+  {
     "id": "type-dictate-01",
     "transcript": "type: sounds good, see you at five",
     "expected": { "action": "type", "operation": "dictate", "text": "sounds good, see you at five" }

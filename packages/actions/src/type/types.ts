@@ -33,6 +33,7 @@ export interface EditorCaptureOptions {
 
 export interface EditorCapture {
   readonly snapshotId: string;
+  readonly targetId: string;
   readonly selectedText: string;
   readonly source: "caret" | "selection" | "last-dictated";
 }

@@ -13,6 +13,7 @@ export type TypeBridgeMessage =
       readonly target: "sotto-type-bridge";
       readonly type: "capture";
       readonly options: EditorCaptureOptions;
+      readonly keepAlive: boolean;
     }
   | {
       readonly target: "sotto-type-bridge";
@@ -21,12 +22,17 @@ export type TypeBridgeMessage =
       readonly text: string;
       readonly inputType: "insertText" | "insertReplacementText";
       readonly rememberAsDictation: boolean;
+      readonly keepAlive: boolean;
+    }
+  | {
+      readonly target: "sotto-type-bridge";
+      readonly type: "release";
     };
 
 export type TypeBridgeResponse =
   | {
       readonly ok: true;
-      readonly value: EditorCapture | EditorCommit;
+      readonly value: EditorCapture | EditorCommit | { readonly released: true };
     }
   | {
       readonly ok: false;
@@ -85,14 +91,24 @@ function parseMessage(value: unknown): TypeBridgeMessage | null {
   if (
     !isRecord(value) ||
     value.target !== "sotto-type-bridge" ||
-    (value.type !== "capture" && value.type !== "commit")
+    (
+      value.type !== "capture" &&
+      value.type !== "commit" &&
+      value.type !== "release"
+    )
   ) {
     return null;
   }
 
+  if (value.type === "release") {
+    return hasOnlyKeys(value, ["target", "type"])
+      ? { target: "sotto-type-bridge", type: "release" }
+      : null;
+  }
+
   if (value.type === "capture") {
     if (
-      !hasOnlyKeys(value, ["target", "type", "options"]) ||
+      !hasOnlyKeys(value, ["target", "type", "options", "keepAlive"]) ||
       !isRecord(value.options) ||
       !hasOnlyKeys(value.options, ["requireSelection", "allowLastDictated"])
     ) {
@@ -100,7 +116,9 @@ function parseMessage(value: unknown): TypeBridgeMessage | null {
     }
     if (
       typeof value.options.requireSelection !== "boolean" ||
-      typeof value.options.allowLastDictated !== "boolean"
+      typeof value.options.allowLastDictated !== "boolean" ||
+      (value.keepAlive !== undefined &&
+        typeof value.keepAlive !== "boolean")
     ) {
       return null;
     }
@@ -111,6 +129,7 @@ function parseMessage(value: unknown): TypeBridgeMessage | null {
         requireSelection: value.options.requireSelection,
         allowLastDictated: value.options.allowLastDictated,
       },
+      keepAlive: value.keepAlive === true,
     };
   }
 
@@ -122,6 +141,7 @@ function parseMessage(value: unknown): TypeBridgeMessage | null {
       "text",
       "inputType",
       "rememberAsDictation",
+      "keepAlive",
     ]) ||
     typeof value.snapshotId !== "string" ||
     value.snapshotId.length < 1 ||
@@ -130,7 +150,9 @@ function parseMessage(value: unknown): TypeBridgeMessage | null {
     value.text.length > 24_000 ||
     (value.inputType !== "insertText" &&
       value.inputType !== "insertReplacementText") ||
-    typeof value.rememberAsDictation !== "boolean"
+    typeof value.rememberAsDictation !== "boolean" ||
+    (value.keepAlive !== undefined &&
+      typeof value.keepAlive !== "boolean")
   ) {
     return null;
   }
@@ -141,6 +163,7 @@ function parseMessage(value: unknown): TypeBridgeMessage | null {
     text: value.text,
     inputType: value.inputType,
     rememberAsDictation: value.rememberAsDictation,
+    keepAlive: value.keepAlive === true,
   };
 }
 
@@ -199,7 +222,12 @@ export function installTypeContentScriptBridge(
   ): void => {
     const message = parseMessage(raw);
     if (!message) return;
-    let shouldCleanUp = message.type === "commit";
+    if (message.type === "release") {
+      sendResponse({ ok: true, value: { released: true } });
+      cleanUp();
+      return;
+    }
+    let shouldCleanUp = message.type === "commit" && !message.keepAlive;
     try {
       const value =
         message.type === "capture"
@@ -211,9 +239,11 @@ export function installTypeContentScriptBridge(
               message.rememberAsDictation,
             );
       sendResponse({ ok: true, value });
-      if (message.type === "capture") scheduleCleanup();
+      if (message.type === "capture" || message.keepAlive) scheduleCleanup();
     } catch (error) {
-      if (message.type === "capture") shouldCleanUp = true;
+      if (message.type === "capture" && !message.keepAlive) {
+        shouldCleanUp = true;
+      }
       sendResponse(errorResponse(error));
     } finally {
       if (shouldCleanUp) cleanUp();

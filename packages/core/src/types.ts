@@ -185,6 +185,11 @@ export interface EditableActionServices {
   }>;
 }
 
+export interface DictationActionServices {
+  start(): Promise<string>;
+  stop(): Promise<string>;
+}
+
 export interface ActionCatalog {
   list(): readonly ActionDefinition[];
 }
@@ -202,6 +207,8 @@ export interface ActionContext {
   readonly page?: PageActionServices;
   /** Worker-owned bridge to the captured editable range. */
   readonly type?: EditableActionServices;
+  /** Worker-owned continuous dictation session. */
+  readonly dictation?: DictationActionServices;
   /** Registry metadata for actions that present command help. */
   readonly actionCatalog?: ActionCatalog;
 }

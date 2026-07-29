@@ -20,6 +20,7 @@ import {
   type ActionResult,
   type ClipboardWorkflow,
   type DestinationFollowUp,
+  type DictationActionServices,
   type EditableActionServices,
   type ExtractedPageText,
   type PageActionServices,
@@ -52,6 +53,10 @@ import {
   SpeechSettingsStore,
   SpeechSettingsTtsEngine,
 } from "./speech-settings.js";
+import {
+  DictationTargetSession,
+  type DictationTarget,
+} from "./dictation.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -94,6 +99,7 @@ let commandGeneration = 0;
 let readingActive = false;
 let readingPaused = false;
 let lastSpokenResponse: string | undefined;
+const dictationSession = new DictationTargetSession();
 
 async function speakResponse(
   text: string,
@@ -535,6 +541,11 @@ interface EditorBridgeLocation {
   readonly bridgeSnapshotId: string;
 }
 
+interface FocusedEditorCapture {
+  readonly capture: ReturnType<typeof parseEditorCapture>;
+  readonly location: Omit<EditorBridgeLocation, "bridgeSnapshotId">;
+}
+
 const editorSnapshots = new Map<string, EditorBridgeLocation>();
 const rewriteFallbacks = new Map<string, string>();
 const pendingClipboardWorkflows = new Map<
@@ -558,6 +569,7 @@ function bridgeMessageOptions(
 
 function parseEditorCapture(value: unknown): {
   readonly snapshotId: string;
+  readonly targetId: string;
   readonly selectedText: string;
   readonly source: "caret" | "selection" | "last-dictated";
 } {
@@ -566,11 +578,15 @@ function parseEditorCapture(value: unknown): {
   }
   const capture = value as {
     snapshotId?: unknown;
+    targetId?: unknown;
     selectedText?: unknown;
     source?: unknown;
   };
   if (
     typeof capture.snapshotId !== "string" ||
+    typeof capture.targetId !== "string" ||
+    capture.targetId.length < 1 ||
+    capture.targetId.length > 256 ||
     typeof capture.selectedText !== "string" ||
     capture.selectedText.length > 24_000 ||
     (capture.source !== "caret" &&
@@ -581,14 +597,15 @@ function parseEditorCapture(value: unknown): {
   }
   return {
     snapshotId: capture.snapshotId,
+    targetId: capture.targetId,
     selectedText: capture.selectedText,
     source: capture.source,
   };
 }
 
-async function captureEditable(
+async function findFocusedEditable(
   options: Parameters<EditableActionServices["capture"]>[0],
-): ReturnType<EditableActionServices["capture"]> {
+): Promise<FocusedEditorCapture> {
   const [activeTab] = await chrome.tabs.query({
     active: true,
     currentWindow: true,
@@ -608,10 +625,7 @@ async function captureEditable(
     throw new Error("The focused editor is in an inaccessible frame.");
   }
 
-  const captures: Array<{
-    readonly capture: ReturnType<typeof parseEditorCapture>;
-    readonly location: Omit<EditorBridgeLocation, "bridgeSnapshotId">;
-  }> = [];
+  const captures: FocusedEditorCapture[] = [];
   const errors: string[] = [];
   for (const frame of frames) {
     try {
@@ -671,7 +685,13 @@ async function captureEditable(
     );
   }
 
-  const selected = captures[0]!;
+  return captures[0]!;
+}
+
+async function captureEditable(
+  options: Parameters<EditableActionServices["capture"]>[0],
+): ReturnType<EditableActionServices["capture"]> {
+  const selected = await findFocusedEditable(options);
   const snapshotId = crypto.randomUUID();
   editorSnapshots.clear();
   editorSnapshots.set(snapshotId, {
@@ -769,6 +789,207 @@ const editableActionServices: EditableActionServices = {
   capture: captureEditable,
   commit: commitEditable,
   rewrite: rewriteEditable,
+};
+
+function dictationTargetFrom(
+  capture: ReturnType<typeof parseEditorCapture>,
+  location: Omit<EditorBridgeLocation, "bridgeSnapshotId">,
+): DictationTarget {
+  return {
+    tabId: location.tabId,
+    frameId: location.frameId,
+    ...(location.documentId === undefined
+      ? {}
+      : { documentId: location.documentId }),
+    targetId: capture.targetId,
+  };
+}
+
+async function releaseDictationTarget(
+  target: DictationTarget | undefined,
+): Promise<void> {
+  if (!target) return;
+  try {
+    await chrome.tabs.sendMessage(
+      target.tabId,
+      {
+        target: "sotto-type-bridge",
+        type: "release",
+      },
+      bridgeMessageOptions(target),
+    );
+  } catch {
+    // A closed or navigated tab has no bridge to release.
+  }
+}
+
+async function captureCurrentDictationTarget(): Promise<{
+  readonly capture: ReturnType<typeof parseEditorCapture>;
+  readonly location: EditorBridgeLocation;
+  readonly target: DictationTarget;
+}> {
+  const expected = dictationSession.target;
+  if (!expected) throw new Error("Dictation is not active.");
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (activeTab?.id !== expected.tabId) {
+    throw new Error("The active tab changed.");
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: expected.tabId, frameIds: [expected.frameId] },
+      files: ["typeBridge.js"],
+      world: "ISOLATED",
+    });
+    const raw = (await chrome.tabs.sendMessage(
+      expected.tabId,
+      {
+        target: "sotto-type-bridge",
+        type: "capture",
+        options: {
+          requireSelection: false,
+          allowLastDictated: false,
+        },
+        keepAlive: true,
+      },
+      bridgeMessageOptions(expected),
+    )) as
+      | {
+          readonly ok?: unknown;
+          readonly value?: unknown;
+          readonly error?: { readonly message?: unknown };
+        }
+      | undefined;
+    if (raw?.ok !== true) {
+      throw new Error(
+        typeof raw?.error?.message === "string"
+          ? raw.error.message
+          : "The text field is not ready.",
+      );
+    }
+    const capture = parseEditorCapture(raw.value);
+    const location: EditorBridgeLocation = {
+      tabId: expected.tabId,
+      frameId: expected.frameId,
+      ...(expected.documentId === undefined
+        ? {}
+        : { documentId: expected.documentId }),
+      bridgeSnapshotId: capture.snapshotId,
+    };
+    return {
+      capture,
+      location,
+      target: dictationTargetFrom(capture, location),
+    };
+  } catch (error) {
+    throw new Error(
+      error instanceof Error ? error.message : "The text field changed.",
+    );
+  }
+}
+
+async function startDictation(): Promise<string> {
+  const selected = await findFocusedEditable({
+    requireSelection: false,
+    allowLastDictated: false,
+  });
+  const previous = dictationSession.stop();
+  await releaseDictationTarget(previous);
+  dictationSession.start(
+    dictationTargetFrom(selected.capture, selected.location),
+  );
+  const spoken = "Dictation started.";
+  try {
+    await speakResponse(spoken, { lang: "en-US" });
+    await sendOffscreen({ type: "dictation-start" });
+    return spoken;
+  } catch (error) {
+    await releaseDictationTarget(dictationSession.stop());
+    throw error;
+  }
+}
+
+async function stopDictation(
+  spoken = "Dictation stopped.",
+  notifyOffscreen = true,
+): Promise<string> {
+  const target = dictationSession.stop();
+  if (!target) {
+    const inactive = "Dictation is not active.";
+    await speakResponse(inactive, { lang: "en-US" });
+    return inactive;
+  }
+  if (notifyOffscreen) {
+    await sendOffscreen({ type: "dictation-stop" });
+  }
+  await releaseDictationTarget(target);
+  await speakResponse(spoken, { lang: "en-US" });
+  return spoken;
+}
+
+async function insertDictationText(
+  text: string,
+): Promise<{ readonly status: "inserted" | "paused" }> {
+  if (dictationSession.state !== "active") return { status: "paused" };
+  try {
+    const current = await captureCurrentDictationTarget();
+    if (!dictationSession.validate(current.target)) {
+      return { status: "paused" };
+    }
+    const raw = (await chrome.tabs.sendMessage(
+      current.location.tabId,
+      {
+        target: "sotto-type-bridge",
+        type: "commit",
+        snapshotId: current.location.bridgeSnapshotId,
+        text,
+        inputType:
+          current.capture.source === "selection"
+            ? "insertReplacementText"
+            : "insertText",
+        rememberAsDictation: true,
+        keepAlive: true,
+      },
+      bridgeMessageOptions(current.location),
+    )) as
+      | {
+          readonly ok?: unknown;
+          readonly value?: unknown;
+        }
+      | undefined;
+    if (raw?.ok !== true) throw new Error("The text field changed.");
+    return { status: "inserted" };
+  } catch {
+    dictationSession.pause();
+    return { status: "paused" };
+  }
+}
+
+async function resumeDictation(): Promise<boolean> {
+  if (dictationSession.state !== "paused") return false;
+  try {
+    const current = await captureCurrentDictationTarget();
+    if (!dictationSession.resume(current.target)) throw new Error();
+    await sendOffscreen({ type: "dictation-resume" });
+    return true;
+  } catch {
+    const spoken = "Focus the same text field, then select Resume.";
+    await speakResponse(spoken, { lang: "en-US" });
+    await sendPanel({
+      type: "dictation-state",
+      active: true,
+      paused: true,
+    });
+    return false;
+  }
+}
+
+const dictationActionServices: DictationActionServices = {
+  start: startDictation,
+  stop: () => stopDictation(),
 };
 
 function isAllowedFollowUp(value: unknown): value is DestinationFollowUp {
@@ -1177,6 +1398,7 @@ async function executeCommand(
           destinationRegistry.dispatch(id, input),
         page: pageActionServices,
         type: editableActionServices,
+        dictation: dictationActionServices,
         actionCatalog: actionRegistry,
       });
     } finally {
@@ -1211,6 +1433,8 @@ async function executeCommand(
       ? "Sorry, say that again?"
       : actionId === "type"
         ? "I couldn't safely type in that editor."
+      : actionId === "dictation"
+        ? "Focus a text field before you start dictation."
       : "That action could not be completed.";
     const detail = error instanceof Error ? error.message : String(error);
     console.warn("Sotto command failed", error);
@@ -1300,6 +1524,26 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return sendOffscreen({ type: "start-listening" });
     case "stop-listening":
       return sendOffscreen({ type: "stop-listening" });
+    case "stop-dictation":
+      return stopDictation();
+    case "dictation-exit": {
+      const spoken = message.operation === "silence"
+        ? "Dictation stopped after 60 seconds of silence."
+        : "Dictation stopped.";
+      return stopDictation(spoken, false);
+    }
+    case "dictation-insert": {
+      if (
+        typeof message.text !== "string" ||
+        message.text.length < 1 ||
+        message.text.length > 2_000
+      ) {
+        throw new TypeError("Valid dictation text is required");
+      }
+      return insertDictationText(message.text);
+    }
+    case "resume-dictation":
+      return resumeDictation();
     case "stop-reading":
       beginCommandGeneration();
       return undefined;
@@ -1316,6 +1560,9 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       );
     }
     case "toggle-listening":
+      if (dictationSession.state !== "inactive") {
+        return stopDictation();
+      }
       if (!readingActive) beginCommandGeneration();
       return sendOffscreen({ type: "toggle-listening" });
     case "text-command": {
@@ -1518,7 +1765,11 @@ chrome.commands.onCommand.addListener((command, tab) => {
       .catch((error: unknown) =>
         reportBackgroundFailure("Sotto could not open the side panel", error),
       )
-      .then(() => sendOffscreen({ type: "toggle-listening" })),
+      .then(() =>
+        dictationSession.state === "inactive"
+          ? sendOffscreen({ type: "toggle-listening" })
+          : stopDictation()
+      ),
     "Sotto could not toggle listening",
     "I couldn't start listening. Open Sotto to check microphone access.",
   );
