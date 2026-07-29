@@ -141,6 +141,19 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps eight translate cases and an unsupported-language negative", () => {
+    expect(
+      cases.filter((testCase) => testCase.expected.action === "translate")
+        .length,
+    ).toBeGreaterThanOrEqual(8);
+    expect(
+      cases.find(
+        (testCase) =>
+          testCase.id === "unknown-translate-unsupported-01",
+      )?.expected,
+    ).toEqual({ action: "unknown" });
+  });
+
   it("keeps at least ten navigate cases and three hostile negatives", () => {
     expect(
       cases.filter((testCase) => testCase.expected.action === "navigate")
@@ -231,6 +244,23 @@ describe("intent eval schema drift", () => {
         question: "What is this?",
         scope: "page",
         answer: "page-derived model text",
+      },
+    ],
+    [
+      "translate rejects an unsupported language",
+      {
+        action: "translate",
+        targetLanguage: "tlh",
+        scope: "page",
+      },
+    ],
+    [
+      "translate cannot carry page-derived output",
+      {
+        action: "translate",
+        targetLanguage: "es",
+        scope: "page",
+        text: "page-derived model text",
       },
     ],
     [

@@ -1257,6 +1257,51 @@
     "expected": { "action": "unknown" }
   },
   {
+    "id": "translate-page-es-01",
+    "transcript": "translate this page to Spanish",
+    "expected": { "action": "translate", "targetLanguage": "es", "scope": "page" }
+  },
+  {
+    "id": "translate-selection-de-01",
+    "transcript": "translate my selection to German",
+    "expected": { "action": "translate", "targetLanguage": "de", "scope": "selection" }
+  },
+  {
+    "id": "translate-page-fr-01",
+    "transcript": "show this page in French",
+    "expected": { "action": "translate", "targetLanguage": "fr", "scope": "page" }
+  },
+  {
+    "id": "translate-selection-ja-01",
+    "transcript": "translate the selected text to Japanese",
+    "expected": { "action": "translate", "targetLanguage": "ja", "scope": "selection" }
+  },
+  {
+    "id": "translate-page-en-01",
+    "transcript": "translate this article into English",
+    "expected": { "action": "translate", "targetLanguage": "en", "scope": "page" }
+  },
+  {
+    "id": "translate-page-pt-01",
+    "transcript": "put this page in Portuguese",
+    "expected": { "action": "translate", "targetLanguage": "pt", "scope": "page" }
+  },
+  {
+    "id": "translate-selection-tr-01",
+    "transcript": "translate this selection into Turkish",
+    "expected": { "action": "translate", "targetLanguage": "tr", "scope": "selection" }
+  },
+  {
+    "id": "translate-page-ko-01",
+    "transcript": "give me a Korean translation of this page",
+    "expected": { "action": "translate", "targetLanguage": "ko", "scope": "page" }
+  },
+  {
+    "id": "unknown-translate-unsupported-01",
+    "transcript": "translate this page to Klingon",
+    "expected": { "action": "unknown" }
+  },
+  {
     "id": "quiet-mode-on-01",
     "transcript": "do not disturb on",
     "expected": { "action": "quiet-mode", "operation": "on" }

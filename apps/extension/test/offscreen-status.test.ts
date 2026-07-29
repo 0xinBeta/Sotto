@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const nano = vi.hoisted(() => ({
   askPageWithPrompt: vi.fn(),
   createParserSession: vi.fn(),
+  createTranslatorSession: vi.fn(),
+  detectSourceLanguage: vi.fn(),
   getNanoAvailability: vi.fn(),
   parseCommand: vi.fn(),
   respondOneSentence: vi.fn(),
@@ -36,7 +38,26 @@ const vad = vi.hoisted(() => ({
 vi.mock("@ricky0123/vad-web", () => ({
   MicVAD: { new: vad.create },
 }));
-vi.mock("@sotto/actions", () => ({ default: [] }));
+vi.mock("@sotto/actions", () => ({
+  default: [],
+  TRANSLATE_LANGUAGE_CODES: [
+    "ar",
+    "zh",
+    "nl",
+    "en",
+    "fr",
+    "de",
+    "hi",
+    "it",
+    "ja",
+    "ko",
+    "pl",
+    "pt",
+    "ru",
+    "es",
+    "tr",
+  ],
+}));
 vi.mock("@sotto/core", () => ({
   ActionRegistry: class ActionRegistry {},
 }));
@@ -44,6 +65,8 @@ vi.mock("@sotto/nano", () => ({
   askPageWithPrompt: nano.askPageWithPrompt,
   createParserSession: nano.createParserSession,
   createResponderSession: vi.fn(),
+  createTranslatorSession: nano.createTranslatorSession,
+  detectSourceLanguage: nano.detectSourceLanguage,
   getNanoAvailability: nano.getNanoAvailability,
   parseCommand: nano.parseCommand,
   respondOneSentence: nano.respondOneSentence,
@@ -196,6 +219,8 @@ afterEach(() => {
   vi.useRealTimers();
   nano.askPageWithPrompt.mockReset();
   nano.createParserSession.mockReset();
+  nano.createTranslatorSession.mockReset();
+  nano.detectSourceLanguage.mockReset();
   nano.parseCommand.mockReset();
   vi.resetModules();
   vi.unstubAllGlobals();
@@ -222,6 +247,62 @@ afterEach(() => {
 });
 
 describe("offscreen fail-soft status", () => {
+  it("runs translation in the offscreen document and publishes download progress", async () => {
+    const translate = vi.fn().mockResolvedValue("Hola");
+    const destroy = vi.fn();
+    nano.detectSourceLanguage.mockResolvedValue("en");
+    nano.createTranslatorSession.mockImplementation(
+      async (options: {
+        readonly onDownloadProgress?: (
+          progress: { readonly loaded: number; readonly total: 1 },
+        ) => void;
+      }) => {
+        options.onDownloadProgress?.({ loaded: 0.5, total: 1 });
+        return {
+          ok: true,
+          availability: "downloadable",
+          session: { translate, destroy },
+        };
+      },
+    );
+    const harness = await installPremiumOffscreen();
+
+    await expect(
+      harness.message({
+        type: "translation-task",
+        task: {
+          pageText: "Hello",
+          pageLanguage: "en-US",
+          targetLanguage: "es",
+        },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        availability: "downloadable",
+        text: "Hola",
+      },
+    });
+    expect(nano.detectSourceLanguage).toHaveBeenCalledWith(
+      "Hello",
+      expect.objectContaining({
+        fallbackLanguage: "en-US",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(translate).toHaveBeenCalledWith(
+      "Hello",
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "model-progress",
+      model: "translator",
+      progress: 0.5,
+    });
+  });
+
   it("downloads premium voice, persists default ON, and publishes progress", async () => {
     nano.getNanoAvailability.mockResolvedValue("unavailable");
     premium.init.mockImplementation(

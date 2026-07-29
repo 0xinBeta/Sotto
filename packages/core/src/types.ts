@@ -145,12 +145,34 @@ export type PageModelTask =
       readonly question: string;
     };
 
+export type PageTranslationAvailability =
+  | "unavailable"
+  | "downloadable"
+  | "downloading"
+  | "available";
+
+export type PageTranslationResult =
+  | {
+      readonly availability: "unavailable";
+    }
+  | {
+      readonly availability: Exclude<
+        PageTranslationAvailability,
+        "unavailable"
+      >;
+      readonly text: string;
+    };
+
 export interface PageActionServices {
   extract(options: {
     readonly preferSelection: boolean;
     readonly requireSelection?: boolean;
   }): Promise<ExtractedPageText>;
   runModelTask(task: PageModelTask): Promise<string>;
+  translate(options: {
+    readonly page: ExtractedPageText;
+    readonly targetLanguage: string;
+  }): Promise<PageTranslationResult>;
 }
 
 export interface EditableActionServices {

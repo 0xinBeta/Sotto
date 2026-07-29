@@ -33,6 +33,7 @@ type ModelProgressKind =
   | "nano"
   | "stt"
   | "summarizer"
+  | "translator"
   | "rewriter"
   | "premium-tts"
   | "premium-stt";
@@ -387,6 +388,7 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         (message.model === "nano" ||
           message.model === "stt" ||
           message.model === "summarizer" ||
+          message.model === "translator" ||
           message.model === "rewriter" ||
           message.model === "premium-tts" ||
           message.model === "premium-stt") &&
@@ -1092,6 +1094,8 @@ function updateProgress(
     nanoProgressLabel.textContent =
       model === "summarizer"
         ? "Chrome Summarizer"
+        : model === "translator"
+          ? "Chrome Translator"
         : model === "rewriter"
           ? "Chrome Rewriter"
           : "Gemini Nano";

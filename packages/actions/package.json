@@ -22,6 +22,10 @@
       "types": "./dist/summarize/extract.d.ts",
       "import": "./dist/summarize/extract.js"
     },
+    "./translate": {
+      "types": "./dist/translate/index.d.ts",
+      "import": "./dist/translate/index.js"
+    },
     "./type": {
       "types": "./dist/type/index.d.ts",
       "import": "./dist/type/index.js"

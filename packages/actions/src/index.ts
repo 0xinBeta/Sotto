@@ -10,6 +10,7 @@ import repeatAction from "./repeat/index.js";
 import screenshotAction from "./screenshot/index.js";
 import summarizeAction from "./summarize/index.js";
 import tabsAction from "./tabs/index.js";
+import translateAction from "./translate/index.js";
 import typeAction from "./type/index.js";
 
 export { default as askPageAction } from "./ask-page/index.js";
@@ -104,12 +105,24 @@ export type {
   SummarizeCommand,
   SummarizeMode,
 } from "./summarize/index.js";
+export {
+  default as translateAction,
+  TRANSLATE_LANGUAGE_CODES,
+  TRANSLATE_LANGUAGE_LABELS,
+  translateSchema,
+} from "./translate/index.js";
+export type {
+  TranslateCommand,
+  TranslateLanguage,
+  TranslateScope,
+} from "./translate/index.js";
 
 export { default as tabsAction } from "./tabs/index.js";
 
 export const actions = [
   screenshotAction,
   tabsAction,
+  translateAction,
   summarizeAction,
   askPageAction,
   navigateAction,

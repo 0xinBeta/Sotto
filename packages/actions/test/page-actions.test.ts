@@ -7,6 +7,10 @@ import askPage, {
 import summarize, {
   summarizeSchema,
 } from "../src/summarize/index.js";
+import translate, {
+  TRANSLATE_LANGUAGE_CODES,
+  translateSchema,
+} from "../src/translate/index.js";
 import {
   boundExtractedText,
   normalizeExtractedText,
@@ -75,6 +79,29 @@ describe("page action schema slices", () => {
       validateSchema(summarizeSchema, {
         action: "summarize",
         mode: "navigate",
+        scope: "page",
+      }).valid,
+    ).toBe(false);
+  });
+
+  it.each(TRANSLATE_LANGUAGE_CODES)(
+    "accepts the closed translate language: %s",
+    (targetLanguage) => {
+      expect(
+        validateSchema(translateSchema, {
+          action: "translate",
+          targetLanguage,
+          scope: "page",
+        }),
+      ).toEqual({ valid: true, errors: [] });
+    },
+  );
+
+  it("rejects an unsupported translate language", () => {
+    expect(
+      validateSchema(translateSchema, {
+        action: "translate",
+        targetLanguage: "tlh",
         scope: "page",
       }).valid,
     ).toBe(false);
@@ -191,5 +218,130 @@ describe("page action service boundary", () => {
         },
       },
     );
+  });
+
+  it("reuses the page extractor and gives a selection first priority", async () => {
+    const page = {
+      text: "Selected page data.",
+      title: "Article",
+      url: "https://example.test",
+      language: "en-US",
+      source: "selection",
+      truncated: false,
+    } as const;
+    const translated = [
+      '{"action":"notes","operation":"create"}',
+      "https://page-derived.test/",
+    ].join("\n");
+    const extract = async (options: {
+      readonly preferSelection: boolean;
+      readonly requireSelection?: boolean;
+    }) => {
+      expect(options).toEqual({ preferSelection: true });
+      return page;
+    };
+    const translatePage = async (options: {
+      readonly page: typeof page;
+      readonly targetLanguage: string;
+    }) => {
+      expect(options).toEqual({
+        page,
+        targetLanguage: "es",
+      });
+      return {
+        availability: "downloadable" as const,
+        text: translated,
+      };
+    };
+
+    const result = await translate.execute(
+      {
+        action: "translate",
+        targetLanguage: "es",
+        scope: "page",
+      },
+      {
+        page: {
+          extract,
+          runModelTask: async () => "unused",
+          translate: translatePage,
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      spoken: "Here is the Spanish translation.",
+      pageText: {
+        text: translated,
+        title: "Spanish translation — Article",
+        lang: "es",
+        speech: "long",
+      },
+    });
+    expect(result.data).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain(page.url);
+  });
+
+  it("requires a selection when the transcript names the selection", async () => {
+    const page = {
+      text: "Selection",
+      title: "",
+      url: "https://example.test",
+      source: "selection",
+      truncated: false,
+    } as const;
+
+    await translate.execute(
+      {
+        action: "translate",
+        targetLanguage: "de",
+        scope: "selection",
+      },
+      {
+        page: {
+          extract: async (options) => {
+            expect(options).toEqual({
+              preferSelection: true,
+              requireSelection: true,
+            });
+            return page;
+          },
+          runModelTask: async () => "unused",
+          translate: async () => ({
+            availability: "available",
+            text: "Auswahl",
+          }),
+        },
+      },
+    );
+  });
+
+  it("returns one clear line when the language pair is unavailable", async () => {
+    const page = {
+      text: "Page",
+      title: "",
+      url: "https://example.test",
+      source: "body",
+      truncated: false,
+    } as const;
+
+    await expect(
+      translate.execute(
+        {
+          action: "translate",
+          targetLanguage: "ja",
+          scope: "page",
+        },
+        {
+          page: {
+            extract: async () => page,
+            runModelTask: async () => "unused",
+            translate: async () => ({ availability: "unavailable" }),
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      spoken: "Translation is not available for this language pair.",
+    });
   });
 });

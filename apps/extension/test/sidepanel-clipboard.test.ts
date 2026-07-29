@@ -679,6 +679,17 @@ describe("side-panel screenshot clipboard fallback", () => {
 
     onMessage({
       target: "sidepanel",
+      type: "model-progress",
+      model: "translator",
+      progress: 0.25,
+    });
+    expect(elements["nano-progress-label"].textContent).toBe(
+      "Chrome Translator",
+    );
+    expect(elements["nano-progress-value"].textContent).toBe("25%");
+
+    onMessage({
+      target: "sidepanel",
       type: "premium-stt-state",
       state: "not-downloaded",
       enabled: false,

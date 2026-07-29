@@ -766,9 +766,59 @@ async function runPageModelTask(task: PageModelTask): Promise<string> {
   return value;
 }
 
+async function runPageTranslation(
+  options: Parameters<PageActionServices["translate"]>[0],
+): ReturnType<PageActionServices["translate"]> {
+  const value = await sendOffscreen({
+    type: "translation-task",
+    task: {
+      pageText: options.page.text,
+      targetLanguage: options.targetLanguage,
+      ...(options.page.language === undefined
+        ? {}
+        : { pageLanguage: options.page.language }),
+    },
+  });
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("The on-device translator returned invalid data");
+  }
+  const candidate = value as {
+    availability?: unknown;
+    text?: unknown;
+  };
+  if (candidate.availability === "unavailable") {
+    if (Object.keys(candidate).length !== 1) {
+      throw new Error("The unavailable translator result contains extra data");
+    }
+    return { availability: "unavailable" };
+  }
+  if (
+    candidate.availability !== "downloadable" &&
+    candidate.availability !== "downloading" &&
+    candidate.availability !== "available"
+  ) {
+    throw new Error("The translator returned an invalid availability state");
+  }
+  if (
+    typeof candidate.text !== "string" ||
+    !candidate.text.trim() ||
+    candidate.text.length > 120_000 ||
+    Object.keys(candidate).some(
+      (key) => key !== "availability" && key !== "text",
+    )
+  ) {
+    throw new Error("The on-device translator returned invalid text");
+  }
+  return {
+    availability: candidate.availability,
+    text: candidate.text,
+  };
+}
+
 const pageActionServices: PageActionServices = {
   extract: extractActivePage,
   runModelTask: runPageModelTask,
+  translate: runPageTranslation,
 };
 
 interface EditorBridgeLocation {

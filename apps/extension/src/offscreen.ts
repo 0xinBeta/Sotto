@@ -1,14 +1,20 @@
 import { MicVAD } from "@ricky0123/vad-web";
-import actions from "@sotto/actions";
+import actions, {
+  TRANSLATE_LANGUAGE_CODES,
+  type TranslateLanguage,
+} from "@sotto/actions";
 import {
   ActionRegistry,
   type ActionCommand,
   type ActionResult,
+  type PageTranslationResult,
 } from "@sotto/core";
 import {
   askPageWithPrompt,
   createParserSession,
   createResponderSession,
+  createTranslatorSession,
+  detectSourceLanguage,
   getNanoAvailability,
   parseCommand,
   respondOneSentence,
@@ -282,6 +288,16 @@ interface PageTaskInput {
   readonly question?: string;
   readonly language?: string;
 }
+
+interface TranslationTaskInput {
+  readonly pageText: string;
+  readonly pageLanguage?: string;
+  readonly targetLanguage: TranslateLanguage;
+}
+
+const TRANSLATE_LANGUAGES = new Set<TranslateLanguage>(
+  TRANSLATE_LANGUAGE_CODES,
+);
 
 async function sendPanel(message: Record<string, unknown>): Promise<void> {
   try {
@@ -1358,6 +1374,99 @@ function parsePageTask(value: unknown): PageTaskInput {
   };
 }
 
+function parseTranslationTask(value: unknown): TranslationTaskInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("A translation task object is required");
+  }
+  const candidate = value as {
+    pageText?: unknown;
+    pageLanguage?: unknown;
+    targetLanguage?: unknown;
+  };
+  if (
+    typeof candidate.pageText !== "string" ||
+    !candidate.pageText.trim() ||
+    candidate.pageText.length > MAX_PAGE_TASK_CHARACTERS
+  ) {
+    throw new TypeError("Page text is empty or exceeds the extraction bound");
+  }
+  if (
+    candidate.pageLanguage !== undefined &&
+    (typeof candidate.pageLanguage !== "string" ||
+      candidate.pageLanguage.length > 35)
+  ) {
+    throw new TypeError("Page language metadata exceeds the task contract");
+  }
+  if (
+    typeof candidate.targetLanguage !== "string" ||
+    !TRANSLATE_LANGUAGES.has(
+      candidate.targetLanguage as TranslateLanguage,
+    )
+  ) {
+    throw new TypeError("The target language is not supported");
+  }
+  return {
+    pageText: candidate.pageText,
+    targetLanguage: candidate.targetLanguage as TranslateLanguage,
+    ...(typeof candidate.pageLanguage === "string"
+      ? { pageLanguage: candidate.pageLanguage }
+      : {}),
+  };
+}
+
+async function runTranslationTask(
+  value: unknown,
+  signal: AbortSignal,
+): Promise<PageTranslationResult> {
+  const task = parseTranslationTask(value);
+  const onDownloadProgress = (
+    progress: { readonly loaded: number },
+  ): void => {
+    void sendPanel({
+      type: "model-progress",
+      model: "translator",
+      progress: progress.loaded,
+    });
+  };
+  const sourceLanguage = await detectSourceLanguage(task.pageText, {
+    ...(task.pageLanguage === undefined
+      ? {}
+      : { fallbackLanguage: task.pageLanguage }),
+    signal,
+    onDownloadProgress,
+  });
+  const created = await createTranslatorSession({
+    sourceLanguage,
+    targetLanguage: task.targetLanguage,
+    signal,
+    onDownloadProgress,
+  });
+  if (!created.ok) {
+    if (created.availability === "unavailable") {
+      return { availability: "unavailable" };
+    }
+    throw new Error(
+      created.error?.message ??
+        "Chrome could not create the translator",
+    );
+  }
+
+  try {
+    const text = (
+      await created.session.translate(task.pageText, { signal })
+    ).trim();
+    if (!text) {
+      throw new Error("Chrome Translator returned no text");
+    }
+    return {
+      availability: created.availability,
+      text: truncateUtf16(text, MAX_PAGE_TASK_CHARACTERS),
+    };
+  } finally {
+    created.session.destroy();
+  }
+}
+
 async function summarizeWithTaskApi(
   task: PageTaskInput,
   signal: AbortSignal,
@@ -2205,6 +2314,10 @@ async function handleOffscreenMessage(
     case "page-task":
       return withModelTask((signal) =>
         inferenceMutex.run(() => runPageTask(message.task, signal))
+      );
+    case "translation-task":
+      return withModelTask((signal) =>
+        inferenceMutex.run(() => runTranslationTask(message.task, signal))
       );
     case "rewrite-task":
       return withModelTask((signal) =>
