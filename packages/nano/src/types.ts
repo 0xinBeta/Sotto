@@ -48,7 +48,38 @@ export type NanoSessionResult = NanoSessionReady | NanoSessionUnavailable;
  * The narrow session surface used by parsing/responding. Keeping this
  * structural makes those functions easy to exercise without loading Nano.
  */
-export type NanoPromptSession = Pick<LanguageModel, "prompt">;
+export interface NanoPromptSession {
+  prompt(
+    input: LanguageModelPrompt,
+    options?: LanguageModelPromptOptions,
+  ): Promise<string>;
+  clone?(options?: LanguageModelCloneOptions): Promise<NanoPromptSession>;
+  destroy?(): void;
+}
+
+export const PARSE_DIAGNOSTIC_CLASSES = [
+  "session-unavailable",
+  "empty-transcript",
+  "missing-follow-up-memory",
+  "prompt-error",
+  "timeout",
+  "invalid-json",
+  "invalid-command",
+  "model-unknown",
+] as const;
+
+export type ParseDiagnosticClass =
+  typeof PARSE_DIAGNOSTIC_CLASSES[number];
+export type ParserStage = "stage-1" | "stage-2";
+
+export interface ParseDiagnostic {
+  readonly diagnostic: ParseDiagnosticClass;
+  readonly message: string;
+  readonly stage?: ParserStage;
+  readonly actionId?: string;
+  /** Model output is present only for invalid JSON or command data. */
+  readonly raw?: string;
+}
 
 export interface ParserPromptInput {
   readonly registry: ActionRegistry;
@@ -65,7 +96,9 @@ export interface ParserMemoryExchange {
 export interface ParseCommandOptions extends ParserPromptInput {
   readonly session: NanoPromptSession | null | undefined;
   readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
   readonly onError?: (error: NanoError) => void;
+  readonly onDiagnostic?: (diagnostic: ParseDiagnostic) => void;
 }
 
 export interface OneSentenceResponseOptions {
@@ -106,6 +139,16 @@ export class NanoSession {
       );
     }
     return this.model.prompt(input, options);
+  }
+
+  async clone(options?: LanguageModelCloneOptions): Promise<NanoSession> {
+    if (this.#destroyed) {
+      throw new DOMException(
+        "Gemini Nano session has been destroyed",
+        "InvalidStateError",
+      );
+    }
+    return new NanoSession(await this.model.clone(options));
   }
 
   destroy(): void {

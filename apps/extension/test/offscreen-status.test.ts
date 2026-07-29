@@ -401,6 +401,39 @@ describe("offscreen fail-soft status", () => {
     );
   });
 
+  it("publishes parse diagnostics to the panel log", async () => {
+    nano.parseCommand.mockImplementation(
+      async (options: {
+        readonly onDiagnostic?: (diagnostic: {
+          readonly diagnostic: string;
+          readonly message: string;
+        }) => void;
+      }) => {
+        options.onDiagnostic?.({
+          diagnostic: "prompt-error",
+          message:
+            "Stage 1 prompt failed. NotSupportedError: Constraint rejected",
+        });
+        return { action: "unknown" };
+      },
+    );
+    const harness = await installPremiumOffscreen();
+
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "open a new tab",
+      timings: { input: "typed" },
+    });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "parse-diagnostic",
+      diagnostic: "prompt-error",
+      message:
+        "Stage 1 prompt failed. NotSupportedError: Constraint rejected",
+    });
+  });
+
   it("publishes partial speech only to the transcript display", async () => {
     nano.parseCommand.mockResolvedValue({ action: "unknown" });
     speech.moonshineTranscribe

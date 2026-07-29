@@ -8,8 +8,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   NanoSession,
+  actionHasParameters,
+  buildActionParserPrompt,
   buildParserInitialPrompts,
   buildParserPrompt,
+  composeActionConstraint,
+  composeActionSelectionConstraint,
   composeResponseConstraint,
   createNanoSession,
   createResponderSession,
@@ -104,8 +108,63 @@ describe("Nano parser support", () => {
     });
     expect(prompts?.[2]).toMatchObject({
       role: "assistant",
-      content: '{"action":"tabs","operation":"new"}',
+      content: '{"action":"tabs"}',
     });
+  });
+
+  it("builds a small action selection constraint", () => {
+    expect(composeActionSelectionConstraint(registry)).toEqual({
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["tabs", "unknown"],
+        },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    });
+  });
+
+  it("keeps only the selected action schema and examples in stage 2", () => {
+    const action = registry.get("tabs");
+    expect(action).toBeDefined();
+    if (!action) return;
+
+    expect(composeActionConstraint(action)).toBe(TAB_SCHEMA);
+    expect(actionHasParameters(action)).toBe(true);
+    expect(buildActionParserPrompt(action, "switch to GitHub")).toEqual([
+      {
+        role: "user",
+        content: [
+          "COMMAND_PARAMETER_DATA",
+          "ACTION_ID_JSON",
+          '"tabs"',
+          "END_ACTION_ID_JSON",
+          "TRANSCRIPT_DATA_JSON",
+          '"open a new tab"',
+          "END_TRANSCRIPT_DATA_JSON",
+          "END_COMMAND_PARAMETER_DATA",
+        ].join("\n"),
+      },
+      {
+        role: "assistant",
+        content: '{"action":"tabs","operation":"new"}',
+      },
+      {
+        role: "user",
+        content: [
+          "COMMAND_PARAMETER_DATA",
+          "ACTION_ID_JSON",
+          '"tabs"',
+          "END_ACTION_ID_JSON",
+          "TRANSCRIPT_DATA_JSON",
+          '"switch to GitHub"',
+          "END_TRANSCRIPT_DATA_JSON",
+          "END_COMMAND_PARAMETER_DATA",
+        ].join("\n"),
+      },
+    ]);
   });
 
   it("encodes only the transcript as delimited JSON data", () => {
@@ -200,18 +259,24 @@ describe("Nano parser support", () => {
 
   it("fails closed for a correction without prior memory", async () => {
     const session = { prompt: vi.fn() };
+    const onDiagnostic = vi.fn();
 
     await expect(
       parseCommand({
         registry,
         session,
         transcript: "no, the other one",
+        onDiagnostic,
       }),
     ).resolves.toEqual({ action: "unknown" });
     expect(session.prompt).not.toHaveBeenCalled();
+    expect(onDiagnostic).toHaveBeenCalledWith({
+      diagnostic: "missing-follow-up-memory",
+      message: "The correction has no recent command.",
+    });
   });
 
-  it("injects memory only for a correction and keeps the constraint identical", async () => {
+  it("injects memory into stage 1 only", async () => {
     const memory = [
       {
         transcript: "switch to GitHub",
@@ -224,9 +289,11 @@ describe("Nano parser support", () => {
       },
     ];
     const followUpSession = {
-      prompt: vi.fn().mockResolvedValue(
-        '{"action":"tabs","operation":"switch","target":"the other one","correction":true}',
-      ),
+      prompt: vi.fn()
+        .mockResolvedValueOnce('{"action":"tabs"}')
+        .mockResolvedValueOnce(
+          '{"action":"tabs","operation":"switch","target":"the other one","correction":true}',
+        ),
     };
 
     await expect(
@@ -242,17 +309,33 @@ describe("Nano parser support", () => {
       target: "the other one",
       correction: true,
     });
-    expect(followUpSession.prompt).toHaveBeenCalledWith(
+    expect(followUpSession.prompt).toHaveBeenNthCalledWith(
+      1,
       buildParserPrompt("no, the other one", memory),
       {
-        responseConstraint: composeResponseConstraint(registry),
+        responseConstraint: composeActionSelectionConstraint(registry),
+        signal: expect.any(AbortSignal),
       },
     );
+    const action = registry.get("tabs");
+    expect(action).toBeDefined();
+    if (!action) return;
+    expect(followUpSession.prompt).toHaveBeenNthCalledWith(
+      2,
+      buildActionParserPrompt(action, "no, the other one"),
+      {
+        responseConstraint: TAB_SCHEMA,
+        signal: expect.any(AbortSignal),
+      },
+    );
+    expect(
+      JSON.stringify(followUpSession.prompt.mock.calls[1]?.[0]),
+    ).not.toContain("FOLLOW_UP_MEMORY");
 
     const normalSession = {
-      prompt: vi.fn().mockResolvedValue(
-        '{"action":"tabs","operation":"new"}',
-      ),
+      prompt: vi.fn()
+        .mockResolvedValueOnce('{"action":"tabs"}')
+        .mockResolvedValueOnce('{"action":"tabs","operation":"new"}'),
     };
     await parseCommand({
       registry,
@@ -260,19 +343,23 @@ describe("Nano parser support", () => {
       transcript: "open a new tab",
       memory,
     });
-    expect(normalSession.prompt).toHaveBeenCalledWith(
+    expect(normalSession.prompt).toHaveBeenNthCalledWith(
+      1,
       buildParserPrompt("open a new tab"),
       {
-        responseConstraint: composeResponseConstraint(registry),
+        responseConstraint: composeActionSelectionConstraint(registry),
+        signal: expect.any(AbortSignal),
       },
     );
   });
 
-  it("passes only the constructed data prompt and constraint, then core-validates", async () => {
+  it("selects an action, fills its parameters, and core-validates", async () => {
     const session = {
-      prompt: vi.fn().mockResolvedValue(
-        '{"action":"tabs","operation":"switch","target":"GitHub"}',
-      ),
+      prompt: vi.fn()
+        .mockResolvedValueOnce('{"action":"tabs"}')
+        .mockResolvedValueOnce(
+          '{"action":"tabs","operation":"switch","target":"GitHub"}',
+        ),
     };
     await expect(
       parseCommand({
@@ -285,31 +372,149 @@ describe("Nano parser support", () => {
       operation: "switch",
       target: "GitHub",
     });
-    expect(session.prompt).toHaveBeenCalledOnce();
-    expect(session.prompt).toHaveBeenCalledWith(
+    expect(session.prompt).toHaveBeenCalledTimes(2);
+    expect(session.prompt).toHaveBeenNthCalledWith(
+      1,
       buildParserPrompt("switch to GitHub"),
       {
-        responseConstraint: composeResponseConstraint(registry),
+        responseConstraint: composeActionSelectionConstraint(registry),
+        signal: expect.any(AbortSignal),
+      },
+    );
+    const action = registry.get("tabs");
+    expect(action).toBeDefined();
+    if (!action) return;
+    expect(session.prompt).toHaveBeenNthCalledWith(
+      2,
+      buildActionParserPrompt(action, "switch to GitHub"),
+      {
+        responseConstraint: TAB_SCHEMA,
+        signal: expect.any(AbortSignal),
       },
     );
   });
 
-  it("fails soft without a session or a usable transcript", async () => {
+  it("uses one clean clone for both parse stages", async () => {
+    const clone = {
+      prompt: vi.fn()
+        .mockResolvedValueOnce('{"action":"tabs"}')
+        .mockResolvedValueOnce('{"action":"tabs","operation":"new"}'),
+      destroy: vi.fn(),
+    };
+    const base = {
+      prompt: vi.fn(),
+      clone: vi.fn().mockResolvedValue(clone),
+    };
+
     await expect(
-      parseCommand({ registry, session: null, transcript: "new tab" }),
+      parseCommand({
+        registry,
+        session: base,
+        transcript: "open a new tab",
+      }),
+    ).resolves.toEqual({ action: "tabs", operation: "new" });
+
+    expect(base.prompt).not.toHaveBeenCalled();
+    expect(base.clone).toHaveBeenCalledOnce();
+    expect(clone.prompt).toHaveBeenCalledTimes(2);
+    expect(clone.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("skips stage 2 for an action with no parameters", async () => {
+    const noParameterAction = defineAction({
+      id: "reader",
+      title: "Reader",
+      permissions: [],
+      schema: {
+        type: "object",
+        properties: { action: { const: "reader" } },
+        required: ["action"],
+        additionalProperties: false,
+      },
+      examples: [
+        { say: "show reader view", emit: { action: "reader" } },
+      ],
+      confirm: false,
+      async execute() {
+        return { spoken: "Reader view is open." };
+      },
+    });
+    const noParameterRegistry = new ActionRegistry([noParameterAction]);
+    const session = {
+      prompt: vi.fn().mockResolvedValue('{"action":"reader"}'),
+    };
+
+    expect(actionHasParameters(noParameterAction)).toBe(false);
+    await expect(
+      parseCommand({
+        registry: noParameterRegistry,
+        session,
+        transcript: "show reader view",
+      }),
+    ).resolves.toEqual({ action: "reader" });
+    expect(session.prompt).toHaveBeenCalledOnce();
+  });
+
+  it("stops after a genuine unknown action selection", async () => {
+    const onDiagnostic = vi.fn();
+    const session = {
+      prompt: vi.fn().mockResolvedValue('{"action":"unknown"}'),
+    };
+
+    await expect(
+      parseCommand({
+        registry,
+        session,
+        transcript: "make the browser purple",
+        onDiagnostic,
+      }),
     ).resolves.toEqual({ action: "unknown" });
+    expect(session.prompt).toHaveBeenCalledOnce();
+    expect(onDiagnostic).toHaveBeenCalledWith({
+      diagnostic: "model-unknown",
+      stage: "stage-1",
+      message: "Stage 1 selected unknown.",
+    });
+  });
+
+  it("fails soft without a session or a usable transcript", async () => {
+    const onDiagnostic = vi.fn();
+    await expect(
+      parseCommand({
+        registry,
+        session: null,
+        transcript: "new tab",
+        onDiagnostic,
+      }),
+    ).resolves.toEqual({ action: "unknown" });
+    expect(onDiagnostic).toHaveBeenLastCalledWith({
+      diagnostic: "session-unavailable",
+      message: "The parser session is not available.",
+    });
 
     const session = { prompt: vi.fn() };
     await expect(
-      parseCommand({ registry, session, transcript: "   " }),
+      parseCommand({
+        registry,
+        session,
+        transcript: "   ",
+        onDiagnostic,
+      }),
     ).resolves.toEqual({ action: "unknown" });
     expect(session.prompt).not.toHaveBeenCalled();
+    expect(onDiagnostic).toHaveBeenLastCalledWith({
+      diagnostic: "empty-transcript",
+      message: "The parser transcript is empty.",
+    });
   });
 
-  it("fails soft on model, JSON, and schema-validation failures", async () => {
+  it("reports a prompt error with its class and message", async () => {
     const onError = vi.fn();
+    const onDiagnostic = vi.fn();
     const failed = {
-      prompt: vi.fn().mockRejectedValue(new Error("model failed")),
+      prompt: vi.fn().mockRejectedValue(
+        new DOMException("Constraint rejected", "NotSupportedError"),
+      ),
     };
     await expect(
       parseCommand({
@@ -317,34 +522,134 @@ describe("Nano parser support", () => {
         session: failed,
         transcript: "new tab",
         onError,
+        onDiagnostic,
       }),
     ).resolves.toEqual({ action: "unknown" });
     expect(onError).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: "Error",
-        message: "model failed",
+        name: "NotSupportedError",
+        message: "Constraint rejected",
       }),
     );
+    expect(onDiagnostic).toHaveBeenCalledWith({
+      diagnostic: "prompt-error",
+      stage: "stage-1",
+      message:
+        "Stage 1 prompt failed. NotSupportedError: Constraint rejected",
+    });
+  });
 
+  it("reports invalid JSON with at most 120 output characters", async () => {
+    const onDiagnostic = vi.fn();
+    const raw = `not JSON ${"x".repeat(200)}`;
     const malformed = {
-      prompt: vi.fn().mockResolvedValue("not JSON"),
+      prompt: vi.fn().mockResolvedValue(raw),
     };
     await expect(
-      parseCommand({ registry, session: malformed, transcript: "new tab" }),
+      parseCommand({
+        registry,
+        session: malformed,
+        transcript: "new tab",
+        onDiagnostic,
+      }),
     ).resolves.toEqual({ action: "unknown" });
+    expect(onDiagnostic).toHaveBeenCalledWith({
+      diagnostic: "invalid-json",
+      stage: "stage-1",
+      raw: raw.slice(0, 120),
+      message:
+        `Stage 1 returned invalid JSON. Output: ${raw.slice(0, 120)}`,
+    });
+  });
 
+  it("reports registry validation with the failing action id", async () => {
+    const onDiagnostic = vi.fn();
+    const raw = '{"action":"tabs","operation":"switch","target":7}';
     const invalidSchema = {
-      prompt: vi.fn().mockResolvedValue(
-        '{"action":"tabs","operation":"switch","target":7}',
-      ),
+      prompt: vi.fn().mockResolvedValue(raw),
     };
     await expect(
       parseCommand({
         registry,
         session: invalidSchema,
         transcript: "new tab",
+        onDiagnostic,
       }),
     ).resolves.toEqual({ action: "unknown" });
+    expect(onDiagnostic).toHaveBeenCalledWith({
+      diagnostic: "invalid-command",
+      stage: "stage-1",
+      actionId: "tabs",
+      raw,
+      message: [
+        "Stage 1 returned invalid command data.",
+        "Action: tabs.",
+        "The command failed registry validation.",
+        `Output: ${raw}`,
+      ].join(" "),
+    });
+  });
+
+  it("reports a separate timeout for each prompt call", async () => {
+    vi.useFakeTimers();
+    try {
+      const onDiagnostic = vi.fn();
+      const session = {
+        prompt: vi.fn(
+          () => new Promise<string>(() => undefined),
+        ),
+      };
+      const parsed = parseCommand({
+        registry,
+        session,
+        transcript: "new tab",
+        timeoutMs: 25,
+        onDiagnostic,
+      });
+
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(parsed).resolves.toEqual({ action: "unknown" });
+      expect(onDiagnostic).toHaveBeenCalledWith({
+        diagnostic: "timeout",
+        stage: "stage-1",
+        message: "Stage 1 timed out after 25 ms.",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies the prompt timeout to stage 2", async () => {
+    vi.useFakeTimers();
+    try {
+      const onDiagnostic = vi.fn();
+      const session = {
+        prompt: vi.fn()
+          .mockResolvedValueOnce('{"action":"tabs"}')
+          .mockImplementationOnce(
+            () => new Promise<string>(() => undefined),
+          ),
+      };
+      const parsed = parseCommand({
+        registry,
+        session,
+        transcript: "new tab",
+        timeoutMs: 25,
+        onDiagnostic,
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(parsed).resolves.toEqual({ action: "unknown" });
+      expect(onDiagnostic).toHaveBeenCalledWith({
+        diagnostic: "timeout",
+        stage: "stage-2",
+        message: "Stage 2 timed out after 25 ms.",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -575,6 +880,29 @@ describe("Nano Prompt API lifecycle", () => {
       name: "InvalidStateError",
     });
     expect(model.prompt).not.toHaveBeenCalled();
+  });
+
+  it("clones a clean owned session without changing the base", async () => {
+    const clonedModel = {
+      prompt: vi.fn().mockResolvedValue("clone"),
+      clone: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const model = {
+      prompt: vi.fn().mockResolvedValue("base"),
+      clone: vi.fn().mockResolvedValue(clonedModel),
+      destroy: vi.fn(),
+    };
+    const session = new NanoSession(model as unknown as LanguageModel);
+
+    const clone = await session.clone();
+
+    expect(model.clone).toHaveBeenCalledOnce();
+    await expect(clone.prompt("test")).resolves.toBe("clone");
+    expect(model.prompt).not.toHaveBeenCalled();
+    clone.destroy();
+    expect(clonedModel.destroy).toHaveBeenCalledOnce();
+    expect(model.destroy).not.toHaveBeenCalled();
   });
 
   it("normalizes non-error thrown values without throwing itself", () => {

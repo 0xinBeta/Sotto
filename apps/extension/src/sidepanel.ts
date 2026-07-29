@@ -12,6 +12,7 @@ import {
 import { MAX_NOTE_TAG_LENGTH } from "@sotto/actions/notes/tags";
 import { sanitizeHostname } from "@sotto/actions";
 import { performClipboardWorkflow } from "@sotto/destinations";
+import type { ParseDiagnosticClass } from "@sotto/nano";
 import type { TtsProgressEventType } from "@sotto/tts";
 import {
   isSpeechLanguage,
@@ -88,6 +89,17 @@ import {
   type WakeWordRuntimeState,
 } from "./wake-word-settings.js";
 import { speechLanguageControl } from "./stt-language.js";
+
+const PARSE_DIAGNOSTIC_CLASSES = [
+  "session-unavailable",
+  "empty-transcript",
+  "missing-follow-up-memory",
+  "prompt-error",
+  "timeout",
+  "invalid-json",
+  "invalid-command",
+  "model-unknown",
+] as const satisfies readonly ParseDiagnosticClass[];
 import {
   deriveNoteTagChips,
   filterPanelNotes,
@@ -526,6 +538,12 @@ type PanelMessage =
     }
   | {
       target: "sidepanel";
+      type: "parse-diagnostic";
+      diagnostic: ParseDiagnosticClass;
+      message: string;
+    }
+  | {
+      target: "sidepanel";
       type: "model-inventory";
       rows: readonly PanelModelRow[];
       totalBytes: number;
@@ -791,6 +809,13 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           message.diagnostic === "blank-result" ||
           message.diagnostic === "timeout" ||
           message.diagnostic === "webgpu-failed") &&
+        isBoundedString(message.message, 1_000, 1)
+      );
+    case "parse-diagnostic":
+      return (
+        PARSE_DIAGNOSTIC_CLASSES.includes(
+          message.diagnostic as ParseDiagnosticClass,
+        ) &&
         isBoundedString(message.message, 1_000, 1)
       );
     case "pipeline-error":
@@ -3999,6 +4024,12 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
         undefined,
         true,
         message.diagnostic,
+      );
+      break;
+    case "parse-diagnostic":
+      appendLog(
+        t("logParseDiagnostic", message.diagnostic),
+        message.message,
       );
       break;
     case "show-command-reference":

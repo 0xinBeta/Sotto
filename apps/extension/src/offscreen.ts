@@ -23,6 +23,7 @@ import {
   summarizeWithPrompt,
   type NanoAvailability,
   type NanoSession,
+  type ParseDiagnostic,
   type RewriteTransformation,
 } from "@sotto/nano";
 import type {
@@ -923,6 +924,16 @@ async function publishSttDiagnostic(
     type: "stt-diagnostic",
     diagnostic,
     message: sttDiagnosticMessage(diagnostic, observedMicLevel),
+  });
+}
+
+async function publishParseDiagnostic(
+  diagnostic: ParseDiagnostic,
+): Promise<void> {
+  await sendPanel({
+    type: "parse-diagnostic",
+    diagnostic: diagnostic.diagnostic,
+    message: diagnostic.message,
   });
 }
 
@@ -2104,11 +2115,9 @@ async function processCommandTranscript(
         memory,
         onError(error) {
           console.warn("Nano intent parsing failed closed", error);
-          void sendPanel({
-            type: "pipeline-error",
-            message: `Gemini Nano could not parse that command: ${error.message}`,
-            errorClass: "nano-parse-failure",
-          });
+        },
+        onDiagnostic(diagnostic) {
+          void publishParseDiagnostic(diagnostic);
         },
       });
     } finally {

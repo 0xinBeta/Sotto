@@ -962,6 +962,9 @@
   "logSpeechDiagnostic": {
     "message": "speech / $1"
   },
+  "logParseDiagnostic": {
+    "message": "parse / $1"
+  },
   "rewriteNotInserted": {
     "message": "REWRITE NOT INSERTED"
   },
