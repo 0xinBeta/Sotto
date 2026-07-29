@@ -16,6 +16,8 @@ interface ModelEntry {
   lastUsed: number;
   resident: boolean;
   inUse: number;
+  releaseRequested: boolean;
+  releaseWaiters: Array<(released: boolean) => void>;
   releasing: Promise<boolean> | undefined;
   timer: ReturnType<typeof setTimeout> | undefined;
 }
@@ -46,6 +48,8 @@ export class ModelResidencyLru {
       lastUsed: this.#now(),
       resident: false,
       inUse: 0,
+      releaseRequested: false,
+      releaseWaiters: [],
       releasing: undefined,
       timer: undefined,
     });
@@ -67,6 +71,9 @@ export class ModelResidencyLru {
 
   acquire(key: string): () => void {
     const entry = this.#require(key);
+    if (entry.releaseRequested || entry.releasing) {
+      throw new Error(`Resident model release is in progress: ${key}`);
+    }
     if (!entry.resident) return () => undefined;
     entry.inUse += 1;
     entry.lastUsed = this.#now();
@@ -80,6 +87,10 @@ export class ModelResidencyLru {
       released = true;
       entry.inUse = Math.max(0, entry.inUse - 1);
       entry.lastUsed = this.#now();
+      if (entry.inUse === 0 && entry.releaseRequested) {
+        void this.#release(key, entry);
+        return;
+      }
       this.#schedule(key, entry);
     };
   }
@@ -87,6 +98,10 @@ export class ModelResidencyLru {
   markReleased(key: string): void {
     const entry = this.#require(key);
     entry.resident = false;
+    if (!entry.releasing) {
+      entry.releaseRequested = false;
+      this.#resolveReleaseWaiters(entry, true);
+    }
     if (entry.timer !== undefined) {
       this.#clearTimer(entry.timer);
       entry.timer = undefined;
@@ -116,6 +131,18 @@ export class ModelResidencyLru {
     return await this.#release(key, entry) ? key : undefined;
   }
 
+  async releaseWhenIdle(key: string): Promise<boolean> {
+    const entry = this.#require(key);
+    if (!entry.resident) return true;
+    if (entry.releasing) return entry.releasing;
+    if (entry.inUse === 0) return this.#release(key, entry);
+
+    entry.releaseRequested = true;
+    return await new Promise<boolean>((resolve) => {
+      entry.releaseWaiters.push(resolve);
+    });
+  }
+
   isResident(key: string): boolean {
     return this.#entries.get(key)?.resident === true;
   }
@@ -124,6 +151,8 @@ export class ModelResidencyLru {
     for (const entry of this.#entries.values()) {
       if (entry.timer !== undefined) this.#clearTimer(entry.timer);
       entry.timer = undefined;
+      entry.releaseRequested = false;
+      this.#resolveReleaseWaiters(entry, false);
     }
   }
 
@@ -159,7 +188,8 @@ export class ModelResidencyLru {
       entry.timer = undefined;
     }
     let failed = false;
-    const releasing = entry.release()
+    const releasing = Promise.resolve()
+      .then(() => entry.release())
       .then(() => {
         entry.resident = false;
         return true;
@@ -171,10 +201,17 @@ export class ModelResidencyLru {
       })
       .finally(() => {
         entry.releasing = undefined;
+        entry.releaseRequested = false;
+        this.#resolveReleaseWaiters(entry, !failed);
         if (failed) this.#schedule(key, entry);
       });
     entry.releasing = releasing;
     return releasing;
+  }
+
+  #resolveReleaseWaiters(entry: ModelEntry, released: boolean): void {
+    const waiters = entry.releaseWaiters.splice(0);
+    for (const resolve of waiters) resolve(released);
   }
 
   #require(key: string): ModelEntry {

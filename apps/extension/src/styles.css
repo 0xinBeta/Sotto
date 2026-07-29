@@ -546,6 +546,133 @@ h2 {
   border-top: 1px solid var(--rule);
 }
 
+.models-card {
+  margin: 0 0 28px;
+  padding: 18px;
+  border: 1px solid var(--rule);
+  background: var(--surface-card);
+}
+
+.models-heading,
+.model-row,
+.model-main,
+.model-meta,
+.model-actions {
+  display: flex;
+  align-items: center;
+}
+
+.models-heading,
+.model-row,
+.model-meta {
+  justify-content: space-between;
+}
+
+.models-heading {
+  gap: 16px;
+}
+
+.models-heading h2 {
+  max-width: none;
+  margin: 7px 0 0;
+  font-size: 25px;
+}
+
+.models-heading output,
+.model-state,
+.model-size {
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.models-heading output {
+  color: var(--acid);
+  font-variant-numeric: tabular-nums;
+}
+
+.models-copy {
+  margin: 12px 0 15px;
+  color: var(--paper-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.models-list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  list-style: none;
+}
+
+.model-row {
+  min-height: 52px;
+  gap: 12px;
+  padding: 9px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.model-row:last-child {
+  border-bottom: 0;
+}
+
+.model-main {
+  min-width: 0;
+  flex: 1;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.model-name {
+  overflow: hidden;
+  color: var(--paper);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-meta {
+  justify-content: flex-start;
+  gap: 8px;
+  color: var(--paper-dim);
+}
+
+.model-state[data-state="active"],
+.model-state[data-state="cached"] {
+  color: var(--acid);
+}
+
+.model-state[data-state="downloading"] {
+  color: var(--paper);
+}
+
+.model-size {
+  font-variant-numeric: tabular-nums;
+}
+
+.model-detail {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-actions {
+  gap: 6px;
+}
+
+.model-action {
+  min-width: auto;
+  padding: 7px 8px;
+  font-size: 8px;
+}
+
+.model-row[data-read-only="true"] .model-detail {
+  color: var(--paper-dim);
+}
+
 .settings-card {
   margin: 0 0 28px;
   padding: 18px;

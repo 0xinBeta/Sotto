@@ -295,6 +295,17 @@ export class PremiumSttManager {
     this.#emitStatus();
   }
 
+  async markDeleted(): Promise<void> {
+    await this.releasePremium();
+    this.#settingGeneration += 1;
+    this.#downloaded = false;
+    this.#enabled = false;
+    this.#resumable = false;
+    this.#error = undefined;
+    this.#state = "not-downloaded";
+    this.#emitStatus();
+  }
+
   async dispose(): Promise<void> {
     const pending = this.#pending;
     this.#pending = undefined;

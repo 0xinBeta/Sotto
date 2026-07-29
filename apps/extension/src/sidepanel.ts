@@ -52,6 +52,26 @@ type SttDiagnostic =
   | "blank-result"
   | "timeout"
   | "webgpu-failed";
+type PanelModelId =
+  | "moonshine-tiny"
+  | "moonshine-base"
+  | "parakeet-v3"
+  | "kokoro"
+  | `kokoro-voice:${string}`
+  | "gemini-nano"
+  | "summarizer";
+type PanelModelState = "active" | "cached" | "absent" | "downloading";
+
+interface PanelModelRow {
+  readonly id: PanelModelId;
+  readonly label: string;
+  readonly detail?: string;
+  readonly state: PanelModelState;
+  readonly readOnly: boolean;
+  readonly bytes?: number;
+  readonly canDownload: boolean;
+  readonly canDelete: boolean;
+}
 
 interface PanelNote {
   readonly id: string;
@@ -104,6 +124,46 @@ function isPanelReminder(value: unknown): value is PanelReminder {
     isBoundedString(value.text, 1_000, 1) &&
     isBoundedString(value.dueAt, 35, 1) &&
     Number.isFinite(Date.parse(value.dueAt))
+  );
+}
+
+function isPanelModelId(value: unknown): value is PanelModelId {
+  return value === "moonshine-tiny" ||
+    value === "moonshine-base" ||
+    value === "parakeet-v3" ||
+    value === "kokoro" ||
+    value === "gemini-nano" ||
+    value === "summarizer" ||
+    (typeof value === "string" &&
+      /^kokoro-voice:[a-z]{2}_[a-z]+$/.test(value));
+}
+
+function isPanelModelRow(value: unknown): value is PanelModelRow {
+  if (!isRecord(value)) return false;
+  return (
+    isPanelModelId(value.id) &&
+    isBoundedString(value.label, 100, 1) &&
+    (value.detail === undefined ||
+      isBoundedString(value.detail, 200, 1)) &&
+    (
+      value.state === "active" ||
+      value.state === "cached" ||
+      value.state === "absent" ||
+      value.state === "downloading"
+    ) &&
+    typeof value.readOnly === "boolean" &&
+    (
+      value.bytes === undefined ||
+      (
+        typeof value.bytes === "number" &&
+        Number.isSafeInteger(value.bytes) &&
+        value.bytes >= 0
+      )
+    ) &&
+    typeof value.canDownload === "boolean" &&
+    typeof value.canDelete === "boolean" &&
+    (!value.readOnly || (!value.canDownload && !value.canDelete)) &&
+    (value.id !== "moonshine-tiny" || !value.canDelete)
   );
 }
 
@@ -222,6 +282,12 @@ type PanelMessage =
       diagnostic: SttDiagnostic;
       message: string;
     }
+  | {
+      target: "sidepanel";
+      type: "model-inventory";
+      rows: readonly PanelModelRow[];
+      totalBytes: number;
+    }
   | { target: "sidepanel"; type: "show-command-reference" };
 
 function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
@@ -338,6 +404,26 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           message.loaded === undefined ||
           message.total === undefined ||
           message.loaded <= message.total
+        )
+      );
+    case "model-inventory":
+      return (
+        Array.isArray(message.rows) &&
+        message.rows.length >= 4 &&
+        message.rows.length <= 40 &&
+        message.rows.every(isPanelModelRow) &&
+        typeof message.totalBytes === "number" &&
+        Number.isSafeInteger(message.totalBytes) &&
+        message.totalBytes >= 0 &&
+        message.totalBytes === message.rows.reduce(
+          (total, row) =>
+            total +
+            (
+              isRecord(row) && typeof row.bytes === "number"
+                ? row.bytes
+                : 0
+            ),
+          0,
         )
       );
     case "premium-tts-state":
@@ -482,6 +568,10 @@ const premiumSttProgressValue =
   requiredElement<HTMLOutputElement>("#premium-stt-progress-value");
 const premiumSttProgressLabel =
   requiredElement<HTMLElement>("#premium-stt-progress-label");
+const modelsList =
+  requiredElement<HTMLUListElement>("#models-list");
+const modelsTotal =
+  requiredElement<HTMLOutputElement>("#models-total");
 const speechRate =
   requiredElement<HTMLInputElement>("#speech-rate");
 const speechRateValue =
@@ -979,6 +1069,109 @@ function formatMegabytes(bytes: number): string {
   const value = bytes / 1_000_000;
   if (value >= 10) return String(Math.round(value));
   return value.toFixed(1).replace(/\.0$/, "");
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1_000) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"] as const;
+  let value = bytes / 1_000;
+  let unit: typeof units[number] = units[0];
+  for (let index = 1; index < units.length && value >= 1_000; index += 1) {
+    value /= 1_000;
+    unit = units[index]!;
+  }
+  const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(digits).replace(/\.0+$/, "")} ${unit}`;
+}
+
+async function runModelAction(
+  row: PanelModelRow,
+  action: "download-model" | "delete-model",
+  button: HTMLButtonElement,
+): Promise<void> {
+  button.disabled = true;
+  const previousText = button.textContent;
+  button.textContent = action === "download-model"
+    ? "Starting…"
+    : "Deleting…";
+  try {
+    await requestWorker({ type: action, modelId: row.id });
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = previousText;
+    appendLog(
+      "model storage",
+      error instanceof Error ? error.message : "The model task failed.",
+    );
+  }
+}
+
+function renderModelInventory(
+  rows: readonly PanelModelRow[],
+  totalBytes: number,
+): void {
+  modelsTotal.value = `Total: ${formatBytes(totalBytes)}`;
+  modelsTotal.textContent = modelsTotal.value;
+  modelsList.replaceChildren(
+    ...rows.map((row) => {
+      const item = document.createElement("li");
+      const main = document.createElement("div");
+      const name = document.createElement("span");
+      const meta = document.createElement("div");
+      const state = document.createElement("span");
+      const size = document.createElement("span");
+      const detail = document.createElement("span");
+      const actions = document.createElement("div");
+
+      item.className = "model-row";
+      item.dataset.readOnly = String(row.readOnly);
+      main.className = "model-main";
+      name.className = "model-name";
+      name.textContent = row.label;
+      meta.className = "model-meta";
+      state.className = "model-state";
+      state.dataset.state = row.state;
+      state.textContent = row.state;
+      meta.append(state);
+      if (row.bytes !== undefined) {
+        size.className = "model-size";
+        size.textContent = formatBytes(row.bytes);
+        meta.append(size);
+      }
+      if (row.detail) {
+        detail.className = "model-detail";
+        detail.textContent = row.detail;
+        meta.append(detail);
+      }
+      main.append(name, meta);
+      actions.className = "model-actions";
+
+      if (row.canDownload) {
+        const button = document.createElement("button");
+        button.className = "button model-action";
+        button.type = "button";
+        button.textContent = "Download";
+        button.setAttribute("aria-label", `Download ${row.label}`);
+        button.addEventListener("click", () => {
+          void runModelAction(row, "download-model", button);
+        });
+        actions.append(button);
+      }
+      if (row.canDelete) {
+        const button = document.createElement("button");
+        button.className = "button model-action";
+        button.type = "button";
+        button.textContent = "Delete";
+        button.setAttribute("aria-label", `Delete ${row.label}`);
+        button.addEventListener("click", () => {
+          void runModelAction(row, "delete-model", button);
+        });
+        actions.append(button);
+      }
+      item.append(main, actions);
+      return item;
+    }),
+  );
 }
 
 function showPremiumVoiceState(
@@ -1794,6 +1987,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
         message.resumable,
         message.error,
       );
+      break;
+    case "model-inventory":
+      renderModelInventory(message.rows, message.totalBytes);
       break;
     case "stt-diagnostic":
       showTranscript(message.message);

@@ -74,6 +74,7 @@ interface WorkerMessage {
   readonly state?: unknown;
   readonly enabled?: unknown;
   readonly voice?: unknown;
+  readonly modelId?: unknown;
   readonly backend?: unknown;
   readonly error?: unknown;
   readonly rate?: unknown;
@@ -1887,6 +1888,24 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
     }
     case "prepare-premium-stt":
       return sendOffscreen({ type: "prepare-premium-stt" });
+    case "download-model":
+    case "delete-model":
+      if (
+        typeof message.modelId !== "string" ||
+        (
+          message.modelId !== "moonshine-tiny" &&
+          message.modelId !== "moonshine-base" &&
+          message.modelId !== "parakeet-v3" &&
+          message.modelId !== "kokoro" &&
+          !/^kokoro-voice:[a-z]{2}_[a-z]+$/.test(message.modelId)
+        )
+      ) {
+        throw new TypeError("A valid model is required");
+      }
+      return sendOffscreen({
+        type: message.type,
+        modelId: message.modelId,
+      });
     case "set-premium-stt-enabled":
       if (typeof message.enabled !== "boolean") {
         throw new TypeError(

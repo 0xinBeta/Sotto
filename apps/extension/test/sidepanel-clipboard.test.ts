@@ -188,6 +188,8 @@ const elementIds = [
   "premium-stt-progress",
   "premium-stt-progress-value",
   "premium-stt-progress-label",
+  "models-list",
+  "models-total",
   "speech-rate",
   "speech-rate-value",
   "speech-volume",
@@ -363,6 +365,83 @@ afterEach(() => {
 });
 
 describe("side-panel screenshot clipboard fallback", () => {
+  it("renders measured model storage and sends model actions", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "model-inventory",
+      rows: [
+        {
+          id: "moonshine-tiny",
+          label: "Moonshine tiny",
+          state: "active",
+          readOnly: false,
+          bytes: 10,
+          canDownload: false,
+          canDelete: false,
+        },
+        {
+          id: "moonshine-base",
+          label: "Moonshine base",
+          state: "absent",
+          readOnly: false,
+          bytes: 0,
+          canDownload: true,
+          canDelete: false,
+        },
+        {
+          id: "kokoro",
+          label: "Kokoro",
+          state: "cached",
+          readOnly: false,
+          bytes: 30,
+          canDownload: false,
+          canDelete: true,
+        },
+        {
+          id: "gemini-nano",
+          label: "Gemini Nano",
+          detail: "Chrome manages this model.",
+          state: "cached",
+          readOnly: true,
+          canDownload: false,
+          canDelete: false,
+        },
+        {
+          id: "summarizer",
+          label: "Summarizer",
+          detail: "Chrome manages this model.",
+          state: "absent",
+          readOnly: true,
+          canDownload: false,
+          canDelete: false,
+        },
+      ],
+      totalBytes: 40,
+    });
+
+    expect(elements["models-total"].textContent).toBe("Total: 40 B");
+    expect(elements["models-list"].children).toHaveLength(5);
+    expect(
+      elements["models-list"].children[0]?.querySelector(".model-action"),
+    ).toBeUndefined();
+    expect(
+      elements["models-list"].children[3]?.querySelector(".model-action"),
+    ).toBeUndefined();
+
+    const deleteButton =
+      elements["models-list"].children[2]?.querySelector(".model-action");
+    expect(deleteButton?.textContent).toBe("Delete");
+    await deleteButton?.emit("click");
+    await vi.waitFor(() =>
+      expect(sendMessage).toHaveBeenCalledWith({
+        target: "worker",
+        type: "delete-model",
+        modelId: "kokoro",
+      })
+    );
+  });
+
   it("shows and persists bounded speech slider values", async () => {
     const { elements, sendMessage } = await installSidepanel({
       speechSettings: { rate: 1.3, volume: 0.55 },

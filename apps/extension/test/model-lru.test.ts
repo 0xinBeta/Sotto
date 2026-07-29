@@ -79,6 +79,41 @@ describe("ModelResidencyLru", () => {
     lru.dispose();
   });
 
+  it("waits for the final lease before an explicit release", async () => {
+    let finishRelease!: () => void;
+    const releaseGate = new Promise<void>((resolve) => {
+      finishRelease = resolve;
+    });
+    const lru = new ModelResidencyLru();
+    const release = vi.fn(async () => {
+      lru.markReleased("premium-stt");
+      await releaseGate;
+    });
+    lru.register("premium-stt", release);
+    lru.markResident("premium-stt");
+    const relinquish = lru.acquire("premium-stt");
+
+    let completed = false;
+    const pending = lru.releaseWhenIdle("premium-stt").then((released) => {
+      completed = released;
+    });
+    await Promise.resolve();
+    expect(release).not.toHaveBeenCalled();
+    expect(completed).toBe(false);
+
+    relinquish();
+    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
+    expect(completed).toBe(false);
+    expect(() => lru.acquire("premium-stt")).toThrow(
+      "release is in progress",
+    );
+    finishRelease();
+    await pending;
+    expect(release).toHaveBeenCalledOnce();
+    expect(completed).toBe(true);
+    lru.dispose();
+  });
+
   it("reschedules an idle release that fails once", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);

@@ -34,6 +34,14 @@ import { InferenceMutex } from "./inference-mutex.js";
 import { computeRms, smoothMicLevel } from "./mic-level.js";
 import { ModelResidencyLru } from "./model-lru.js";
 import {
+  buildModelInventory,
+  deleteManagedModel,
+  isManagedModelId,
+  ModelCacheStore,
+  type ChromeAvailability,
+  type ManagedModelId,
+} from "./model-manager.js";
+import {
   PREMIUM_TTS_DOWNLOADED_KEY,
   PREMIUM_TTS_ENABLED_KEY,
   PREMIUM_TTS_VOICE_KEY,
@@ -92,6 +100,7 @@ interface OffscreenMessage {
   readonly rate?: unknown;
   readonly volume?: unknown;
   readonly voice?: unknown;
+  readonly modelId?: unknown;
   readonly preview?: unknown;
   readonly timings?: unknown;
 }
@@ -109,6 +118,9 @@ const registry = new ActionRegistry(actions);
 const tinyStt = new MoonshineEngine();
 const inferenceMutex = new InferenceMutex();
 const modelLru = new ModelResidencyLru();
+const modelCache = new ModelCacheStore(
+  typeof caches === "undefined" ? undefined : caches,
+);
 const speechContext = new SpeechContextRing();
 const followUpMemory = new FollowUpMemory();
 
@@ -147,6 +159,7 @@ let premiumTtsRecovery: Promise<void> | undefined;
 let premiumSettingsReady: Promise<void> | undefined;
 let premiumTtsUtteranceId: string | undefined;
 let premiumTtsIdleReleased = false;
+let tinyDownloading = false;
 let parserSessionPromiseIsWarmup = false;
 let pipelineWarmup: AbortController | undefined;
 let lastPipelineWarmupAt = Number.NEGATIVE_INFINITY;
@@ -204,11 +217,7 @@ const REWRITE_TRANSFORMATIONS = new Set<RewriteTransformation>([
   "bullets",
 ]);
 
-type BuiltInAvailability =
-  | "unavailable"
-  | "downloadable"
-  | "downloading"
-  | "available";
+type BuiltInAvailability = ChromeAvailability;
 
 interface DownloadProgressMonitor {
   addEventListener(
@@ -256,6 +265,16 @@ interface RewriterApi {
   ): Promise<RewriterInstance>;
 }
 
+const SUMMARIZER_OPTIONS = {
+  type: "key-points",
+  format: "plain-text",
+  length: "medium",
+  preference: "auto",
+  expectedInputLanguages: ["en"],
+  expectedContextLanguages: ["en"],
+  outputLanguage: "en",
+} as const;
+
 interface PageTaskInput {
   readonly role: "summarize" | "ask-page";
   readonly pageText: string;
@@ -296,6 +315,58 @@ async function permissionState(): Promise<PermissionState | "unknown"> {
   }
 }
 
+let modelInventoryPublish: Promise<void> | undefined;
+
+async function getSummarizerAvailability(): Promise<ChromeAvailability> {
+  const api = (
+    globalThis as typeof globalThis & { readonly Summarizer?: SummarizerApi }
+  ).Summarizer;
+  if (!api) return "unavailable";
+  return await api.availability(SUMMARIZER_OPTIONS).catch(() => "unavailable");
+}
+
+async function publishModelInventory(): Promise<void> {
+  if (modelInventoryPublish) return modelInventoryPublish;
+  const pending = (async () => {
+    await Promise.all([
+      ensurePremiumSettings(),
+      ensurePremiumSttSettings(),
+    ]);
+    const status = premiumSttStatus ?? premiumStt!.status;
+    const inventory = buildModelInventory({
+      cache: await modelCache.measure(),
+      tinyDownloading,
+      premiumSttTier: status.tier,
+      premiumSttState: status.state,
+      premiumTtsState,
+      premiumTtsEnabled,
+      premiumTtsVoice,
+      nano: nanoAvailability,
+      nanoActive: parserSession !== undefined || responderSession !== undefined,
+      summarizer: await getSummarizerAvailability(),
+    });
+    await sendPanel({ type: "model-inventory", ...inventory });
+  })();
+  modelInventoryPublish = pending;
+  try {
+    await pending;
+  } finally {
+    if (modelInventoryPublish === pending) modelInventoryPublish = undefined;
+  }
+}
+
+function queueModelInventoryPublish(): void {
+  void publishModelInventory().catch((error: unknown) => {
+    console.warn("Sotto could not read local model storage", error);
+  });
+}
+
+async function refreshModelInventory(): Promise<void> {
+  modelCache.invalidate();
+  await modelInventoryPublish?.catch(() => undefined);
+  await publishModelInventory();
+}
+
 async function publishStatus(error?: string): Promise<void> {
   await Promise.all([
     ensurePremiumSettings(),
@@ -327,6 +398,7 @@ async function publishStatus(error?: string): Promise<void> {
   });
   await publishPremiumStatus();
   await publishPremiumSttStatus();
+  await publishModelInventory();
 }
 
 function progressRatioFromKokoro(
@@ -405,6 +477,7 @@ async function publishPremiumStatus(): Promise<void> {
       : { backend: premiumTtsBackend }),
     ...(premiumTtsError === undefined ? {} : { error: premiumTtsError }),
   }).catch(() => undefined);
+  queueModelInventoryPublish();
 }
 
 async function publishPremiumSttStatus(): Promise<void> {
@@ -421,6 +494,7 @@ async function publishPremiumSttStatus(): Promise<void> {
     backend: status.backend,
     ...(status.error === undefined ? {} : { error: status.error }),
   });
+  queueModelInventoryPublish();
 }
 
 const STT_DIAGNOSTIC_MESSAGES: Record<SttDiagnostic, string> = {
@@ -596,6 +670,152 @@ async function persistPremiumSttStatus(): Promise<void> {
   });
 }
 
+function modelIdForTier(tier: PremiumSttTier): ManagedModelId {
+  return tier === "parakeet" ? "parakeet-v3" : "moonshine-base";
+}
+
+async function setStoredTierDownloaded(
+  tier: PremiumSttTier,
+  downloaded: boolean,
+): Promise<void> {
+  const existing = await chrome.storage.local.get(
+    PREMIUM_STT_DOWNLOADED_TIERS_KEY,
+  );
+  const stored = existing[PREMIUM_STT_DOWNLOADED_TIERS_KEY];
+  const tiers: Record<string, boolean> =
+    typeof stored === "object" &&
+      stored !== null &&
+      !Array.isArray(stored)
+      ? { ...(stored as Record<string, boolean>) }
+      : {};
+  tiers[tier] = downloaded;
+  await chrome.storage.local.set({
+    [PREMIUM_STT_DOWNLOADED_TIERS_KEY]: tiers,
+  });
+}
+
+async function downloadManagedModel(id: ManagedModelId): Promise<void> {
+  if (id.startsWith("kokoro-voice:")) {
+    throw new TypeError("Choose this voice in the voice list");
+  }
+  if (id === "kokoro") {
+    await ensurePremiumTts();
+    await refreshModelInventory();
+    return;
+  }
+
+  await ensurePremiumSttSettings();
+  if (id === "moonshine-tiny") {
+    tinyDownloading = true;
+    queueModelInventoryPublish();
+    try {
+      await premiumStt!.initializeDefault();
+    } finally {
+      tinyDownloading = false;
+      await refreshModelInventory();
+    }
+    return;
+  }
+
+  if (id !== modelIdForTier(premiumStt!.status.tier)) {
+    throw new Error("This speech model is not available on this device");
+  }
+  await premiumStt!.prepare();
+  await persistPremiumSttStatus();
+  await publishPremiumSttStatus();
+  await refreshModelInventory();
+}
+
+async function fallbackFromPremiumTts(): Promise<void> {
+  premiumTtsEnabled = false;
+  await chrome.storage.local.set({
+    [PREMIUM_TTS_ENABLED_KEY]: false,
+  });
+  await askWorker({
+    type: "premium-state-update",
+    state: premiumTtsState,
+    enabled: false,
+    voice: premiumTtsVoice,
+    ...(premiumTtsBackend === undefined
+      ? {}
+      : { backend: premiumTtsBackend }),
+  });
+  await publishPremiumStatus();
+}
+
+async function deleteManagedModelCache(id: ManagedModelId): Promise<void> {
+  const currentSttId = premiumSttStatus
+    ? modelIdForTier(premiumSttStatus.tier)
+    : undefined;
+  const isCurrentStt = id === currentSttId;
+  const isKokoro = id === "kokoro" || id.startsWith("kokoro-voice:");
+  const activeStt = isCurrentStt &&
+    premiumSttStatus?.state === "active";
+  const activeTts = isKokoro &&
+    premiumTtsState === "ready" &&
+    premiumTtsEnabled &&
+    (id === "kokoro" ||
+      id === `kokoro-voice:${premiumTtsVoice}`);
+  if (
+    (isCurrentStt &&
+      (premiumSttStatus?.state === "downloading" ||
+        premiumSttStatus?.state === "validating" ||
+        premiumSttStatus?.state === "loading" ||
+        premiumSttStatus?.state === "warming")) ||
+    (isKokoro && premiumTtsState === "downloading")
+  ) {
+    throw new Error("Wait for the model task to finish");
+  }
+
+  await deleteManagedModel({
+    id,
+    active: activeStt || activeTts,
+    fallback: async () => {
+      if (activeStt) {
+        await premiumStt!.setEnabled(false);
+        await persistPremiumSttStatus();
+        await publishPremiumSttStatus();
+      } else {
+        await fallbackFromPremiumTts();
+      }
+    },
+    release: async () => {
+      if (isCurrentStt && modelLru.isResident("premium-stt")) {
+        return modelLru.releaseWhenIdle("premium-stt");
+      }
+      if (isKokoro && modelLru.isResident("premium-tts")) {
+        return modelLru.releaseWhenIdle("premium-tts");
+      }
+      return true;
+    },
+    clear: () => modelCache.delete(id),
+  });
+
+  if (isCurrentStt) {
+    await premiumStt!.markDeleted();
+    await persistPremiumSttStatus();
+    await publishPremiumSttStatus();
+  } else if (id === "moonshine-base" || id === "parakeet-v3") {
+    await setStoredTierDownloaded(
+      id === "parakeet-v3" ? "parakeet" : "moonshine-base",
+      false,
+    );
+  } else if (id === "kokoro") {
+    premiumTtsDownloaded = false;
+    premiumTtsEnabled = false;
+    premiumTtsState = "absent";
+    premiumTtsBackend = undefined;
+    premiumTtsError = undefined;
+    premiumTtsIdleReleased = false;
+    await chrome.storage.local.set({
+      [PREMIUM_TTS_DOWNLOADED_KEY]: false,
+      [PREMIUM_TTS_ENABLED_KEY]: false,
+    });
+    await publishPremiumStatus();
+  }
+  await refreshModelInventory();
+}
+
 function isWebGpuFailure(error: unknown): boolean {
   const detail = error instanceof Error ? error.message : String(error);
   return /device[\s_-]*lost|out of memory|\boom\b|webgpu|gpu process/i.test(
@@ -658,6 +878,7 @@ async function ensurePremiumTts(
       [PREMIUM_TTS_DOWNLOADED_KEY]: true,
     });
     await publishPremiumStatus();
+    await refreshModelInventory();
   }).catch(async (error: unknown) => {
     if (premiumTts === engine) premiumTts = undefined;
     await engine.dispose().catch(() => undefined);
@@ -764,6 +985,9 @@ async function speakPremium(message: OffscreenMessage): Promise<void> {
     releaseModel();
     if (premiumTtsUtteranceId === utteranceId) {
       premiumTtsUtteranceId = undefined;
+    }
+    if (preview) {
+      void refreshModelInventory().catch(() => undefined);
     }
   }
 }
@@ -1056,9 +1280,11 @@ async function summarizeWithTaskApi(
           model: "summarizer",
           progress: Math.max(0, Math.min(1, event.loaded)),
         });
+        queueModelInventoryPublish();
       });
     },
   });
+  queueModelInventoryPublish();
 
   try {
     const context =
@@ -1354,7 +1580,9 @@ async function processSpeech(
       audio: input.audio,
       expandedAudio: input.expanded,
       transcribe: async (audio) => {
-        const releaseModel = premiumStt!.status.resident
+        const releaseModel =
+          premiumStt!.status.resident &&
+            premiumStt!.status.state === "active"
           ? modelLru.acquire("premium-stt")
           : () => undefined;
         try {
@@ -1391,8 +1619,14 @@ async function processSpeech(
 
 function ensureStt(): Promise<void> {
   if (!sttReady) {
+    tinyDownloading = true;
+    queueModelInventoryPublish();
     const pending = ensurePremiumSttSettings()
-      .then(() => premiumStt!.initializeDefault());
+      .then(() => premiumStt!.initializeDefault())
+      .finally(async () => {
+        tinyDownloading = false;
+        await refreshModelInventory();
+      });
     sttReady = pending.catch((error: unknown) => {
       sttReady = undefined;
       throw error;
@@ -1704,6 +1938,9 @@ async function handleOffscreenMessage(
 ): Promise<unknown> {
   switch (message.type) {
     case "get-status":
+      modelCache.invalidate();
+      await publishStatus();
+      return;
     case "refresh-permissions":
       await publishStatus();
       return;
@@ -1750,6 +1987,19 @@ async function handleOffscreenMessage(
       await premiumStt!.prepare();
       await persistPremiumSttStatus();
       await publishPremiumSttStatus();
+      await refreshModelInventory();
+      return;
+    case "download-model":
+      if (!isManagedModelId(message.modelId)) {
+        throw new TypeError("A valid model is required");
+      }
+      await downloadManagedModel(message.modelId);
+      return;
+    case "delete-model":
+      if (!isManagedModelId(message.modelId)) {
+        throw new TypeError("A valid model is required");
+      }
+      await deleteManagedModelCache(message.modelId);
       return;
     case "set-premium-stt-enabled":
       if (typeof message.enabled !== "boolean") {
