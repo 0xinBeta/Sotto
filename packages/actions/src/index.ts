@@ -1,6 +1,7 @@
 import askPageAction from "./ask-page/index.js";
 import helpAction from "./help/index.js";
 import notesAction from "./notes/index.js";
+import pageControlAction from "./page-control/index.js";
 import playbackAction from "./playback/index.js";
 import screenshotAction from "./screenshot/index.js";
 import summarizeAction from "./summarize/index.js";
@@ -25,6 +26,20 @@ export {
   notesSchema,
 } from "./notes/index.js";
 export type { NotesCommand } from "./notes/index.js";
+export {
+  calculateZoomLevel,
+  default as pageControlAction,
+  isRestrictedPage,
+  pageControlSchema,
+  runScrollOperation,
+  zoomFeedback,
+} from "./page-control/index.js";
+export type {
+  PageControlCommand,
+  PageControlOperation,
+  ScrollOperation,
+  ZoomOperation,
+} from "./page-control/index.js";
 export {
   default as playbackAction,
   playbackSchema,
@@ -66,6 +81,7 @@ export const actions = [
   summarizeAction,
   askPageAction,
   notesAction,
+  pageControlAction,
   playbackAction,
   typeAction,
   helpAction,

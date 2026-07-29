@@ -476,6 +476,53 @@ describe("background screenshot clipboard injection", () => {
     expect(worker.speak).not.toHaveBeenCalled();
   });
 
+  it("logs a silent action without speech or an earcon", async () => {
+    const silentResult = {
+      spoken: "Scrolled down.",
+      silent: true,
+    } as const;
+    worker.route.mockResolvedValue(silentResult);
+    const harness = await installBackground({
+      id: 12,
+      url: "https://example.com/article",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "scroll down",
+        command: {
+          action: "page-control",
+          operation: "scroll-down",
+        },
+      }),
+    ).resolves.toEqual({ ok: true, value: silentResult });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "action-log",
+      heard: "scroll down",
+      did: "Scrolled down.",
+      timings: {
+        input: "voice",
+        actionMs: expect.any(Number),
+      },
+    });
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "earcon",
+      }),
+    );
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-result",
+      }),
+    );
+    expect(worker.speak).not.toHaveBeenCalled();
+  });
+
   it("keeps a read for playback controls and stops it for another command", async () => {
     let finishRead!: () => void;
     worker.speak.mockImplementation(

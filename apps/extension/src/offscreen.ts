@@ -1574,7 +1574,7 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
   const spoken =
     command.action === "unknown"
       ? "Sorry, say that again?"
-      : command.action === "help"
+      : command.action === "help" || command.action === "page-control"
         ? result.spoken
         : await inferenceMutex.run(async () =>
             await respondOneSentence({

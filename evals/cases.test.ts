@@ -50,6 +50,14 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps at least eight page-control cases", () => {
+    expect(
+      cases.filter((testCase) =>
+        testCase.expected.action === "page-control"
+      ).length,
+    ).toBeGreaterThanOrEqual(8);
+  });
+
   it("keeps at least eight follow-up cases, including no-context negatives", () => {
     const followUps = cases.filter((testCase) =>
       testCase.id.startsWith("followup-")

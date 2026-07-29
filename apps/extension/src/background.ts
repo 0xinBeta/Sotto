@@ -912,6 +912,15 @@ async function publishActionResult(
     await publishNotes();
     if (!commandIsCurrent(generation)) return;
   }
+  if (result.silent === true) {
+    await sendPanel({
+      type: "action-log",
+      heard: transcript,
+      did: result.spoken,
+      timings,
+    });
+    return;
+  }
   if (result.pageText) {
     const { text, title, lang, speech } = result.pageText;
     if (

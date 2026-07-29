@@ -9,6 +9,8 @@ export function installChromeStub() {
       remove: vi.fn(),
       update: vi.fn(),
       captureVisibleTab: vi.fn(),
+      getZoom: vi.fn(),
+      setZoom: vi.fn(),
     },
     windows: {
       update: vi.fn(),
@@ -19,6 +21,9 @@ export function installChromeStub() {
     },
     permissions: {
       contains: vi.fn().mockResolvedValue(true),
+    },
+    scripting: {
+      executeScript: vi.fn(),
     },
   };
 

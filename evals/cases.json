@@ -335,6 +335,57 @@
   },
 
   {
+    "id": "page-control-scroll-down-01",
+    "transcript": "scroll down",
+    "expected": { "action": "page-control", "operation": "scroll-down" }
+  },
+  {
+    "id": "page-control-scroll-down-02",
+    "transcript": "scroll down a little",
+    "expected": { "action": "page-control", "operation": "scroll-down" }
+  },
+  {
+    "id": "page-control-scroll-up-01",
+    "transcript": "scroll up",
+    "expected": { "action": "page-control", "operation": "scroll-up" }
+  },
+  {
+    "id": "page-control-scroll-up-02",
+    "transcript": "page up",
+    "expected": { "action": "page-control", "operation": "scroll-up" }
+  },
+  {
+    "id": "page-control-top-01",
+    "transcript": "go to the top",
+    "expected": { "action": "page-control", "operation": "top" }
+  },
+  {
+    "id": "page-control-bottom-01",
+    "transcript": "bottom of the page",
+    "expected": { "action": "page-control", "operation": "bottom" }
+  },
+  {
+    "id": "page-control-zoom-in-01",
+    "transcript": "zoom in",
+    "expected": { "action": "page-control", "operation": "zoom-in" }
+  },
+  {
+    "id": "page-control-zoom-out-01",
+    "transcript": "zoom out",
+    "expected": { "action": "page-control", "operation": "zoom-out" }
+  },
+  {
+    "id": "page-control-zoom-reset-01",
+    "transcript": "reset zoom",
+    "expected": { "action": "page-control", "operation": "zoom-reset" }
+  },
+  {
+    "id": "page-control-zoom-reset-02",
+    "transcript": "return to normal zoom",
+    "expected": { "action": "page-control", "operation": "zoom-reset" }
+  },
+
+  {
     "id": "tabs-new-01",
     "transcript": "new tab",
     "expected": { "action": "tabs", "operation": "new" }
@@ -864,11 +915,6 @@
   {
     "id": "unknown-07",
     "transcript": "summarize last week's email",
-    "expected": { "action": "unknown" }
-  },
-  {
-    "id": "unknown-08",
-    "transcript": "scroll down a little",
     "expected": { "action": "unknown" }
   },
   {

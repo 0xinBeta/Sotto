@@ -1069,6 +1069,36 @@ describe("offscreen fail-soft status", () => {
     });
   });
 
+  it("speaks the exact page-control result without responder changes", async () => {
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockClear();
+    nano.respondOneSentence.mockReset();
+
+    await expect(
+      harness.message({
+        type: "action-result",
+        transcript: "zoom in",
+        command: { action: "page-control", operation: "zoom-in" },
+        result: { spoken: "Zoom one hundred forty percent." },
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(nano.respondOneSentence).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "earcon",
+      kind: "complete",
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "speak",
+      text: "Zoom one hundred forty percent.",
+      heard: "zoom in",
+      did: "Zoom one hundred forty percent.",
+      timings: { input: "voice" },
+    });
+  });
+
   it("aborts a pending page task when a new transcript barges in", async () => {
     nano.getNanoAvailability.mockResolvedValue("unavailable");
     nano.parseCommand.mockResolvedValue({ action: "unknown" });

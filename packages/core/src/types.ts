@@ -101,6 +101,8 @@ export type ClientWorkflow =
 
 export interface ActionResult {
   readonly spoken: string;
+  /** Logs a successful result without speech or an earcon. */
+  readonly silent?: true;
   readonly workflow?: ClientWorkflow;
   readonly data?: Readonly<Record<string, JsonValue>>;
   /**
