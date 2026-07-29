@@ -203,6 +203,7 @@ const elementIds = [
   "notes-list",
   "notes-search",
   "export-notes",
+  "reminders-list",
   "reminder-banner",
   "command-reference",
   "command-reference-list",
@@ -274,6 +275,9 @@ async function installSidepanel(options: {
         };
       }
       if (message.type === "delete-note") {
+        return { ok: true, value: true };
+      }
+      if (message.type === "cancel-reminder") {
         return { ok: true, value: true };
       }
       return { ok: true };
@@ -875,6 +879,80 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["notes-list"].textContent).toBe("No notes yet.");
   });
 
+  it("sorts reminders and cancels one after a deliberate panel click", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "reminders-updated",
+      reminders: [
+        {
+          id: "later",
+          text: "Stretch",
+          dueAt: "2026-07-28T12:30:00.000Z",
+        },
+        {
+          id: "sooner",
+          text: "Check the build",
+          dueAt: "2026-07-28T12:12:00.000Z",
+        },
+      ],
+    });
+
+    expect(elements["reminders-list"].children).toHaveLength(2);
+    expect(
+      elements["reminders-list"].firstElementChild?.textContent,
+    ).toContain("Check the build");
+    const reminder = elements["reminders-list"].firstElementChild;
+    const details = reminder?.children[1] as FakeElement | undefined;
+    const cancelButton = details?.children[1] as FakeElement | undefined;
+    if (!cancelButton) throw new Error("Cancel button was not rendered");
+
+    await cancelButton.emit("click");
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "cancel-reminder",
+      reminderId: "sooner",
+    });
+    expect(elements["reminders-list"].textContent).toContain("Stretch");
+    expect(elements["reminders-list"].textContent).not.toContain(
+      "Check the build",
+    );
+  });
+
+  it("removes a fired reminder from the live list", async () => {
+    const { elements, onMessage } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "reminders-updated",
+      reminders: [
+        {
+          id: "build",
+          text: "Check the build",
+          dueAt: "2026-07-28T12:12:00.000Z",
+        },
+      ],
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "reminder-fired",
+      reminder: {
+        id: "build",
+        text: "Check the build",
+        dueAt: "2026-07-28T12:12:00.000Z",
+        notificationPermission: "granted",
+      },
+    });
+
+    expect(elements["reminders-list"].textContent).toBe(
+      "No pending reminders.",
+    );
+    expect(elements["reminder-banner"].textContent).toBe(
+      "Reminder: Check the build",
+    );
+  });
+
   it("opens and scrolls to the command reference on request", async () => {
     const { elements, onMessage } = await installSidepanel();
 
@@ -906,6 +984,11 @@ describe("side-panel screenshot clipboard fallback", () => {
     });
     onMessage({
       target: "sidepanel",
+      type: "reminders-updated",
+      reminders: [{ id: "bad", text: "Bad", dueAt: "not-a-date" }],
+    });
+    onMessage({
+      target: "sidepanel",
       type: "screenshot-permission-needed",
       workflow: {
         kind: "screenshot-permission",
@@ -917,7 +1000,7 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["page-text-output"].textContent).toBe("");
     expect(elements["notes-list"].children).toEqual([]);
     expect(elements["clipboard-card"].hidden).toBe(true);
-    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(4);
   });
 
   it("automatically writes on receipt without showing the copy card", async () => {

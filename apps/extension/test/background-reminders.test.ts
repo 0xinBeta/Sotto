@@ -4,7 +4,10 @@ const worker = vi.hoisted(() => ({
   speak: vi.fn(),
 }));
 
-vi.mock("@sotto/actions", () => ({ default: [] }));
+vi.mock("@sotto/actions", () => ({
+  default: [],
+  findBestTabMatch: vi.fn(),
+}));
 vi.mock("@sotto/core", () => ({
   ActionRegistry: class ActionRegistry {},
   CommandRouter: class CommandRouter {},
@@ -146,6 +149,7 @@ async function installBackground(options: {
     },
     alarms: {
       get: vi.fn(async (name: string) => alarms.get(name)),
+      getAll: vi.fn(async () => [...alarms.values()]),
       create: alarmCreate,
       clear: vi.fn(async (name: string) => alarms.delete(name)),
       onAlarm: {
@@ -277,6 +281,11 @@ describe("background reminder recovery", () => {
         }),
       }),
     );
+    expect(harness.panelSend).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reminders-updated",
+      reminders: [],
+    });
     expect(worker.speak).toHaveBeenCalledWith("Reminder: Reminder denied", {
       lang: "en-US",
       rate: 1,

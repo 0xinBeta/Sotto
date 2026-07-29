@@ -59,6 +59,7 @@ import {
   type DictationTarget,
 } from "./dictation.js";
 import { ConfirmationSession } from "./confirmation.js";
+import { ReminderSelectionSession } from "./reminder-selection.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -97,12 +98,15 @@ const speechSettings = new SpeechSettingsStore({
 });
 const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
 const confirmationSession = new ConfirmationSession();
+const reminderSelectionSession =
+  new ReminderSelectionSession<ReminderRecord>();
 
 let creatingOffscreen: Promise<void> | undefined;
 let commandGeneration = 0;
 let readingActive = false;
 let readingPaused = false;
 let lastSpokenResponse: string | undefined;
+let pendingReminderConfirmationId: string | undefined;
 const dictationSession = new DictationTargetSession();
 
 function actionContext(): ActionContext {
@@ -303,6 +307,14 @@ function panelNote(note: NoteRecord): Record<string, unknown> {
   };
 }
 
+function panelReminder(reminder: ReminderRecord): Record<string, unknown> {
+  return {
+    id: reminder.id,
+    text: reminder.text,
+    dueAt: reminder.dueAt,
+  };
+}
+
 async function publishNotes(): Promise<readonly NoteRecord[]> {
   const notes = await notesReminderStore.listNotes();
   await sendPanel({
@@ -310,6 +322,15 @@ async function publishNotes(): Promise<readonly NoteRecord[]> {
     notes: notes.map(panelNote),
   });
   return notes;
+}
+
+async function publishReminders(): Promise<readonly ReminderRecord[]> {
+  const reminders = await notesReminderStore.listPendingReminders();
+  await sendPanel({
+    type: "reminders-updated",
+    reminders: reminders.map(panelReminder),
+  });
+  return reminders;
 }
 
 function firstWords(text: string, maximum = 8): string {
@@ -343,6 +364,35 @@ async function confirmationResult(
         spoken: `Delete the note: ${firstWords(note.body)}? Say yes.`,
       },
       pending: true,
+    };
+  }
+
+  if (isCancelReminderCommand(command)) {
+    const reminders = await notesReminderStore.listPendingReminders();
+    if (reminders.length === 0) {
+      return {
+        result: { spoken: "You have no pending reminders." },
+        pending: false,
+      };
+    }
+    if (reminders.length === 1) {
+      pendingReminderConfirmationId = reminders[0]!.id;
+      return {
+        result: {
+          spoken:
+            `Cancel the reminder: ${firstWords(reminders[0]!.text)}? Say yes.`,
+        },
+        pending: true,
+      };
+    }
+
+    reminderSelectionSession.request(reminders);
+    return {
+      result: {
+        spoken:
+          `Which one? ${reminders.slice(0, 3).map((reminder) => firstWords(reminder.text)).join(". ")}.`,
+      },
+      pending: false,
     };
   }
 
@@ -394,6 +444,23 @@ async function reconcileReminders(): Promise<void> {
   await notesReminderStore.reconcileReminders({
     onDue: deliverReminder,
   });
+}
+
+function isCancelReminderCommand(command: ActionCommand): boolean {
+  return command.action === "notes" &&
+    (command as { readonly operation?: unknown }).operation ===
+      "cancel-reminder";
+}
+
+async function cancelReminderResult(
+  reminderId: string,
+): Promise<ActionResult> {
+  const cancelled = await notesReminderStore.cancelReminder(reminderId);
+  return {
+    spoken: cancelled
+      ? "Cancelled the reminder."
+      : "That reminder is no longer pending.",
+  };
 }
 
 async function loadReminder(
@@ -1209,6 +1276,7 @@ async function publishActionResult(
   if (!commandIsCurrent(generation)) return;
   if (command.action === "notes") {
     await publishNotes();
+    await publishReminders();
     if (!commandIsCurrent(generation)) return;
   }
   if (result.silent === true) {
@@ -1433,6 +1501,7 @@ async function executeCommand(
   try {
     const confirmation = confirmationSession.resolve(transcript);
     if (confirmation.kind === "cancelled") {
+      pendingReminderConfirmationId = undefined;
       generation = beginCommandGeneration();
       generationStarted = true;
       const result = { spoken: "Cancelled." };
@@ -1451,10 +1520,16 @@ async function executeCommand(
       const actionStartedAt = performance.now();
       let result: ActionResult;
       try {
-        result = await commandRouter.routeConfirmed(
-          confirmation.command,
-          actionContext(),
-        );
+        const reminderId = isCancelReminderCommand(confirmation.command)
+          ? pendingReminderConfirmationId
+          : undefined;
+        pendingReminderConfirmationId = undefined;
+        result = reminderId === undefined
+          ? await commandRouter.routeConfirmed(
+            confirmation.command,
+            actionContext(),
+          )
+          : await cancelReminderResult(reminderId);
       } finally {
         completedTimings = {
           ...timings,
@@ -1468,6 +1543,29 @@ async function executeCommand(
         result,
         generation,
         completedTimings,
+      );
+      return result;
+    }
+
+    const reminderSelection = reminderSelectionSession.resolve(transcript);
+    if (reminderSelection.kind !== "none") {
+      generation = beginCommandGeneration();
+      generationStarted = true;
+      const result = reminderSelection.kind === "matched"
+        ? await cancelReminderResult(reminderSelection.reminder.id)
+        : {
+          spoken:
+            "I could not match a reminder. Say the reminder text again.",
+        };
+      await publishActionResult(
+        transcript,
+        {
+          action: "notes",
+          operation: "cancel-reminder",
+        } as ActionCommand,
+        result,
+        generation,
+        timings,
       );
       return result;
     }
@@ -1593,6 +1691,8 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
     }
     case "get-notes":
       return (await publishNotes()).map(panelNote);
+    case "get-reminders":
+      return (await publishReminders()).map(panelReminder);
     case "delete-note": {
       if (
         typeof message.noteId !== "string" ||
@@ -1603,6 +1703,19 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       const deleted = await notesReminderStore.deleteNote(message.noteId);
       await publishNotes();
       return deleted;
+    }
+    case "cancel-reminder": {
+      if (
+        typeof message.reminderId !== "string" ||
+        !REMINDER_ID_PATTERN.test(message.reminderId)
+      ) {
+        throw new TypeError("A valid reminder id is required");
+      }
+      const cancelled = await notesReminderStore.cancelReminder(
+        message.reminderId,
+      );
+      await publishReminders();
+      return cancelled;
     }
     case "get-command-reference":
       return createCommandReference(actionRegistry);
@@ -1890,23 +2003,31 @@ chrome.runtime.onInstalled.addListener(() => {
     "Sotto could not configure its side panel",
   );
   runAndReport(
-    restrictNotesStorageAccess().then(reconcileReminders),
+    restrictNotesStorageAccess()
+      .then(reconcileReminders)
+      .then(publishReminders),
     "Sotto could not initialize notes and reminders",
   );
 });
 
 chrome.runtime.onStartup?.addListener(() => {
   runAndReport(
-    restrictNotesStorageAccess().then(reconcileReminders),
+    restrictNotesStorageAccess()
+      .then(reconcileReminders)
+      .then(publishReminders),
     "Sotto could not reconcile reminders",
   );
 });
 
 chrome.alarms?.onAlarm?.addListener((alarm) => {
   runAndReport(
-    notesReminderStore.handleReminderAlarm(alarm.name, {
-      onDue: deliverReminder,
-    }),
+    notesReminderStore
+      .handleReminderAlarm(alarm.name, {
+        onDue: deliverReminder,
+      })
+      .then(async (reminder) => {
+        if (reminder) await publishReminders();
+      }),
     "Sotto could not deliver a reminder",
   );
 });
@@ -1980,7 +2101,9 @@ chrome.notifications?.onClicked?.addListener((notificationId) => {
 
 if (chrome.storage?.local && chrome.alarms && chrome.notifications) {
   runAndReport(
-    restrictNotesStorageAccess().then(reconcileReminders),
+    restrictNotesStorageAccess()
+      .then(reconcileReminders)
+      .then(publishReminders),
     "Sotto could not restore reminders",
   );
 }

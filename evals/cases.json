@@ -444,6 +444,36 @@
     "transcript": "set a reminder for five minutes from now to check the oven",
     "expected": { "action": "notes", "operation": "remind", "text": "Check the oven", "delayMinutes": 5 }
   },
+  {
+    "id": "notes-list-reminders-01",
+    "transcript": "what are my reminders",
+    "expected": { "action": "notes", "operation": "list-reminders" }
+  },
+  {
+    "id": "notes-list-reminders-02",
+    "transcript": "read my pending reminders",
+    "expected": { "action": "notes", "operation": "list-reminders" }
+  },
+  {
+    "id": "notes-list-reminders-03",
+    "transcript": "which reminders do I have",
+    "expected": { "action": "notes", "operation": "list-reminders" }
+  },
+  {
+    "id": "notes-cancel-reminder-01",
+    "transcript": "cancel my reminder",
+    "expected": { "action": "notes", "operation": "cancel-reminder" }
+  },
+  {
+    "id": "notes-cancel-reminder-02",
+    "transcript": "remove my pending reminder",
+    "expected": { "action": "notes", "operation": "cancel-reminder" }
+  },
+  {
+    "id": "notes-cancel-reminder-03",
+    "transcript": "delete my reminder",
+    "expected": { "action": "notes", "operation": "cancel-reminder" }
+  },
 
   {
     "id": "page-control-scroll-down-01",

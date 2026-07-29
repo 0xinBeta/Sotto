@@ -19,6 +19,8 @@ describe("notes action schema", () => {
       text: "Stretch",
       delayMinutes: 0.5,
     },
+    { action: "notes", operation: "list-reminders" },
+    { action: "notes", operation: "cancel-reminder" },
   ])("accepts a valid command", (command) => {
     expect(validateSchema(notesSchema, command)).toEqual({
       valid: true,
@@ -44,16 +46,27 @@ describe("notes action schema", () => {
       operation: "list",
       delayMinutes: 5,
     },
+    {
+      action: "notes",
+      operation: "cancel-reminder",
+      text: "Page-derived reminder",
+    },
   ])("rejects out-of-contract command data", (command) => {
     expect(validateSchema(notesSchema, command).valid).toBe(false);
   });
 
-  it("requires confirmation only for delete-last", () => {
+  it("requires confirmation for note deletion and reminder cancellation", () => {
     if (typeof notesAction.confirm !== "function") {
       throw new TypeError("Notes confirmation must use the command");
     }
     expect(
       notesAction.confirm({ action: "notes", operation: "delete-last" }),
+    ).toBe(true);
+    expect(
+      notesAction.confirm({
+        action: "notes",
+        operation: "cancel-reminder",
+      }),
     ).toBe(true);
     expect(
       notesAction.confirm({ action: "notes", operation: "read" }),
@@ -100,6 +113,56 @@ describe("notes action schema", () => {
         },
       });
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("reads pending reminders with relative times, soonest first", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-28T12:00:00.000Z"));
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({
+            schemaVersion: 1,
+            "reminder:later": {
+              id: "later",
+              text: "Stretch",
+              dueAt: "2026-07-28T12:30:00.000Z",
+              status: "scheduled",
+              alarmName: "reminder:later",
+            },
+            "reminder:sooner": {
+              id: "sooner",
+              text: "Check the build",
+              dueAt: "2026-07-28T12:12:00.000Z",
+              status: "scheduled",
+              alarmName: "reminder:sooner",
+            },
+            "reminder:done": {
+              id: "done",
+              text: "Old task",
+              dueAt: "2026-07-28T12:05:00.000Z",
+              status: "delivered",
+              alarmName: "reminder:done",
+            },
+          })),
+        },
+      },
+    });
+
+    try {
+      await expect(
+        notesAction.execute(
+          { action: "notes", operation: "list-reminders" },
+          {},
+        ),
+      ).resolves.toEqual({
+        spoken:
+          "in 12 minutes: Check the build. in 30 minutes: Stretch",
+      });
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });

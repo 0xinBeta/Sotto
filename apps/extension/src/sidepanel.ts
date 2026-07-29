@@ -60,6 +60,12 @@ interface PanelNote {
   readonly updatedAt: string;
 }
 
+interface PanelReminder {
+  readonly id: string;
+  readonly text: string;
+  readonly dueAt: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -85,6 +91,19 @@ function isPanelNote(value: unknown): value is PanelNote {
     isBoundedString(value.updatedAt, 35, 1) &&
     Number.isFinite(Date.parse(value.createdAt)) &&
     Number.isFinite(Date.parse(value.updatedAt))
+  );
+}
+
+function isPanelReminder(value: unknown): value is PanelReminder {
+  if (!isRecord(value)) return false;
+  return (
+    Object.keys(value).every((key) =>
+      key === "id" || key === "text" || key === "dueAt"
+    ) &&
+    isBoundedString(value.id, 128, 1) &&
+    isBoundedString(value.text, 1_000, 1) &&
+    isBoundedString(value.dueAt, 35, 1) &&
+    Number.isFinite(Date.parse(value.dueAt))
   );
 }
 
@@ -159,6 +178,11 @@ type PanelMessage =
       target: "sidepanel";
       type: "notes-updated";
       notes: readonly PanelNote[];
+    }
+  | {
+      target: "sidepanel";
+      type: "reminders-updated";
+      reminders: readonly PanelReminder[];
     }
   | {
       target: "sidepanel";
@@ -266,6 +290,12 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         Array.isArray(message.notes) &&
         message.notes.length <= 5_000 &&
         message.notes.every(isPanelNote)
+      );
+    case "reminders-updated":
+      return (
+        Array.isArray(message.reminders) &&
+        message.reminders.length <= 5_000 &&
+        message.reminders.every(isPanelReminder)
       );
     case "reminder-fired":
     case "reminder-opened": {
@@ -471,6 +501,8 @@ const skipReading = requiredElement<HTMLButtonElement>("#skip-reading");
 const notesList = requiredElement<HTMLUListElement>("#notes-list");
 const notesSearch = requiredElement<HTMLInputElement>("#notes-search");
 const exportNotes = requiredElement<HTMLButtonElement>("#export-notes");
+const remindersList =
+  requiredElement<HTMLUListElement>("#reminders-list");
 const reminderBanner = requiredElement<HTMLElement>("#reminder-banner");
 const commandReference =
   requiredElement<HTMLDetailsElement>("#command-reference");
@@ -483,6 +515,7 @@ let isReadingPaused = false;
 let isDictating = false;
 let isDictationPaused = false;
 let panelNotes: readonly PanelNote[] = [];
+let panelReminders: readonly PanelReminder[] = [];
 let pendingScreenshot: ClipboardWorkflow | undefined;
 let pendingScreenshotPermission: ScreenshotPermissionWorkflow | undefined;
 let newestLogEntry: LogEntry | undefined;
@@ -1165,6 +1198,73 @@ function renderNotes(notes: readonly PanelNote[]): void {
   renderNoteList();
 }
 
+function renderReminderList(): void {
+  remindersList.replaceChildren();
+  if (panelReminders.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "empty-notes";
+    empty.textContent = "No pending reminders.";
+    remindersList.append(empty);
+    return;
+  }
+
+  for (const reminder of panelReminders) {
+    const item = document.createElement("li");
+    const text = document.createElement("p");
+    const details = document.createElement("div");
+    const time = document.createElement("time");
+    const cancelButton = document.createElement("button");
+    const due = new Date(reminder.dueAt);
+    text.textContent = reminder.text;
+    time.dateTime = reminder.dueAt;
+    time.textContent = due.toLocaleString([], {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    details.className = "note-details";
+    cancelButton.className = "note-delete";
+    cancelButton.type = "button";
+    cancelButton.textContent = "Cancel";
+    cancelButton.setAttribute(
+      "aria-label",
+      `Cancel reminder: ${reminder.text.slice(0, 80)}`,
+    );
+    cancelButton.addEventListener("click", async () => {
+      cancelButton.disabled = true;
+      try {
+        const cancelled = await requestWorker<boolean>({
+          type: "cancel-reminder",
+          reminderId: reminder.id,
+        });
+        if (cancelled) {
+          panelReminders = panelReminders.filter(
+            (item) => item.id !== reminder.id,
+          );
+          renderReminderList();
+        }
+      } catch (error) {
+        appendLog(
+          "cancel reminder",
+          error instanceof Error
+            ? error.message
+            : "The reminder was not cancelled.",
+        );
+        cancelButton.disabled = false;
+      }
+    });
+    details.append(time, cancelButton);
+    item.append(text, details);
+    remindersList.append(item);
+  }
+}
+
+function renderReminders(reminders: readonly PanelReminder[]): void {
+  panelReminders = [...reminders].sort((left, right) =>
+    left.dueAt.localeCompare(right.dueAt)
+  );
+  renderReminderList();
+}
+
 function showCommandReference(): void {
   commandReference.open = true;
   commandReference.scrollIntoView({ block: "start" });
@@ -1767,9 +1867,18 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
     case "notes-updated":
       renderNotes(message.notes);
       break;
+    case "reminders-updated":
+      renderReminders(message.reminders);
+      break;
     case "reminder-fired":
+      panelReminders = panelReminders.filter(
+        (reminder) => reminder.id !== message.reminder.id,
+      );
+      renderReminderList();
+      showReminder(message.reminder, true);
+      break;
     case "reminder-opened":
-      showReminder(message.reminder, message.type === "reminder-fired");
+      showReminder(message.reminder);
       break;
     case "earcon":
       void playEarcon(message.kind);
@@ -1867,6 +1976,18 @@ void requestWorker<readonly PanelNote[]>({ type: "get-notes" })
     appendLog(
       "notes",
       error instanceof Error ? error.message : "Notes are unavailable",
+    );
+  });
+void requestWorker<readonly PanelReminder[]>({ type: "get-reminders" })
+  .then((reminders) => {
+    if (reminders) renderReminders(reminders);
+  })
+  .catch((error: unknown) => {
+    appendLog(
+      "reminders",
+      error instanceof Error
+        ? error.message
+        : "Reminders are unavailable.",
     );
   });
 void loadCapturePermissionState();

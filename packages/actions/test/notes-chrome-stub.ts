@@ -44,6 +44,7 @@ export class MemoryStorageArea implements StorageAreaLike {
 export class MemoryAlarmStore implements AlarmStoreLike {
   readonly alarms = new Map<string, { name: string; when: number }>();
   readonly get = vi.fn(async (name: string) => this.alarms.get(name));
+  readonly getAll = vi.fn(async () => [...this.alarms.values()]);
   readonly create = vi.fn(
     async (name: string, alarmInfo: { readonly when: number }) => {
       this.alarms.set(name, { name, when: alarmInfo.when });

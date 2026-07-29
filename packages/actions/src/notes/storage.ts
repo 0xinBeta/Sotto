@@ -61,6 +61,7 @@ export interface StorageAreaLike {
 
 export interface AlarmStoreLike {
   get(name: string): Promise<{ readonly name: string } | undefined>;
+  getAll?(): Promise<readonly { readonly name: string }[]>;
   create(
     name: string,
     alarmInfo: { readonly when: number },
@@ -120,6 +121,7 @@ function defaultStorage(): StorageAreaLike {
 function defaultAlarms(): AlarmStoreLike {
   return {
     get: (name) => chrome.alarms.get(name),
+    getAll: () => chrome.alarms.getAll(),
     create: (name, alarmInfo) => chrome.alarms.create(name, alarmInfo),
     clear: (name) => chrome.alarms.clear(name),
   };
@@ -392,6 +394,40 @@ export class NotesReminderStore {
     );
   }
 
+  async listPendingReminders(): Promise<readonly ReminderRecord[]> {
+    return (await this.listReminders()).filter(
+      (reminder) => reminder.status === "scheduled",
+    );
+  }
+
+  cancelReminder(reminderId: string): Promise<boolean> {
+    return this.#enqueueMutation(async () => {
+      if (!isId(reminderId)) {
+        throw new TypeError("A valid reminder id is required");
+      }
+      const key = `${REMINDER_KEY_PREFIX}${reminderId}`;
+      const values = await this.#storage.get([
+        NOTES_SCHEMA_VERSION_KEY,
+        key,
+      ]);
+      assertSchemaVersion(values, values[key] !== undefined);
+      const reminder = values[key];
+      if (reminder === undefined) return false;
+      if (!isReminderRecord(reminder) || reminder.id !== reminderId) {
+        throw new Error(`Invalid reminder record at ${key}`);
+      }
+      if (reminder.status !== "scheduled") return false;
+
+      await this.#storage.remove(key);
+      try {
+        await this.#alarms.clear(reminder.alarmName);
+      } catch {
+        // Storage is authoritative. Reconciliation clears a stray alarm.
+      }
+      return true;
+    });
+  }
+
   scheduleReminder(input: ScheduleReminderInput): Promise<ReminderRecord> {
     return this.#enqueueMutation(async () => {
       const delayMinutes = parseReminderDelayMinutes(input.delayMinutes);
@@ -489,6 +525,20 @@ export class NotesReminderStore {
             when: Date.parse(reminder.dueAt),
           });
           recreatedAlarmNames.push(reminder.alarmName);
+        }
+      }
+
+      const scheduledAlarmNames = new Set(
+        reminders
+          .filter((reminder) => reminder.status === "scheduled")
+          .map((reminder) => reminder.alarmName),
+      );
+      for (const alarm of await this.#alarms.getAll?.() ?? []) {
+        if (
+          alarm.name.startsWith(REMINDER_KEY_PREFIX) &&
+          !scheduledAlarmNames.has(alarm.name)
+        ) {
+          await this.#alarms.clear(alarm.name);
         }
       }
 

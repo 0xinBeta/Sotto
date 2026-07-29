@@ -163,6 +163,57 @@ describe("notes storage", () => {
 });
 
 describe("reminder scheduling", () => {
+  it("lists only pending reminders with the soonest first", async () => {
+    const later = reminder("later", "2026-07-28T12:30:00.000Z");
+    const sooner = reminder("sooner", "2026-07-28T12:10:00.000Z");
+    const delivered = reminder(
+      "delivered",
+      "2026-07-28T12:05:00.000Z",
+      "delivered",
+    );
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      "reminder:later": later,
+      "reminder:sooner": sooner,
+      "reminder:delivered": delivered,
+    });
+    const { store } = makeStore(storage);
+
+    await expect(store.listPendingReminders()).resolves.toEqual([
+      sooner,
+      later,
+    ]);
+  });
+
+  it("removes storage before clearing an alarm and reconciles a stray", async () => {
+    const record = reminder("cancel", "2026-07-28T12:10:00.000Z");
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      "reminder:cancel": record,
+    });
+    const alarms = new MemoryAlarmStore();
+    alarms.alarms.set(record.alarmName, {
+      name: record.alarmName,
+      when: Date.parse(record.dueAt),
+    });
+    alarms.clear.mockRejectedValueOnce(new Error("alarm registry busy"));
+    const { store } = makeStore(storage, alarms);
+
+    await expect(store.cancelReminder(record.id)).resolves.toBe(true);
+    expect(storage.values["reminder:cancel"]).toBeUndefined();
+    expect(
+      storage.remove.mock.invocationCallOrder[0],
+    ).toBeLessThan(alarms.clear.mock.invocationCallOrder[0]!);
+    expect(alarms.alarms.has(record.alarmName)).toBe(true);
+
+    await expect(store.reconcileReminders({ now: NOW })).resolves.toEqual({
+      delivered: [],
+      recreatedAlarmNames: [],
+    });
+    expect(alarms.alarms.has(record.alarmName)).toBe(false);
+    expect(alarms.clear).toHaveBeenCalledTimes(2);
+  });
+
   it.each([0.5, 1, MAX_REMINDER_DELAY_MINUTES])(
     "accepts the bounded delay %s minutes",
     (delay) => {

@@ -12,7 +12,23 @@ const worker = vi.hoisted(() => ({
   stop: vi.fn(),
 }));
 
-vi.mock("@sotto/actions", () => ({ default: [] }));
+vi.mock("@sotto/actions", () => ({
+  default: [],
+  findBestTabMatch: (
+    candidates: readonly {
+      readonly title?: string;
+      readonly reminder?: unknown;
+    }[],
+    target: string,
+  ) => {
+    const words = target.toLocaleLowerCase().split(/\s+/u);
+    return candidates.find((candidate) =>
+      words.every((word) =>
+        candidate.title?.toLocaleLowerCase().includes(word)
+      )
+    );
+  },
+}));
 vi.mock("@sotto/core", () => ({
   ActionRegistry: class ActionRegistry {},
   CommandRouter: class CommandRouter {
@@ -194,6 +210,7 @@ async function installBackground(
     },
     alarms: {
       get: vi.fn(),
+      getAll: vi.fn().mockResolvedValue([]),
       create: alarmCreate,
       clear: vi.fn(),
       onAlarm: {
@@ -345,6 +362,111 @@ describe("background screenshot clipboard injection", () => {
         result: { spoken: "Cancelled." },
       }),
     );
+  });
+
+  it("uses the confirm tier when one reminder is pending", async () => {
+    const record = {
+      id: "build",
+      text: "Check the build",
+      dueAt: "2099-07-28T12:12:00.000Z",
+      status: "scheduled",
+      alarmName: "reminder:build",
+    };
+    worker.requiresConfirmation.mockImplementation(
+      (command) =>
+        (command as { readonly operation?: unknown }).operation ===
+          "cancel-reminder",
+    );
+    const harness = await installBackground(
+      { id: 4, url: "https://example.com/current" },
+      {
+        schemaVersion: 1,
+        "reminder:build": record,
+      },
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "cancel my reminder",
+        command: { action: "notes", operation: "cancel-reminder" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        spoken: "Cancel the reminder: Check the build? Say yes.",
+      },
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "yes",
+        command: { action: "unknown" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Cancelled the reminder." },
+    });
+    expect(harness.storageValues["reminder:build"]).toBeUndefined();
+    expect(worker.routeConfirmed).not.toHaveBeenCalled();
+  });
+
+  it("asks which reminder and cancels a local fuzzy-text match", async () => {
+    const build = {
+      id: "build",
+      text: "Check the build",
+      dueAt: "2099-07-28T12:12:00.000Z",
+      status: "scheduled",
+      alarmName: "reminder:build",
+    };
+    const oven = {
+      id: "oven",
+      text: "Check the oven",
+      dueAt: "2099-07-28T12:30:00.000Z",
+      status: "scheduled",
+      alarmName: "reminder:oven",
+    };
+    worker.requiresConfirmation.mockImplementation(
+      (command) =>
+        (command as { readonly operation?: unknown }).operation ===
+          "cancel-reminder",
+    );
+    const harness = await installBackground(
+      { id: 4, url: "https://example.com/current" },
+      {
+        schemaVersion: 1,
+        "reminder:oven": oven,
+        "reminder:build": build,
+      },
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "cancel my reminder",
+        command: { action: "notes", operation: "cancel-reminder" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        spoken: "Which one? Check the build. Check the oven.",
+      },
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "check build",
+        command: { action: "unknown" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Cancelled the reminder." },
+    });
+    expect(harness.storageValues["reminder:build"]).toBeUndefined();
+    expect(harness.storageValues["reminder:oven"]).toEqual(oven);
+    expect(worker.route).not.toHaveBeenCalled();
   });
 
   it("sends the help workflow to the command reference", async () => {

@@ -68,6 +68,15 @@ describe("intent eval schema drift", () => {
     ).toBe(true);
   });
 
+  it("keeps at least six reminder list and cancel cases", () => {
+    const reminderCases = cases.filter((testCase) =>
+      testCase.id.startsWith("notes-list-reminders-") ||
+      testCase.id.startsWith("notes-cancel-reminder-")
+    );
+
+    expect(reminderCases.length).toBeGreaterThanOrEqual(6);
+  });
+
   it("keeps at least six start and six stop dictation cases", () => {
     const dictationCases = cases.filter(
       (testCase) => testCase.expected.action === "dictation",
