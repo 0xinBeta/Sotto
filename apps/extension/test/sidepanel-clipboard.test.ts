@@ -342,6 +342,15 @@ async function installSidepanel(options: {
   elements["action-log"].append(emptyLog);
 
   let onMessage: ((message: unknown) => void) | undefined;
+  let onStorageChanged:
+    | ((
+        changes: Record<
+          string,
+          { readonly oldValue?: unknown; readonly newValue?: unknown }
+        >,
+        areaName: string,
+      ) => void)
+    | undefined;
   const documentListeners = new Map<string, Listener[]>();
   const requestPermission = vi.fn().mockResolvedValue(true);
   const clipboardWriteText = vi.fn().mockResolvedValue(undefined);
@@ -533,6 +542,13 @@ async function installSidepanel(options: {
         ],
       ),
     },
+    storage: {
+      onChanged: {
+        addListener: vi.fn((listener) => {
+          onStorageChanged = listener;
+        }),
+      },
+    },
   });
 
   await import("../src/sidepanel.js");
@@ -564,6 +580,13 @@ async function installSidepanel(options: {
     onMessage,
     requestPermission,
     sendMessage,
+    storageChanged: (
+      changes: Record<
+        string,
+        { readonly oldValue?: unknown; readonly newValue?: unknown }
+      >,
+      areaName = "local",
+    ) => onStorageChanged?.(changes, areaName),
   };
 }
 
@@ -754,6 +777,33 @@ describe("side-panel screenshot clipboard fallback", () => {
         volume: 0,
         verbosity: "normal",
       })
+    );
+  });
+
+  it("updates speech controls when local storage changes", async () => {
+    const { elements, sendMessage, storageChanged } = await installSidepanel({
+      speechSettings: {
+        rate: 1,
+        volume: 1,
+        verbosity: "normal",
+      },
+    });
+    await vi.waitFor(() =>
+      expect(elements["speech-rate-value"].textContent).toBe("1.0×")
+    );
+    sendMessage.mockClear();
+
+    storageChanged({
+      speechRate: { oldValue: 1, newValue: 1.25 },
+      speechVolume: { oldValue: 1, newValue: 0.8 },
+      responseVerbosity: { oldValue: "normal", newValue: "brief" },
+    });
+
+    expect(elements["speech-rate-value"].textContent).toBe("1.25×");
+    expect(elements["speech-volume-value"].textContent).toBe("80%");
+    expect(elements["response-verbosity"].value).toBe("brief");
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "set-speech-settings" }),
     );
   });
 

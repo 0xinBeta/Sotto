@@ -228,6 +228,29 @@ export interface ScreenQuestionServices {
   }): Promise<ScreenQuestionResult>;
 }
 
+export type SpeechSettingsVerbosity = "normal" | "brief";
+
+export interface SpeechSettingsVoice {
+  readonly id: string;
+  readonly label: string;
+  readonly accent: "US" | "GB";
+}
+
+export interface SpeechSettingsActionState {
+  readonly rate: number;
+  readonly volume: number;
+  readonly verbosity: SpeechSettingsVerbosity;
+  readonly voices: readonly SpeechSettingsVoice[];
+}
+
+export interface SpeechSettingsActionServices {
+  get(): Promise<SpeechSettingsActionState>;
+  setRate(rate: number): Promise<void>;
+  setVolume(volume: number): Promise<void>;
+  setVoice(voiceId: string): Promise<void>;
+  setVerbosity(verbosity: SpeechSettingsVerbosity): Promise<void>;
+}
+
 export interface ActionCatalog {
   list(): readonly ActionDefinition[];
 }
@@ -249,6 +272,8 @@ export interface ActionContext {
   readonly dictation?: DictationActionServices;
   /** Worker-owned bridge from a visible-tab image to an isolated screen model. */
   readonly screen?: ScreenQuestionServices;
+  /** Worker-owned access to the closed set of speech settings. */
+  readonly settings?: SpeechSettingsActionServices;
   /** Registry metadata for actions that present command help. */
   readonly actionCatalog?: ActionCatalog;
 }

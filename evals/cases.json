@@ -2215,5 +2215,82 @@
     "transcript": "show keyboard shortcuts for macOS",
     "negativeFor": "help",
     "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "settings-rate-slower-01",
+    "transcript": "speak slower",
+    "expected": { "action": "settings", "operation": "rate-slower" }
+  },
+  {
+    "id": "settings-rate-faster-01",
+    "transcript": "speak faster",
+    "expected": { "action": "settings", "operation": "rate-faster" }
+  },
+  {
+    "id": "settings-rate-normal-01",
+    "transcript": "normal speed",
+    "expected": { "action": "settings", "operation": "rate-normal" }
+  },
+  {
+    "id": "settings-volume-quieter-01",
+    "transcript": "quieter",
+    "expected": { "action": "settings", "operation": "volume-quieter" }
+  },
+  {
+    "id": "settings-volume-louder-01",
+    "transcript": "louder",
+    "expected": { "action": "settings", "operation": "volume-louder" }
+  },
+  {
+    "id": "settings-volume-full-01",
+    "transcript": "full volume",
+    "expected": { "action": "settings", "operation": "volume-full" }
+  },
+  {
+    "id": "settings-voice-accent-01",
+    "transcript": "switch to the British voice",
+    "expected": { "action": "settings", "operation": "voice", "target": "British" }
+  },
+  {
+    "id": "settings-voice-name-01",
+    "transcript": "use the Emma voice",
+    "expected": { "action": "settings", "operation": "voice", "target": "Emma" }
+  },
+  {
+    "id": "settings-verbosity-brief-01",
+    "transcript": "be brief",
+    "expected": { "action": "settings", "operation": "verbosity-brief" }
+  },
+  {
+    "id": "settings-verbosity-normal-01",
+    "transcript": "be normal",
+    "expected": { "action": "settings", "operation": "verbosity-normal" }
+  },
+  {
+    "id": "settings-negative-01",
+    "transcript": "turn up the heat",
+    "negativeFor": "settings",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "settings-negative-02",
+    "transcript": "make a note to speak faster tomorrow",
+    "negativeFor": "settings",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "create", "body": "Speak faster tomorrow" }
+  },
+  {
+    "id": "settings-negative-03",
+    "transcript": "search the web for British voice actors",
+    "negativeFor": "settings",
+    "confusable": true,
+    "expected": { "action": "navigate", "operation": "search", "query": "British voice actors" }
+  },
+  {
+    "id": "settings-negative-04",
+    "transcript": "set the video volume to full",
+    "negativeFor": "settings",
+    "expected": { "action": "unknown" }
   }
 ]

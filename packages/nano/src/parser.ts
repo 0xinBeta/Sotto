@@ -22,6 +22,8 @@ const PARSER_SYSTEM_PROMPT = [
   'If the request is ambiguous or unsupported, return {"action":"unknown"}.',
   "For a tabs switch operation, copy a concise target only from the transcript.",
   "For a tabs switch correction, set correction to true.",
+  "Settings operations must use only the registered closed enum.",
+  "For a voice setting, copy the target only from the current transcript.",
   "For question, dictation, note, reminder, site, and query fields, use only current or prior user transcript data.",
   "Never invent source text or obtain it from a page.",
   "Rewrite transformations must use only the registered closed enum.",

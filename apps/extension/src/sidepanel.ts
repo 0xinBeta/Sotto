@@ -36,6 +36,10 @@ import {
   clampSpeechVolume,
   DEFAULT_SPEECH_SETTINGS,
   isResponseVerbosity,
+  normalizeSpeechSettings,
+  RESPONSE_VERBOSITY_KEY,
+  SPEECH_RATE_KEY,
+  SPEECH_VOLUME_KEY,
   type SpeechSettings,
 } from "./speech-settings.js";
 import {
@@ -1007,7 +1011,7 @@ function currentSpeechSettings(): SpeechSettings {
 function showSpeechSettings(settings: SpeechSettings): void {
   const rate = clampSpeechRate(settings.rate);
   const volume = clampSpeechVolume(settings.volume);
-  const rateText = rate.toFixed(1);
+  const rateText = rate.toFixed(2).replace(/0$/u, "");
   const volumePercent = Math.round(volume * 100);
   speechRate.value = String(rate);
   speechRateValue.value = `${rateText}×`;
@@ -1068,6 +1072,28 @@ async function loadSpeechSettings(): Promise<void> {
     appendLog(t("logSpeechSettings"), t("speechSettingsUnavailable"));
   }
 }
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local") return;
+  if (
+    changes[SPEECH_RATE_KEY] === undefined &&
+    changes[SPEECH_VOLUME_KEY] === undefined &&
+    changes[RESPONSE_VERBOSITY_KEY] === undefined
+  ) {
+    return;
+  }
+  const current = currentSpeechSettings();
+  showSpeechSettings(
+    normalizeSpeechSettings({
+      [SPEECH_RATE_KEY]:
+        changes[SPEECH_RATE_KEY]?.newValue ?? current.rate,
+      [SPEECH_VOLUME_KEY]:
+        changes[SPEECH_VOLUME_KEY]?.newValue ?? current.volume,
+      [RESPONSE_VERBOSITY_KEY]:
+        changes[RESPONSE_VERBOSITY_KEY]?.newValue ?? current.verbosity,
+    }),
+  );
+});
 
 copyDiagnosticReport.addEventListener("click", async () => {
   copyDiagnosticReport.disabled = true;

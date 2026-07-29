@@ -81,6 +81,34 @@ describe("PremiumTtsRouter", () => {
     );
   });
 
+  it("uses a new voice for the next confirmation", async () => {
+    const system = systemHarness();
+    let router!: PremiumTtsRouter;
+    const request = vi.fn(async (message: PremiumTtsRequest) => {
+      if (message.type !== "premium-speak") return;
+      queueMicrotask(() =>
+        router.notifyFirstAudio(message.utteranceId ?? "")
+      );
+    });
+    router = new PremiumTtsRouter({ system, request });
+    router.updateStatus({
+      state: "ready",
+      enabled: true,
+      voice: "af_heart",
+    });
+
+    router.setVoice("bf_emma");
+    await router.speak("This is my voice now.");
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "premium-speak",
+        text: "This is my voice now.",
+        voice: "bf_emma",
+      }),
+    );
+  });
+
   it("uses system TTS for every sentence when the ready engine is toggled off", async () => {
     const system = systemHarness();
     const request = vi.fn().mockResolvedValue(undefined);

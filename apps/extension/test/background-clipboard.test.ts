@@ -934,6 +934,83 @@ describe("background screenshot clipboard injection", () => {
     );
   });
 
+  it("applies voice settings before it routes the confirmation", async () => {
+    worker.route.mockImplementation(
+      async (
+        _command: unknown,
+        context: {
+          readonly settings: {
+            get(): Promise<{
+              readonly voices: readonly {
+                readonly id: string;
+                readonly accent: string;
+              }[];
+            }>;
+            setRate(rate: number): Promise<void>;
+            setVolume(volume: number): Promise<void>;
+            setVoice(voiceId: string): Promise<void>;
+            setVerbosity(verbosity: "normal" | "brief"): Promise<void>;
+          };
+        },
+      ) => {
+        const settings = await context.settings.get();
+        expect(settings.voices).toContainEqual(
+          expect.objectContaining({ id: "bf_emma", accent: "GB" }),
+        );
+        await context.settings.setRate(1.25);
+        await context.settings.setVolume(0.8);
+        await context.settings.setVerbosity("brief");
+        await context.settings.setVoice("bf_emma");
+        return { spoken: "This is my voice now." };
+      },
+    );
+    const harness = await installBackground({
+      id: 6,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "use the Emma voice",
+        command: {
+          action: "settings",
+          operation: "voice",
+          target: "Emma",
+        },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "This is my voice now." },
+    });
+
+    expect(harness.storageValues).toMatchObject({
+      speechRate: 1.25,
+      speechVolume: 0.8,
+      responseVerbosity: "brief",
+    });
+    const voiceCall = harness.sendMessage.mock.calls.findIndex(
+      ([message]) =>
+        message.target === "offscreen" &&
+        message.type === "set-premium-tts-voice",
+    );
+    const confirmationCall = harness.sendMessage.mock.calls.findIndex(
+      ([message]) =>
+        message.target === "offscreen" &&
+        message.type === "action-result",
+    );
+    expect(voiceCall).toBeGreaterThanOrEqual(0);
+    expect(confirmationCall).toBeGreaterThan(voiceCall);
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-result",
+        verbosity: "brief",
+        result: { spoken: "This is my voice now." },
+      }),
+    );
+  });
+
   it("suppresses speech and keeps the spoken line in the log", async () => {
     const harness = await installBackground(
       { id: 60, url: "https://example.com/current" },

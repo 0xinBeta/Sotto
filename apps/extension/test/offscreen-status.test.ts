@@ -591,6 +591,13 @@ describe("offscreen fail-soft status", () => {
     ).resolves.toEqual({ ok: true });
     expect(harness.values.premiumTtsVoice).toBe("bf_emma");
     expect(premium.setVoice).toHaveBeenCalledWith("bf_emma");
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "premium-tts-state",
+        voice: "bf_emma",
+      }),
+    );
 
     await expect(
       harness.message({
@@ -1354,6 +1361,35 @@ describe("offscreen fail-soft status", () => {
       text: "Zoom one hundred forty percent.",
       heard: "zoom in",
       did: "Zoom one hundred forty percent.",
+      timings: { input: "voice" },
+    });
+  });
+
+  it("speaks the settings confirmation without responder changes", async () => {
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockClear();
+    nano.respondOneSentence.mockReset();
+
+    await expect(
+      harness.message({
+        type: "action-result",
+        transcript: "be brief",
+        command: {
+          action: "settings",
+          operation: "verbosity-brief",
+        },
+        result: { spoken: "Brief mode is on." },
+        verbosity: "brief",
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(nano.respondOneSentence).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "speak",
+      text: "Brief mode is on.",
+      heard: "be brief",
+      did: "Brief mode is on.",
       timings: { input: "voice" },
     });
   });

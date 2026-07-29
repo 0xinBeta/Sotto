@@ -91,6 +91,19 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(4);
   });
 
+  it("keeps twelve settings cases, including the heat negative", () => {
+    const settingsCases = cases.filter((testCase) =>
+      testCase.expected.action === "settings" ||
+      ("negativeFor" in testCase && testCase.negativeFor === "settings")
+    );
+    expect(settingsCases.length).toBeGreaterThanOrEqual(12);
+    expect(
+      settingsCases.find(
+        (testCase) => testCase.transcript === "turn up the heat",
+      )?.expected,
+    ).toEqual({ action: "unknown" });
+  });
+
   it("keeps notes management and confirmation phrase cases", () => {
     const management = cases.filter((testCase) =>
       testCase.id.startsWith("notes-read-") ||

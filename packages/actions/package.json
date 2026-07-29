@@ -65,6 +65,10 @@
     "./repeat": {
       "types": "./dist/repeat/index.d.ts",
       "import": "./dist/repeat/index.js"
+    },
+    "./settings": {
+      "types": "./dist/settings/index.d.ts",
+      "import": "./dist/settings/index.js"
     }
   },
   "files": [

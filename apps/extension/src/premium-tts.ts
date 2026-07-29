@@ -153,6 +153,10 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     return this.#playbackState;
   }
 
+  setVoice(voice: KokoroVoiceId): void {
+    this.#voice = voice;
+  }
+
   updateStatus(status: PremiumTtsStatus): void {
     const wasReady = this.#state === "ready";
     const wasEnabled = this.#enabled;

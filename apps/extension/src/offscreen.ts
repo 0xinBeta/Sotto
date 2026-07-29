@@ -2231,6 +2231,7 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
     command.action !== "help" &&
     command.action !== "page-control" &&
     command.action !== "ask-screen" &&
+    command.action !== "settings" &&
     (verbosity === "normal" || selectedLine.key !== undefined);
   const spoken =
     command.action === "unknown"

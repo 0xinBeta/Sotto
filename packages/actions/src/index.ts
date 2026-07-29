@@ -9,6 +9,7 @@ import playbackAction from "./playback/index.js";
 import quietModeAction from "./quiet-mode/index.js";
 import repeatAction from "./repeat/index.js";
 import screenshotAction from "./screenshot/index.js";
+import settingsAction from "./settings/index.js";
 import summarizeAction from "./summarize/index.js";
 import tabsAction from "./tabs/index.js";
 import translateAction from "./translate/index.js";
@@ -87,6 +88,23 @@ export {
   repeatSchema,
 } from "./repeat/index.js";
 export type { RepeatCommand } from "./repeat/index.js";
+export {
+  default as settingsAction,
+  findVoiceMatch,
+  MAX_SPEECH_RATE,
+  MAX_SPEECH_VOLUME,
+  MIN_SPEECH_RATE,
+  MIN_SPEECH_VOLUME,
+  nextSpeechRate,
+  nextSpeechVolume,
+  settingsSchema,
+  SPEECH_RATE_STEP,
+  SPEECH_VOLUME_STEP,
+} from "./settings/index.js";
+export type {
+  SettingsCommand,
+  SettingsOperation,
+} from "./settings/index.js";
 export { default as screenshotAction } from "./screenshot/index.js";
 export type {
   ScreenshotCommand,
@@ -137,6 +155,7 @@ export const actions = [
   pageControlAction,
   playbackAction,
   quietModeAction,
+  settingsAction,
   repeatAction,
   typeAction,
   dictationAction,

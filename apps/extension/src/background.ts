@@ -40,6 +40,7 @@ import {
 } from "@sotto/tts";
 import {
   isKokoroVoiceId,
+  KOKORO_VOICES,
   type KokoroVoiceId,
 } from "@sotto/tts/kokoro-voices";
 import {
@@ -179,6 +180,31 @@ function actionContext(): ActionContext {
     screen: screenQuestionServices,
     type: editableActionServices,
     dictation: dictationActionServices,
+    settings: {
+      get: async () => ({
+        ...await speechSettings.get(),
+        voices: KOKORO_VOICES,
+      }),
+      setRate: async (rate) => {
+        await speechSettings.update({ rate });
+      },
+      setVolume: async (volume) => {
+        await speechSettings.update({ volume });
+      },
+      setVoice: async (voiceId) => {
+        if (!isKokoroVoiceId(voiceId)) {
+          throw new TypeError("A valid premium voice is required");
+        }
+        await sendOffscreen({
+          type: "set-premium-tts-voice",
+          voice: voiceId,
+        });
+        ttsRouter.setVoice(voiceId);
+      },
+      setVerbosity: async (verbosity) => {
+        await speechSettings.update({ verbosity });
+      },
+    },
     actionCatalog: actionRegistry,
   };
 }
