@@ -48,6 +48,7 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("quiet-mode")).toContain(
       'aria-labelledby="quiet-mode-label"',
     );
+    expect(openingTag("live-transcript-preview")).toContain('role="switch"');
     expect(openingTag("session-history-enabled")).toContain('role="switch"');
     expect(openingTag("session-history-enabled")).toContain(
       'aria-describedby="session-history-note"',
@@ -113,6 +114,9 @@ describe("side-panel accessibility structure", () => {
     );
     expect(panelMarkup).toMatch(
       /<label class="voice-switch" for="premium-stt-enabled">/,
+    );
+    expect(panelMarkup).toMatch(
+      /<label class="voice-switch" for="live-transcript-preview">/,
     );
     expect(panelMarkup).toMatch(
       /class="quiet-switch"[\s\S]*for="quiet-mode"/,
@@ -210,5 +214,14 @@ describe("side-panel preference styles", () => {
     );
     expect(recoveryStyles).toContain("display: block");
     expect(recoveryStyles).toContain("color: var(--paper-dim)");
+  });
+
+  it("dims and italicizes provisional transcripts", () => {
+    const partialStyles = panelStyles.slice(
+      panelStyles.indexOf(".transcript-partial {"),
+      panelStyles.indexOf(".recovery-hint {"),
+    );
+    expect(partialStyles).toContain("color: var(--paper-dim)");
+    expect(partialStyles).toContain("font-style: italic");
   });
 });

@@ -87,7 +87,14 @@ describe("PremiumSttManager", () => {
       backend: "webgpu",
     });
     expect(premium.transcribe).toHaveBeenCalledTimes(1);
-    expect(tiny.dispose).toHaveBeenCalledTimes(1);
+    expect(tiny.dispose).not.toHaveBeenCalled();
+    expect(manager.tinyReady).toBe(true);
+    await expect(
+      manager.transcribeTiny(new Float32Array([0.1])),
+    ).resolves.toBe("tiny");
+    await expect(
+      manager.transcribe(new Float32Array([0.1])),
+    ).resolves.toBe("ready");
   });
 
   it("falls back atomically to tiny when the activation self-test is blank", async () => {

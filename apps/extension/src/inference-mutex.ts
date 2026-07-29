@@ -30,6 +30,14 @@ export class InferenceMutex {
     return this.#pending;
   }
 
+  tryRun<T>(
+    task: () => Promise<T>,
+    options: InferenceRunOptions = {},
+  ): Promise<T> | undefined {
+    if (this.#pending !== 0 || options.signal?.aborted) return undefined;
+    return this.run(task, options);
+  }
+
   run<T>(
     task: () => Promise<T>,
     options: InferenceRunOptions = {},

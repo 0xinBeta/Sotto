@@ -161,6 +161,9 @@
   "responseBrief": {
     "message": "Brief"
   },
+  "liveTranscriptPreview": {
+    "message": "Live transcript preview"
+  },
   "keepSessionHistory": {
     "message": "Keep session history"
   },

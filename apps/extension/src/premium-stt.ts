@@ -1,6 +1,7 @@
 import type {
   SttEngine,
   SttProgress,
+  SttTranscriptionOptions,
 } from "@sotto/stt";
 
 import {
@@ -189,6 +190,20 @@ export class PremiumSttManager {
     };
   }
 
+  get tinyReady(): boolean {
+    return this.#tinyReady;
+  }
+
+  transcribeTiny(
+    audio: Float32Array,
+    options: SttTranscriptionOptions = {},
+  ): Promise<string> {
+    if (!this.#tinyReady) {
+      return Promise.reject(new Error("Moonshine tiny is not ready"));
+    }
+    return this.#tiny.transcribe(audio, options);
+  }
+
   async initializeDefault(): Promise<void> {
     await this.#ensureTiny();
     this.#emitStatus();
@@ -229,7 +244,6 @@ export class PremiumSttManager {
         this.#premium
       ) {
         this.#state = "active";
-        await this.#disposeTinyIfActive(settingGeneration);
       }
     } else {
       await this.#ensureTiny();
@@ -393,7 +407,6 @@ export class PremiumSttManager {
       if (!this.#hasStoredEnabled) this.#enabled = true;
       if (this.#enabled) {
         this.#setState("active");
-        await this.#disposeTinyIfActive(this.#settingGeneration);
       }
       if (previous && previous !== loaded) {
         await this.#runInference(() => previous.dispose());
@@ -446,27 +459,6 @@ export class PremiumSttManager {
       await pending;
     } finally {
       if (this.#tinyTransition === pending) this.#tinyTransition = undefined;
-    }
-  }
-
-  async #disposeTinyIfActive(settingGeneration: number): Promise<void> {
-    if (this.#tinyTransition) {
-      await this.#tinyTransition.catch(() => undefined);
-      return this.#disposeTinyIfActive(settingGeneration);
-    }
-    if (!this.#enabled || settingGeneration !== this.#settingGeneration) return;
-    if (!this.#tinyReady) return;
-    const pending = this.#runInference(() => this.#tiny.dispose()).then(() => {
-      this.#tinyReady = false;
-    });
-    this.#tinyTransition = pending;
-    try {
-      await pending;
-    } finally {
-      if (this.#tinyTransition === pending) this.#tinyTransition = undefined;
-    }
-    if (!this.#enabled || settingGeneration !== this.#settingGeneration) {
-      await this.#ensureTiny();
     }
   }
 

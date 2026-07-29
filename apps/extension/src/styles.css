@@ -1123,6 +1123,11 @@ progress::-webkit-progress-value {
   color: var(--transcript-placeholder);
 }
 
+.transcript-partial {
+  color: var(--paper-dim);
+  font-style: italic;
+}
+
 .recovery-hint {
   display: block;
   margin-top: 5px;

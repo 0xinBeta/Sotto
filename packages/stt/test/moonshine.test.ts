@@ -12,6 +12,15 @@ const transformers = vi.hoisted(() => ({
     },
     useBrowserCache: false,
   },
+  InterruptableStoppingCriteria: class InterruptableStoppingCriteria {
+    interrupted = false;
+    interrupt(): void {
+      this.interrupted = true;
+    }
+    reset(): void {
+      this.interrupted = false;
+    }
+  },
   pipeline: vi.fn(),
 }));
 
@@ -137,9 +146,44 @@ describe("MoonshineEngine fail-soft initialization", () => {
 
     const audio = new Float32Array(16_000);
     await expect(engine.transcribe(audio)).resolves.toBe("base result");
-    expect(transcriber).toHaveBeenCalledWith(audio, {
+    expect(transcriber).toHaveBeenCalledWith(audio, expect.objectContaining({
       max_new_tokens: 15,
-    });
+    }));
+  });
+
+  it("interrupts generation when transcription is cancelled", async () => {
+    vi.stubGlobal("navigator", {});
+    let resolve!: (value: { text: string }) => void;
+    let stoppingCriteria:
+      | InstanceType<typeof transformers.InterruptableStoppingCriteria>
+      | undefined;
+    const transcriber = vi.fn(
+      (
+        _audio: Float32Array,
+        options: {
+          readonly stopping_criteria:
+            InstanceType<typeof transformers.InterruptableStoppingCriteria>;
+        },
+      ) => {
+        stoppingCriteria = options.stopping_criteria;
+        return new Promise<{ text: string }>((done) => {
+          resolve = done;
+        });
+      },
+    );
+    transformers.pipeline.mockResolvedValue(transcriber);
+    const engine = new MoonshineEngine();
+    await engine.init();
+    const controller = new AbortController();
+    const pending = engine.transcribe(
+      new Float32Array([0.25]),
+      { signal: controller.signal },
+    );
+
+    controller.abort(new DOMException("Final transcription", "AbortError"));
+    expect(stoppingCriteria?.interrupted).toBe(true);
+    resolve({ text: "partial" });
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it.each([

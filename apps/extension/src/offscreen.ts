@@ -66,11 +66,17 @@ import {
 } from "./premium-stt.js";
 import { loadSttSelfTestPcm } from "./stt-self-test.js";
 import {
+  isPlausibleSttText,
   SpeechContextRing,
   transcribeWithSttGuards,
   type SpeechRetryAudio,
   type SttDiagnostic,
 } from "./stt-guards.js";
+import {
+  LIVE_TRANSCRIPT_PREVIEW_KEY,
+  LiveTranscriptPreview,
+  liveTranscriptPreviewEnabled,
+} from "./live-transcript-preview.js";
 import {
   isExchangeTimings,
   type ExchangeTimings,
@@ -164,6 +170,8 @@ let sttReady: Promise<void> | undefined;
 let premiumStt: PremiumSttManager | undefined;
 let premiumSttStatus: PremiumSttStatus | undefined;
 let premiumSttSettingsReady: Promise<void> | undefined;
+let liveTranscriptPreviewAvailable = false;
+let liveTranscriptPreviewSetting = false;
 let activeModelTask: AbortController | undefined;
 let premiumTts: KokoroTtsEngine | undefined;
 let premiumTtsState: PremiumTtsState = "absent";
@@ -330,6 +338,24 @@ async function sendPanel(message: Record<string, unknown>): Promise<void> {
     // A panel is not required for hotkey-only use.
   }
 }
+
+const liveTranscriptPreview = new LiveTranscriptPreview({
+  decode(audio, signal) {
+    if (!premiumStt?.tinyReady) return undefined;
+    return inferenceMutex.tryRun(
+      () => premiumStt!.transcribeTiny(audio, { signal }),
+      { priority: "background", signal },
+    );
+  },
+  publish(text, audioSamples) {
+    const partial = cleanTranscript(text);
+    if (!isPlausibleSttText(partial, audioSamples)) return;
+    void sendPanel({ type: "partial-transcript", text: partial });
+  },
+  onError(error) {
+    console.warn("Sotto partial transcription failed", error);
+  },
+});
 
 async function askWorker<T>(
   message: Record<string, unknown>,
@@ -544,6 +570,7 @@ async function publishStatus(error?: string): Promise<void> {
   });
   await publishPremiumStatus();
   await publishPremiumSttStatus();
+  await publishLiveTranscriptPreviewStatus();
   await publishModelInventory();
 }
 
@@ -643,6 +670,14 @@ async function publishPremiumSttStatus(): Promise<void> {
   queueModelInventoryPublish();
 }
 
+async function publishLiveTranscriptPreviewStatus(): Promise<void> {
+  await sendPanel({
+    type: "live-transcript-preview-state",
+    available: liveTranscriptPreviewAvailable,
+    enabled: liveTranscriptPreviewSetting,
+  });
+}
+
 const STT_DIAGNOSTIC_MESSAGES: Record<SttDiagnostic, string> = {
   "vad-rejected":
     "Speech was too short or quiet. Keep holding the key through the full command.",
@@ -719,6 +754,7 @@ async function ensurePremiumSttSettings(): Promise<void> {
           PREMIUM_STT_DOWNLOADED_TIERS_KEY,
           PREMIUM_STT_ENABLED_KEY,
           PREMIUM_STT_TIER_KEY,
+          LIVE_TRANSCRIPT_PREVIEW_KEY,
         ]);
       }
     } catch (error) {
@@ -736,6 +772,12 @@ async function ensurePremiumSttSettings(): Promise<void> {
     const downloaded = downloadedByTier ||
       (stored[PREMIUM_STT_DOWNLOADED_KEY] === true &&
         stored[PREMIUM_STT_TIER_KEY] === tier);
+    liveTranscriptPreviewAvailable = tier === "parakeet";
+    liveTranscriptPreviewSetting = liveTranscriptPreviewEnabled(
+      liveTranscriptPreviewAvailable,
+      stored[LIVE_TRANSCRIPT_PREVIEW_KEY],
+    );
+    liveTranscriptPreview.setEnabled(liveTranscriptPreviewSetting);
     premiumStt = new PremiumSttManager({
       tiny: tinyStt,
       tier,
@@ -2077,18 +2119,22 @@ async function startListening(): Promise<void> {
       },
       onSpeechStart() {
         speechContext.onSpeechStart();
+        liveTranscriptPreview.start();
         if (dictationState === "active") dictationSilenceTimer.reset();
         void sendPanel({ type: "speech-start" });
       },
       onVADMisfire() {
         speechContext.onVADMisfire();
+        liveTranscriptPreview.finish();
         void sendPanel({ type: "speech-end" });
         void publishSttDiagnostic("vad-rejected", micLevelPeak);
       },
       onFrameProcessed(_probabilities, frame) {
         speechContext.onFrame(frame);
+        liveTranscriptPreview.addFrame(frame);
       },
       onSpeechEnd(audio) {
+        liveTranscriptPreview.finish();
         cancelPipelineWarmup();
         const sttStartedAt = performance.now();
         const input = speechContext.onSpeechEnd(audio);
@@ -2123,6 +2169,7 @@ async function startListening(): Promise<void> {
 
 async function stopListeningNow(): Promise<void> {
   stopTimer = undefined;
+  liveTranscriptPreview.cancel();
   const activeVad = vad;
   vad = undefined;
   listening = false;
@@ -2373,6 +2420,21 @@ async function handleOffscreenMessage(
       await persistPremiumSttStatus();
       await publishPremiumSttStatus();
       return;
+    case "set-live-transcript-preview-enabled":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError("A live transcript preview setting is required");
+      }
+      await ensurePremiumSttSettings();
+      liveTranscriptPreviewSetting =
+        liveTranscriptPreviewAvailable && message.enabled;
+      liveTranscriptPreview.setEnabled(liveTranscriptPreviewSetting);
+      if (liveTranscriptPreviewAvailable) {
+        await chrome.storage.local.set({
+          [LIVE_TRANSCRIPT_PREVIEW_KEY]: liveTranscriptPreviewSetting,
+        });
+      }
+      await publishLiveTranscriptPreviewStatus();
+      return;
     case "premium-speak":
       await speakPremium(message);
       return;
@@ -2538,6 +2600,7 @@ chrome.runtime.onMessage.addListener(
 
 window.addEventListener("unload", () => {
   cancelActiveModelTask();
+  liveTranscriptPreview.cancel();
   dictationSilenceTimer.clear();
   followUpMemory.clear();
   stopMicLevelMeter();

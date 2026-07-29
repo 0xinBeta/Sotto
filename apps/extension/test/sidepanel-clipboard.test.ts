@@ -51,6 +51,19 @@ class FakeElement {
     this.children.length = 0;
   }
 
+  get classList(): { toggle(name: string, force?: boolean): boolean } {
+    return {
+      toggle: (name, force) => {
+        const names = new Set(this.className.split(/\s+/u).filter(Boolean));
+        const add = force ?? !names.has(name);
+        if (add) names.add(name);
+        else names.delete(name);
+        this.className = [...names].join(" ");
+        return add;
+      },
+    };
+  }
+
   addEventListener(type: string, listener: Listener): void {
     const listeners = this.listeners.get(type) ?? [];
     listeners.push(listener);
@@ -187,6 +200,8 @@ const elementIds = [
   "action-log",
   "action-log-announcer",
   "clear-log",
+  "live-transcript-preview-setting",
+  "live-transcript-preview",
   "session-history-enabled",
   "session-history-panel",
   "session-history-list",
@@ -335,6 +350,7 @@ async function installSidepanel(options: {
   elements["reading-controls"].hidden = true;
   elements["latency-readout"].hidden = true;
   elements["settings-backup-confirm"].hidden = true;
+  elements["live-transcript-preview-setting"].hidden = true;
   elements["session-history-panel"].hidden = true;
   const emptyLog = new FakeElement("li");
   emptyLog.className = "empty-log";
@@ -1186,6 +1202,58 @@ describe("side-panel screenshot clipboard fallback", () => {
     });
     expect(elements["mic-meter"].dataset.state).toBe("idle");
     expect(elements["mic-meter-fill"].style.transform).toBe("scaleX(0)");
+  });
+
+  it("shows provisional text without live announcements, then replaces it", async () => {
+    const { elements, onMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "partial-transcript",
+      text: "open the",
+    });
+    expect(elements.transcript.textContent).toBe("open the");
+    expect(elements.transcript.className).toContain("transcript-partial");
+    expect(elements.transcript.getAttribute("aria-live")).toBe("off");
+
+    onMessage({
+      target: "sidepanel",
+      type: "transcript",
+      text: "open the calendar",
+    });
+    expect(elements.transcript.textContent).toBe("open the calendar");
+    expect(elements.transcript.className).not.toContain("transcript-partial");
+    expect(elements.transcript.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("shows and saves the WebGPU live transcript switch", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+
+    onMessage({
+      target: "sidepanel",
+      type: "live-transcript-preview-state",
+      available: true,
+      enabled: true,
+    });
+    expect(elements["live-transcript-preview-setting"].hidden).toBe(false);
+    expect(elements["live-transcript-preview"].checked).toBe(true);
+
+    elements["live-transcript-preview"].checked = false;
+    await elements["live-transcript-preview"].emit("change");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "set-live-transcript-preview-enabled",
+      enabled: false,
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "live-transcript-preview-state",
+      available: false,
+      enabled: false,
+    });
+    expect(elements["live-transcript-preview-setting"].hidden).toBe(true);
+    expect(elements["live-transcript-preview"].disabled).toBe(true);
   });
 
   it("updates the meter for assistive technology at most twice per second", async () => {

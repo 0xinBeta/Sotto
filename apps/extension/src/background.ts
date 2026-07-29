@@ -2778,6 +2778,14 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         type: "set-premium-stt-enabled",
         enabled: message.enabled,
       });
+    case "set-live-transcript-preview-enabled":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError("A live transcript preview setting is required");
+      }
+      return sendOffscreen({
+        type: "set-live-transcript-preview-enabled",
+        enabled: message.enabled,
+      });
     case "premium-first-audio":
       if (
         typeof message.utteranceId !== "string" ||

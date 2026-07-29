@@ -11,8 +11,15 @@ export interface SttProgress {
 
 export type SttProgressCallback = (progress: SttProgress) => void;
 
+export interface SttTranscriptionOptions {
+  readonly signal?: AbortSignal;
+}
+
 export interface SttEngine {
   init(onProgress?: SttProgressCallback): Promise<void>;
-  transcribe(audio: Float32Array): Promise<string>;
+  transcribe(
+    audio: Float32Array,
+    options?: SttTranscriptionOptions,
+  ): Promise<string>;
   dispose(): Promise<void>;
 }

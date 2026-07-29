@@ -14,4 +14,5 @@ export type {
   SttEngine,
   SttProgress,
   SttProgressCallback,
+  SttTranscriptionOptions,
 } from "./types.js";

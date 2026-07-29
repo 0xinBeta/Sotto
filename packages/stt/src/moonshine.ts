@@ -1,9 +1,14 @@
-import { env, pipeline } from "@huggingface/transformers";
+import {
+  env,
+  InterruptableStoppingCriteria,
+  pipeline,
+} from "@huggingface/transformers";
 
 import type {
   SttEngine,
   SttProgress,
   SttProgressCallback,
+  SttTranscriptionOptions,
 } from "./types.js";
 
 const WASM_ASSET_PATH = "assets/ort-transformers/";
@@ -53,7 +58,10 @@ interface MoonshineOutput {
 interface MoonshineTranscriber {
   (
     audio: Float32Array,
-    options?: { readonly max_new_tokens?: number },
+    options?: {
+      readonly max_new_tokens?: number;
+      readonly stopping_criteria?: InterruptableStoppingCriteria;
+    },
   ): Promise<MoonshineOutput>;
   dispose?: () => void | Promise<void>;
 }
@@ -114,7 +122,10 @@ export class MoonshineEngine implements SttEngine {
     }
   }
 
-  async transcribe(audio: Float32Array): Promise<string> {
+  async transcribe(
+    audio: Float32Array,
+    options: SttTranscriptionOptions = {},
+  ): Promise<string> {
     if (!this.#transcriber) {
       throw new Error("MoonshineEngine must be initialized before transcription");
     }
@@ -133,13 +144,28 @@ export class MoonshineEngine implements SttEngine {
       return "";
     }
 
+    options.signal?.throwIfAborted();
+    const stoppingCriteria = options.signal
+      ? new InterruptableStoppingCriteria()
+      : undefined;
+    const interrupt = () => stoppingCriteria?.interrupt();
+    options.signal?.addEventListener("abort", interrupt, { once: true });
     const durationSeconds = audio.length / 16_000;
-    const output = await this.#transcriber(audio, {
-      max_new_tokens: Math.min(
-        96,
-        Math.ceil(durationSeconds * 6.5) + 8,
-      ),
-    });
+    let output: MoonshineOutput;
+    try {
+      output = await this.#transcriber(audio, {
+        max_new_tokens: Math.min(
+          96,
+          Math.ceil(durationSeconds * 6.5) + 8,
+        ),
+        ...(stoppingCriteria === undefined
+          ? {}
+          : { stopping_criteria: stoppingCriteria }),
+      });
+      options.signal?.throwIfAborted();
+    } finally {
+      options.signal?.removeEventListener("abort", interrupt);
+    }
     if (typeof output?.text !== "string") {
       throw new Error("Moonshine returned an invalid transcription result");
     }

@@ -262,6 +262,99 @@ afterEach(() => {
 });
 
 describe("offscreen fail-soft status", () => {
+  it("disables live transcript preview without WebGPU", async () => {
+    const harness = await installPremiumOffscreen();
+
+    await harness.message({ type: "get-status" });
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "live-transcript-preview-state",
+      available: false,
+      enabled: false,
+    });
+
+    await harness.message({
+      type: "set-live-transcript-preview-enabled",
+      enabled: true,
+    });
+    expect(harness.values.liveTranscriptPreview).toBeUndefined();
+    expect(harness.sendMessage).toHaveBeenLastCalledWith({
+      target: "sidepanel",
+      type: "live-transcript-preview-state",
+      available: false,
+      enabled: false,
+    });
+  });
+
+  it("defaults live transcript preview ON with WebGPU and saves the toggle", async () => {
+    const harness = await installPremiumOffscreen({ webGpu: true });
+
+    await harness.message({ type: "get-status" });
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "live-transcript-preview-state",
+      available: true,
+      enabled: true,
+    });
+
+    await harness.message({
+      type: "set-live-transcript-preview-enabled",
+      enabled: false,
+    });
+    expect(harness.values.liveTranscriptPreview).toBe(false);
+  });
+
+  it("publishes partial speech only to the transcript display", async () => {
+    nano.parseCommand.mockResolvedValue({ action: "unknown" });
+    speech.moonshineTranscribe
+      .mockResolvedValueOnce("open")
+      .mockResolvedValueOnce("open the calendar");
+    const harness = await installPremiumOffscreen({ webGpu: true });
+
+    await harness.message({ type: "start-listening" });
+    await vi.waitFor(() => expect(speech.moonshineInit).toHaveBeenCalled());
+    const vadOptions = vad.create.mock.calls[0]?.[0] as {
+      onSpeechStart(): void;
+      onFrameProcessed(
+        probabilities: Record<string, number>,
+        frame: Float32Array,
+      ): void;
+      onSpeechEnd(audio: Float32Array): void;
+    };
+    vadOptions.onSpeechStart();
+    const frame = new Float32Array(512).fill(0.02);
+    for (let index = 0; index < 19; index += 1) {
+      vadOptions.onFrameProcessed({}, frame);
+    }
+
+    await vi.waitFor(() =>
+      expect(harness.sendMessage).toHaveBeenCalledWith({
+        target: "sidepanel",
+        type: "partial-transcript",
+        text: "open",
+      })
+    );
+    expect(
+      harness.sendMessage.mock.calls.some(
+        ([message]) =>
+          message.target === "worker" &&
+          message.type === "execute-command",
+      ),
+    ).toBe(false);
+    expect(nano.parseCommand).not.toHaveBeenCalled();
+
+    const audio = new Float32Array(16_000).fill(0.02);
+    vadOptions.onSpeechEnd(audio);
+    await vi.waitFor(() =>
+      expect(harness.sendMessage).toHaveBeenCalledWith({
+        target: "sidepanel",
+        type: "transcript",
+        text: "open the calendar",
+      })
+    );
+    expect(nano.parseCommand).toHaveBeenCalledOnce();
+  });
+
   it("serializes screen inference and releases each transported image", async () => {
     const resolvers: Array<
       (value: {

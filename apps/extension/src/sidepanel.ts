@@ -255,6 +255,13 @@ type PanelMessage =
   | { target: "sidepanel"; type: "speech-end" }
   | { target: "sidepanel"; type: "mic-level"; level: number }
   | { target: "sidepanel"; type: "transcript"; text: string }
+  | { target: "sidepanel"; type: "partial-transcript"; text: string }
+  | {
+      target: "sidepanel";
+      type: "live-transcript-preview-state";
+      available: boolean;
+      enabled: boolean;
+    }
   | {
       target: "sidepanel";
       type: "model-progress";
@@ -386,6 +393,14 @@ type PanelMessage =
 
 function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
   switch (message.type) {
+    case "partial-transcript":
+      return isBoundedString(message.text, 2_000, 1);
+    case "live-transcript-preview-state":
+      return (
+        typeof message.available === "boolean" &&
+        typeof message.enabled === "boolean" &&
+        (!message.enabled || message.available)
+      );
     case "quiet-mode-state":
       return typeof message.enabled === "boolean";
     case "action-log":
@@ -719,6 +734,10 @@ const actionLog = requiredElement<HTMLOListElement>("#action-log");
 const actionLogAnnouncer =
   requiredElement<HTMLElement>("#action-log-announcer");
 const clearLog = requiredElement<HTMLButtonElement>("#clear-log");
+const liveTranscriptPreviewSetting =
+  requiredElement<HTMLElement>("#live-transcript-preview-setting");
+const liveTranscriptPreview =
+  requiredElement<HTMLInputElement>("#live-transcript-preview");
 const sessionHistoryEnabled =
   requiredElement<HTMLInputElement>("#session-history-enabled");
 const sessionHistoryPanel =
@@ -1305,13 +1324,25 @@ function showMicLevel(level: number): void {
 function showTranscript(
   text: string,
   errorClass?: RecoveryErrorClass,
+  partial = false,
 ): void {
+  transcript.setAttribute("aria-live", partial ? "off" : "polite");
+  transcript.classList.toggle("transcript-partial", partial);
   renderRecoveryMessage(
     transcript,
     text || t("transcriptPlaceholder"),
     errorClass,
   );
   transcript.dataset.placeholder = String(!text);
+}
+
+function showLiveTranscriptPreviewState(
+  available: boolean,
+  enabled: boolean,
+): void {
+  liveTranscriptPreviewSetting.hidden = !available;
+  liveTranscriptPreview.checked = available && enabled;
+  liveTranscriptPreview.disabled = !available;
 }
 
 function updateReadingSentence(
@@ -2964,6 +2995,20 @@ premiumSttEnabled.addEventListener("change", async () => {
   premiumSttEnabled.disabled = false;
 });
 
+liveTranscriptPreview.addEventListener("change", async () => {
+  const requested = liveTranscriptPreview.checked;
+  liveTranscriptPreview.disabled = true;
+  if (
+    !(await send({
+      type: "set-live-transcript-preview-enabled",
+      enabled: requested,
+    }))
+  ) {
+    liveTranscriptPreview.checked = !requested;
+  }
+  liveTranscriptPreview.disabled = false;
+});
+
 quietModeToggle.addEventListener("change", async () => {
   const requested = quietModeToggle.checked;
   quietModeToggle.disabled = true;
@@ -3142,6 +3187,12 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
         message.error,
       );
       break;
+    case "live-transcript-preview-state":
+      showLiveTranscriptPreviewState(
+        message.available,
+        message.enabled,
+      );
+      break;
     case "model-inventory":
       renderModelInventory(message.rows, message.totalBytes);
       break;
@@ -3186,6 +3237,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       break;
     case "transcript":
       showTranscript(message.text);
+      break;
+    case "partial-transcript":
+      showTranscript(message.text, undefined, true);
       break;
     case "model-progress":
       updateProgress(
