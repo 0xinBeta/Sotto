@@ -3,9 +3,16 @@ import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
+import {
+  assertOrtRuntimeInventory,
+} from "./ort-runtime-inventory.js";
+
 const extensionRoot = import.meta.dirname;
 const vadDist = realpathSync(
   resolve(extensionRoot, "node_modules/@ricky0123/vad-web/dist"),
+);
+const ortVadDist = realpathSync(
+  resolve(extensionRoot, "node_modules/onnxruntime-web/dist"),
 );
 const ortTransformersDist = realpathSync(
   resolve(extensionRoot, "node_modules/onnxruntime-web-transformers/dist"),
@@ -32,16 +39,16 @@ const ortKokoroDist = realpathSync(
   resolve(kokoroTransformers, "../../onnxruntime-web/dist"),
 );
 
-function shareVadOrtRuntime(): Plugin {
+function isolateVadOrtRuntime(): Plugin {
   return {
-    name: "sotto-share-vad-ort-runtime",
+    name: "sotto-isolate-vad-ort-runtime",
     enforce: "pre",
     resolveId(source, importer) {
       if (
         source === "onnxruntime-web/wasm" &&
         importer?.startsWith(vadDist)
       ) {
-        return resolve(ortKokoroDist, "ort.min.mjs");
+        return resolve(ortVadDist, "ort.wasm.min.mjs");
       }
     },
   };
@@ -204,6 +211,28 @@ function verifyWakeModelsNotBundled(): Plugin {
   };
 }
 
+function verifyOrtRuntimeAssets(): Plugin {
+  return {
+    name: "sotto-verify-ort-runtime-assets",
+    closeBundle() {
+      const assetsRoot = resolve(extensionRoot, "dist/assets");
+      const actual = Object.fromEntries(
+        readdirSync(assetsRoot, { withFileTypes: true })
+          .filter(
+            (entry) =>
+              entry.isDirectory() &&
+              entry.name.startsWith("ort-"),
+          )
+          .map((entry) => [
+            entry.name,
+            readdirSync(resolve(assetsRoot, entry.name)),
+          ]),
+      );
+      assertOrtRuntimeInventory(actual);
+    },
+  };
+}
+
 function verifyPremiumEngineChunks(): Plugin {
   const engineModules = {
     kokoro: [
@@ -294,7 +323,7 @@ export default defineConfig({
     conditions: ["onnxruntime-web-use-extern-wasm"],
   },
   plugins: [
-    shareVadOrtRuntime(),
+    isolateVadOrtRuntime(),
     localOrtRuntimeUrls(),
     viteStaticCopy({
       targets: [
@@ -313,9 +342,14 @@ export default defineConfig({
           dest: "assets/vad",
           rename: { stripBase: true },
         },
-        // ORT JS and WASM must stay version-matched. VAD shares Kokoro's
-        // compatible 1.22-dev JSEP runtime; Parakeet needs 1.24.1 JSEP and
-        // Transformers.js 4.2/Moonshine needs 1.26-dev asyncify.
+        // ORT JS and WASM must stay version-matched. VAD and wake use the
+        // isolated 1.22 WASM runtime. Kokoro and Parakeet each need their
+        // pinned JSEP runtime. Transformers.js 4.2/Moonshine needs asyncify.
+        {
+          src: `${ortVadDist}/ort-wasm-simd-threaded.{wasm,mjs}`,
+          dest: "assets/ort-vad",
+          rename: { stripBase: true },
+        },
         {
           src:
             `${ortTransformersDist}/ort-wasm-simd-threaded.asyncify.{wasm,mjs}`,
@@ -337,6 +371,7 @@ export default defineConfig({
     }),
     inlineExtractPageRuntime(),
     verifyPremiumEngineChunks(),
+    verifyOrtRuntimeAssets(),
     verifyWakeModelsNotBundled(),
   ],
   build: {

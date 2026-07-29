@@ -1,0 +1,132 @@
+diff --git a/dist/models/legacy.js b/dist/models/legacy.js
+index 8377583732f88e899afd09f1a3fe7266e6c447c6..c2ca02aab99f73272ff71186264e8923227f9dce 100644
+--- a/dist/models/legacy.js
++++ b/dist/models/legacy.js
+@@ -10,30 +10,38 @@ class SileroLegacy {
+         this._h = _h;
+         this._c = _c;
+         this._sr = _sr;
++        this._activeRuns = new Set();
+         this.reset_state = () => {
+             const zeroes = Array(2 * 64).fill(0);
+             this._h = new this.ortInstance.Tensor("float32", zeroes, [2, 1, 64]);
+             this._c = new this.ortInstance.Tensor("float32", zeroes, [2, 1, 64]);
+         };
+-        this.process = async (audioFrame) => {
+-            const t = new this.ortInstance.Tensor("float32", audioFrame, [
+-                1,
+-                audioFrame.length,
+-            ]);
+-            const inputs = {
+-                input: t,
+-                h: this._h,
+-                c: this._c,
+-                sr: this._sr,
+-            };
+-            const out = await this._session.run(inputs);
+-            this._h = out["hn"];
+-            this._c = out["cn"];
+-            const [isSpeech] = out["output"]?.data;
+-            const notSpeech = 1 - isSpeech;
+-            return { notSpeech, isSpeech };
++        this.process = (audioFrame) => {
++            const activeRun = (async () => {
++                const t = new this.ortInstance.Tensor("float32", audioFrame, [
++                    1,
++                    audioFrame.length,
++                ]);
++                const inputs = {
++                    input: t,
++                    h: this._h,
++                    c: this._c,
++                    sr: this._sr,
++                };
++                const out = await this._session.run(inputs);
++                this._h = out["hn"];
++                this._c = out["cn"];
++                const [isSpeech] = out["output"]?.data;
++                const notSpeech = 1 - isSpeech;
++                return { notSpeech, isSpeech };
++            })();
++            this._activeRuns.add(activeRun);
++            return activeRun.finally(() => {
++                this._activeRuns.delete(activeRun);
++            });
+         };
+         this.release = async () => {
++            await Promise.allSettled(this._activeRuns);
+             await this._session.release();
+             this._h.dispose();
+             this._c.dispose();
+diff --git a/dist/models/v5.js b/dist/models/v5.js
+index 0a06b6d3e75661b0d88bcf294d16a4160750293f..7e8e3be0ab95baba984ad37f236acfc6280fc1e8 100644
+--- a/dist/models/v5.js
++++ b/dist/models/v5.js
+@@ -13,35 +13,43 @@ class SileroV5 {
+         this._state = _state;
+         this._sr = _sr;
+         this.ortInstance = ortInstance;
++        this._activeRuns = new Set();
+         this.reset_state = () => {
+             this._state = getNewState(this.ortInstance);
+         };
+-        this.process = async (audioFrame) => {
+-            const t = new this.ortInstance.Tensor("float32", audioFrame, [
+-                1,
+-                audioFrame.length,
+-            ]);
+-            const inputs = {
+-                input: t,
+-                state: this._state,
+-                sr: this._sr,
+-            };
+-            const out = await this._session.run(inputs);
+-            if (!out["stateN"]) {
+-                throw new Error("No state from model");
+-            }
+-            this._state = out["stateN"];
+-            if (!out["output"]?.data) {
+-                throw new Error("No output from model");
+-            }
+-            const isSpeech = out["output"].data[0];
+-            if (typeof isSpeech != "number") {
+-                throw new Error("Weird output data");
+-            }
+-            const notSpeech = 1 - isSpeech;
+-            return { notSpeech, isSpeech };
++        this.process = (audioFrame) => {
++            const activeRun = (async () => {
++                const t = new this.ortInstance.Tensor("float32", audioFrame, [
++                    1,
++                    audioFrame.length,
++                ]);
++                const inputs = {
++                    input: t,
++                    state: this._state,
++                    sr: this._sr,
++                };
++                const out = await this._session.run(inputs);
++                if (!out["stateN"]) {
++                    throw new Error("No state from model");
++                }
++                this._state = out["stateN"];
++                if (!out["output"]?.data) {
++                    throw new Error("No output from model");
++                }
++                const isSpeech = out["output"].data[0];
++                if (typeof isSpeech != "number") {
++                    throw new Error("Weird output data");
++                }
++                const notSpeech = 1 - isSpeech;
++                return { notSpeech, isSpeech };
++            })();
++            this._activeRuns.add(activeRun);
++            return activeRun.finally(() => {
++                this._activeRuns.delete(activeRun);
++            });
+         };
+         this.release = async () => {
++            await Promise.allSettled(this._activeRuns);
+             await this._session.release();
+             this._state.dispose();
+             this._sr.dispose();

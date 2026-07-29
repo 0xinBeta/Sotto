@@ -95,7 +95,7 @@ export class OpenWakeWordModel implements WakeFrameModel {
   ): Promise<OpenWakeWordModel> {
     ort.env.wasm.numThreads = 1;
     ort.env.wasm.proxy = false;
-    ort.env.wasm.wasmPaths = chrome.runtime.getURL("assets/ort-kokoro/");
+    ort.env.wasm.wasmPaths = chrome.runtime.getURL("assets/ort-vad/");
 
     const sessionOptions = {
       executionProviders: ["wasm"],
@@ -410,6 +410,7 @@ export class WakeWordController {
 
     if (this.#detected || this.#suspensions.size > 0) {
       await this.#stopCapture();
+      await this.#modelRun?.catch(() => undefined);
       await this.#setState("suspended");
       return;
     }

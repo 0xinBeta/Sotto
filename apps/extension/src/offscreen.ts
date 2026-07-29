@@ -2400,7 +2400,7 @@ async function startListening(
     vad = await MicVAD.new({
       model: "v5",
       baseAssetPath: chrome.runtime.getURL("assets/vad/"),
-      onnxWASMBasePath: chrome.runtime.getURL("assets/ort-kokoro/"),
+      onnxWASMBasePath: chrome.runtime.getURL("assets/ort-vad/"),
       startOnLoad: false,
       submitUserSpeechOnPause: true,
       // Natural speech pauses exceed 200ms; an aggressive redemption chops

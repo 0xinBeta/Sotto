@@ -5,6 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
+  '@ricky0123/vad-web@0.0.30':
+    hash: nmjdecp6tswlgut4ge2fxf7tey
+    path: patches/@ricky0123__vad-web@0.0.30.patch
   kokoro-js@1.2.1:
     hash: xbdz2x6w3alejsa5ooi2gy54ou
     path: patches/kokoro-js@1.2.1.patch
@@ -36,7 +39,7 @@ importers:
     dependencies:
       '@ricky0123/vad-web':
         specifier: 0.0.30
-        version: 0.0.30
+        version: 0.0.30(patch_hash=nmjdecp6tswlgut4ge2fxf7tey)
       '@sotto/actions':
         specifier: workspace:*
         version: link:../../packages/actions
@@ -1782,7 +1785,7 @@ snapshots:
 
   '@protobufjs/utf8@1.1.2': {}
 
-  '@ricky0123/vad-web@0.0.30':
+  '@ricky0123/vad-web@0.0.30(patch_hash=nmjdecp6tswlgut4ge2fxf7tey)':
     dependencies:
       onnxruntime-web: 1.22.0
 

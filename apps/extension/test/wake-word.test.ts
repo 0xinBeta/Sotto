@@ -141,6 +141,33 @@ describe("wake phrase lifecycle", () => {
     expect(captures).toHaveLength(2);
   });
 
+  it("waits for active inference before it declares suspension", async () => {
+    const { captures, controller, model } = setup();
+    let resolveRun: ((score: number) => void) | undefined;
+    model.processFrame.mockImplementation(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveRun = resolve;
+        }),
+    );
+    await controller.setEnabled(true);
+    captures[0]!.emit();
+    await vi.waitFor(() => {
+      expect(model.processFrame).toHaveBeenCalledOnce();
+    });
+
+    const suspension = controller.setSuspended("session", true);
+    await flushTasks();
+
+    expect(captures[0]!.stop).toHaveBeenCalledOnce();
+    expect(controller.state).toBe("armed");
+
+    resolveRun?.(0);
+    await suspension;
+
+    expect(controller.state).toBe("suspended");
+  });
+
   it("suspends for speech playback until every hold ends", async () => {
     const { captures, controller } = setup();
     await controller.setEnabled(true);

@@ -1115,6 +1115,7 @@ describe("offscreen fail-soft status", () => {
     expect(vad.create).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "v5",
+        onnxWASMBasePath: "chrome-extension://sotto/assets/ort-vad/",
         positiveSpeechThreshold: 0.5,
         negativeSpeechThreshold: 0.35,
         preSpeechPadMs: 300,
