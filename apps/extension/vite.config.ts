@@ -226,6 +226,9 @@ function verifyPremiumEngineChunks(): Plugin {
       if (Buffer.byteLength(offscreen.code) >= 1024 * 1024) {
         throw new Error("The offscreen entry chunk must stay under 1 MiB");
       }
+      if (/\bchrome\s*\.\s*storage\b/.test(offscreen.code)) {
+        throw new Error("The offscreen entry chunk must not use chrome.storage");
+      }
 
       const staticChunks = new Set<string>();
       const visitStaticChunk = (fileName: string): void => {

@@ -149,8 +149,39 @@ async function installPremiumOffscreen(options: {
   });
   const values = { ...options.initialStorage };
   const sendMessage = vi.fn().mockImplementation(
-    async (message: { readonly target?: string }) =>
-      message.target === "worker" ? { ok: true } : undefined,
+    async (message: {
+      readonly target?: string;
+      readonly type?: string;
+      readonly area?: string;
+      readonly keys?: readonly string[];
+      readonly values?: Record<string, unknown>;
+    }) => {
+      if (message.target !== "worker") return undefined;
+      if (message.type === "storage-get") {
+        if (options.storageGetError) {
+          return {
+            ok: false,
+            error: {
+              name: options.storageGetError.name,
+              message: options.storageGetError.message,
+            },
+          };
+        }
+        const selected = message.keys ?? [];
+        return {
+          ok: true,
+          value: Object.fromEntries(
+            selected
+              .filter((key) => key in values)
+              .map((key) => [key, values[key]]),
+          ),
+        };
+      }
+      if (message.type === "storage-set") {
+        Object.assign(values, message.values);
+      }
+      return { ok: true };
+    },
   );
   let onMessage: OffscreenListener | undefined;
   let unloadListener: (() => void) | undefined;
@@ -191,22 +222,6 @@ async function installPremiumOffscreen(options: {
       onMessage: {
         addListener: vi.fn((listener) => {
           onMessage = listener;
-        }),
-      },
-    },
-    storage: {
-      local: {
-        get: vi.fn(async (keys: string | readonly string[]) => {
-          if (options.storageGetError) throw options.storageGetError;
-          const selected = Array.isArray(keys) ? keys : [keys];
-          return Object.fromEntries(
-            selected
-              .filter((key) => key in values)
-              .map((key) => [key, values[key]]),
-          );
-        }),
-        set: vi.fn(async (updates: Record<string, unknown>) => {
-          Object.assign(values, updates);
         }),
       },
     },
@@ -678,12 +693,29 @@ describe("offscreen fail-soft status", () => {
     );
     premium.dispose.mockResolvedValue(undefined);
     const values: Record<string, unknown> = {};
-    const storageSet = vi.fn(async (updates: Record<string, unknown>) => {
-      Object.assign(values, updates);
-    });
     const sendMessage = vi.fn().mockImplementation(
-      async (message: { readonly target?: string }) =>
-        message.target === "worker" ? { ok: true } : undefined,
+      async (message: {
+        readonly target?: string;
+        readonly type?: string;
+        readonly keys?: readonly string[];
+        readonly values?: Record<string, unknown>;
+      }) => {
+        if (message.target !== "worker") return undefined;
+        if (message.type === "storage-get") {
+          return {
+            ok: true,
+            value: Object.fromEntries(
+              (message.keys ?? [])
+                .filter((key) => key in values)
+                .map((key) => [key, values[key]]),
+            ),
+          };
+        }
+        if (message.type === "storage-set") {
+          Object.assign(values, message.values);
+        }
+        return { ok: true };
+      },
     );
     let onMessage:
       | ((
@@ -706,19 +738,6 @@ describe("offscreen fail-soft status", () => {
           addListener: vi.fn((listener) => {
             onMessage = listener;
           }),
-        },
-      },
-      storage: {
-        local: {
-          get: vi.fn(async (keys: string | readonly string[]) => {
-            const selected = Array.isArray(keys) ? keys : [keys];
-            return Object.fromEntries(
-              selected
-                .filter((key) => key in values)
-                .map((key) => [key, values[key]]),
-            );
-          }),
-          set: storageSet,
         },
       },
     });

@@ -117,6 +117,7 @@ describe("PremiumSttManager", () => {
       state: "error",
       downloaded: false,
       resident: false,
+      error: "Premium STT self-test returned empty text",
     });
     expect(premium.dispose).toHaveBeenCalledTimes(1);
     expect(tiny.dispose).not.toHaveBeenCalled();
@@ -124,6 +125,75 @@ describe("PremiumSttManager", () => {
     await expect(manager.transcribe(new Float32Array([0.1]))).resolves.toBe(
       "tiny result",
     );
+  });
+
+  it("reports the implausible self-test text", async () => {
+    const text = "noise noise noise noise noise noise noise noise";
+    const premium = engineHarness(vi.fn().mockResolvedValue(text));
+    const manager = new PremiumSttManager({
+      tiny: engineHarness(),
+      tier: "parakeet",
+      createPremium: () => premium,
+      runInference: (task) => task(),
+      selfTestAudio: fixture,
+    });
+
+    await manager.initializeDefault();
+    await expect(manager.prepare()).rejects.toThrow(
+      `self-test returned implausible text: ${JSON.stringify(text)}`,
+    );
+    expect(manager.status.error).toContain(JSON.stringify(text));
+  });
+
+  it("reports fixture decode errors with their cause", async () => {
+    const premium = engineHarness();
+    const manager = new PremiumSttManager({
+      tiny: engineHarness(),
+      tier: "parakeet",
+      createPremium: () => premium,
+      runInference: (task) => task(),
+      selfTestAudio: () => Promise.reject(new Error("gzip data is corrupt")),
+    });
+
+    await manager.initializeDefault();
+    await expect(manager.prepare()).rejects.toThrow(
+      "Premium STT self-test fixture failed: gzip data is corrupt",
+    );
+    expect(manager.status.error).toBe(
+      "Premium STT self-test fixture failed: gzip data is corrupt",
+    );
+  });
+
+  it("fully resets after a failed self-test and retries without reload", async () => {
+    const first = engineHarness(vi.fn().mockResolvedValue(""));
+    const replacement = engineHarness();
+    const createPremium = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(replacement);
+    const manager = new PremiumSttManager({
+      tiny: engineHarness(),
+      tier: "parakeet",
+      createPremium,
+      runInference: (task) => task(),
+      selfTestAudio: fixture,
+    });
+
+    await manager.initializeDefault();
+    await expect(manager.prepare()).rejects.toThrow("empty text");
+    expect(manager.status.state).toBe("error");
+
+    await expect(manager.prepare()).resolves.toBeUndefined();
+
+    expect(createPremium).toHaveBeenCalledTimes(2);
+    expect(first.dispose).toHaveBeenCalledOnce();
+    expect(replacement.transcribe).toHaveBeenCalledOnce();
+    expect(manager.status).toMatchObject({
+      state: "active",
+      downloaded: true,
+      resident: true,
+      resumable: false,
+    });
+    expect(manager.status.error).toBeUndefined();
   });
 
   it("routes utterances to tiny during download, validation, and warmup", async () => {

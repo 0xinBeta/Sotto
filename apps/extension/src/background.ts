@@ -52,10 +52,19 @@ import {
   type KokoroVoiceId,
 } from "@sotto/tts/kokoro-voices";
 import {
+  PREMIUM_TTS_DOWNLOADED_KEY,
+  PREMIUM_TTS_ENABLED_KEY,
+  PREMIUM_TTS_VOICE_KEY,
   PremiumTtsRouter,
   previewPremiumVoiceSelection,
   type PremiumTtsState,
 } from "./premium-tts.js";
+import {
+  PREMIUM_STT_DOWNLOADED_KEY,
+  PREMIUM_STT_DOWNLOADED_TIERS_KEY,
+  PREMIUM_STT_ENABLED_KEY,
+  PREMIUM_STT_TIER_KEY,
+} from "./premium-stt.js";
 import {
   ExchangeTimingBuffer,
   isExchangeTimings,
@@ -102,7 +111,12 @@ import {
   SITE_BLOCKED_RESPONSE,
 } from "./blocked-sites.js";
 import { SessionHistoryStore } from "./session-history.js";
-import { NON_ENGLISH_COMMAND_LINE } from "./stt-language.js";
+import {
+  NON_ENGLISH_COMMAND_LINE,
+  SPEECH_LANGUAGE_KEY,
+} from "./stt-language.js";
+import { LIVE_TRANSCRIPT_PREVIEW_KEY } from "./live-transcript-preview.js";
+import { WAKE_WORD_ENABLED_KEY } from "./wake-word-settings.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -133,6 +147,66 @@ interface WorkerMessage {
   readonly phrase?: unknown;
   readonly aliasExecutionId?: unknown;
   readonly language?: unknown;
+  readonly area?: unknown;
+  readonly keys?: unknown;
+  readonly values?: unknown;
+}
+
+const OFFSCREEN_LOCAL_STORAGE_KEYS = new Set([
+  LIVE_TRANSCRIPT_PREVIEW_KEY,
+  PREMIUM_STT_DOWNLOADED_KEY,
+  PREMIUM_STT_DOWNLOADED_TIERS_KEY,
+  PREMIUM_STT_ENABLED_KEY,
+  PREMIUM_STT_TIER_KEY,
+  PREMIUM_TTS_DOWNLOADED_KEY,
+  PREMIUM_TTS_ENABLED_KEY,
+  PREMIUM_TTS_VOICE_KEY,
+  SPEECH_LANGUAGE_KEY,
+  WAKE_WORD_ENABLED_KEY,
+]);
+
+function offscreenStorageArea(area: unknown): chrome.storage.StorageArea {
+  if (area === "local") return chrome.storage.local;
+  if (area === "session" && chrome.storage.session) {
+    return chrome.storage.session;
+  }
+  throw new TypeError("A valid offscreen storage area is required");
+}
+
+function offscreenStorageKeys(
+  area: unknown,
+  keys: unknown,
+): readonly string[] {
+  if (
+    !Array.isArray(keys) ||
+    keys.length === 0 ||
+    !keys.every((key): key is string => typeof key === "string")
+  ) {
+    throw new TypeError("Valid offscreen storage keys are required");
+  }
+  const allowed = area === "local"
+    ? OFFSCREEN_LOCAL_STORAGE_KEYS
+    : new Set<string>();
+  if (keys.some((key) => !allowed.has(key))) {
+    throw new TypeError("An offscreen storage key is not allowed");
+  }
+  return keys;
+}
+
+function offscreenStorageValues(
+  area: unknown,
+  values: unknown,
+): Record<string, unknown> {
+  if (
+    typeof values !== "object" ||
+    values === null ||
+    Array.isArray(values)
+  ) {
+    throw new TypeError("Valid offscreen storage values are required");
+  }
+  const keys = Object.keys(values);
+  offscreenStorageKeys(area, keys);
+  return values as Record<string, unknown>;
 }
 
 const actionRegistry = new ActionRegistry(actions);
@@ -3053,6 +3127,17 @@ async function retryScreenshot(command: unknown): Promise<ActionResult> {
 
 async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
   switch (message.type) {
+    case "storage-get": {
+      const area = offscreenStorageArea(message.area);
+      const keys = offscreenStorageKeys(message.area, message.keys);
+      return area.get([...keys]);
+    }
+    case "storage-set": {
+      const area = offscreenStorageArea(message.area);
+      const values = offscreenStorageValues(message.area, message.values);
+      await area.set(values);
+      return undefined;
+    }
     case "get-status":
       return sendOffscreen({ type: "get-status" });
     case "get-wake-playback-active":

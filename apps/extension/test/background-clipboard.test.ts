@@ -1765,6 +1765,76 @@ describe("background screenshot clipboard injection", () => {
     });
   });
 
+  it("proxies only approved offscreen settings through worker storage", async () => {
+    const harness = await installBackground(
+      {
+        id: 72,
+        url: "https://example.com/current",
+      },
+      {
+        premiumTtsVoice: "bf_emma",
+        premiumSttEnabled: true,
+        privateSetting: "blocked",
+      },
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "storage-get",
+        area: "local",
+        keys: ["premiumTtsVoice", "premiumSttEnabled"],
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        premiumTtsVoice: "bf_emma",
+        premiumSttEnabled: true,
+      },
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "storage-set",
+        area: "local",
+        values: {
+          premiumTtsEnabled: false,
+          speechLanguage: "es",
+        },
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(harness.storageValues).toMatchObject({
+      premiumTtsEnabled: false,
+      speechLanguage: "es",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "storage-get",
+        area: "local",
+        keys: ["privateSetting"],
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        name: "Error",
+        message: "An offscreen storage key is not allowed",
+      },
+    });
+    await expect(
+      harness.workerMessage({
+        type: "storage-set",
+        area: "session",
+        values: { premiumTtsEnabled: true },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        name: "Error",
+        message: "An offscreen storage key is not allowed",
+      },
+    });
+  });
+
   it("imports post-backup settings and adopts their runtime state", async () => {
     const harness = await installBackground({
       id: 71,

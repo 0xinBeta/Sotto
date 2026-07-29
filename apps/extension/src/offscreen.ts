@@ -414,6 +414,28 @@ async function askWorker<T>(
   return response.value;
 }
 
+async function getStoredValues(
+  keys: readonly string[],
+  area: "local" | "session" = "local",
+): Promise<Record<string, unknown>> {
+  return await askWorker<Record<string, unknown>>({
+    type: "storage-get",
+    area,
+    keys: [...keys],
+  }) ?? {};
+}
+
+async function setStoredValues(
+  values: Record<string, unknown>,
+  area: "local" | "session" = "local",
+): Promise<void> {
+  await askWorker({
+    type: "storage-set",
+    area,
+    values,
+  });
+}
+
 async function publishWakeWordStatus(): Promise<void> {
   await sendPanel({
     type: "wake-word-state",
@@ -479,9 +501,8 @@ function getWakeWordController(): WakeWordController {
 
 async function ensureWakeWordSetting(): Promise<void> {
   wakeWordSettingReady ??= (async () => {
-    const localStorage = chrome.storage?.local;
     const [stored, playbackActive] = await Promise.all([
-      localStorage?.get(WAKE_WORD_ENABLED_KEY) ?? Promise.resolve({}),
+      getStoredValues([WAKE_WORD_ENABLED_KEY]),
       askWorker<boolean>({ type: "get-wake-playback-active" }).catch(
         () => false,
       ),
@@ -497,7 +518,7 @@ async function ensureWakeWordSetting(): Promise<void> {
     } catch (error) {
       wakeWordEnabled = false;
       await controller.setEnabled(false).catch(() => undefined);
-      await localStorage?.set({ [WAKE_WORD_ENABLED_KEY]: false })
+      await setStoredValues({ [WAKE_WORD_ENABLED_KEY]: false })
         .catch(() => undefined);
       throw error;
     }
@@ -511,23 +532,21 @@ async function ensureWakeWordSetting(): Promise<void> {
 }
 
 async function setWakeWordEnabled(enabled: boolean): Promise<void> {
-  const localStorage = chrome.storage?.local;
-  if (!localStorage) throw new Error("Local settings are unavailable");
   const controller = getWakeWordController();
   if (!enabled) {
     wakeWordEnabled = false;
     await controller.setEnabled(false);
-    await localStorage.set({ [WAKE_WORD_ENABLED_KEY]: false });
+    await setStoredValues({ [WAKE_WORD_ENABLED_KEY]: false });
     return;
   }
   wakeWordEnabled = true;
   try {
     await controller.setEnabled(true);
-    await localStorage.set({ [WAKE_WORD_ENABLED_KEY]: true });
+    await setStoredValues({ [WAKE_WORD_ENABLED_KEY]: true });
   } catch (error) {
     wakeWordEnabled = false;
     await controller.setEnabled(false).catch(() => undefined);
-    await localStorage.set({ [WAKE_WORD_ENABLED_KEY]: false })
+    await setStoredValues({ [WAKE_WORD_ENABLED_KEY]: false })
       .catch(() => undefined);
     throw error;
   }
@@ -791,11 +810,11 @@ async function ensurePremiumSettings(): Promise<void> {
   if (premiumSettingsReady) return premiumSettingsReady;
   premiumSettingsReady = (async () => {
     try {
-      const stored = await chrome.storage?.local?.get?.([
+      const stored = await getStoredValues([
         PREMIUM_TTS_ENABLED_KEY,
         PREMIUM_TTS_DOWNLOADED_KEY,
         PREMIUM_TTS_VOICE_KEY,
-      ]) ?? {};
+      ]);
       premiumTtsDownloaded =
         stored[PREMIUM_TTS_DOWNLOADED_KEY] === true;
       premiumTtsEnabled = premiumEnabledByDefault(
@@ -939,17 +958,14 @@ async function ensurePremiumSttSettings(): Promise<void> {
     const tier = await detectPremiumSttTier();
     let stored: Record<string, unknown> = {};
     try {
-      const local = chrome.storage?.local;
-      if (local) {
-        stored = await local.get([
-          PREMIUM_STT_DOWNLOADED_KEY,
-          PREMIUM_STT_DOWNLOADED_TIERS_KEY,
-          PREMIUM_STT_ENABLED_KEY,
-          PREMIUM_STT_TIER_KEY,
-          SPEECH_LANGUAGE_KEY,
-          LIVE_TRANSCRIPT_PREVIEW_KEY,
-        ]);
-      }
+      stored = await getStoredValues([
+        PREMIUM_STT_DOWNLOADED_KEY,
+        PREMIUM_STT_DOWNLOADED_TIERS_KEY,
+        PREMIUM_STT_ENABLED_KEY,
+        PREMIUM_STT_TIER_KEY,
+        SPEECH_LANGUAGE_KEY,
+        LIVE_TRANSCRIPT_PREVIEW_KEY,
+      ]);
     } catch (error) {
       console.warn(
         "Unable to read high-accuracy speech settings; using Moonshine tiny",
@@ -1019,7 +1035,6 @@ async function ensurePremiumSttSettings(): Promise<void> {
       },
       onDiagnostic(diagnostic) {
         void publishSttDiagnostic(diagnostic);
-        if (diagnostic === "timeout") scheduleSttTimeoutRecovery();
       },
       async onMemoryPressure() {
         modelLru.noteMemoryPressure();
@@ -1038,9 +1053,9 @@ async function ensurePremiumSttSettings(): Promise<void> {
 async function persistPremiumSttStatus(): Promise<void> {
   const status = premiumStt?.status;
   if (!status) return;
-  const existing = await chrome.storage.local.get(
+  const existing = await getStoredValues([
     PREMIUM_STT_DOWNLOADED_TIERS_KEY,
-  );
+  ]);
   const storedTiers = existing[PREMIUM_STT_DOWNLOADED_TIERS_KEY];
   const downloadedTiers: Record<string, boolean> =
     typeof storedTiers === "object" &&
@@ -1049,7 +1064,7 @@ async function persistPremiumSttStatus(): Promise<void> {
       ? { ...(storedTiers as Record<string, boolean>) }
       : {};
   downloadedTiers[status.tier] = status.downloaded;
-  await chrome.storage.local.set({
+  await setStoredValues({
     [PREMIUM_STT_DOWNLOADED_KEY]: status.downloaded,
     [PREMIUM_STT_DOWNLOADED_TIERS_KEY]: downloadedTiers,
     [PREMIUM_STT_ENABLED_KEY]: status.enabled,
@@ -1065,9 +1080,9 @@ async function setStoredTierDownloaded(
   tier: PremiumSttTier,
   downloaded: boolean,
 ): Promise<void> {
-  const existing = await chrome.storage.local.get(
+  const existing = await getStoredValues([
     PREMIUM_STT_DOWNLOADED_TIERS_KEY,
-  );
+  ]);
   const stored = existing[PREMIUM_STT_DOWNLOADED_TIERS_KEY];
   const tiers: Record<string, boolean> =
     typeof stored === "object" &&
@@ -1076,7 +1091,7 @@ async function setStoredTierDownloaded(
       ? { ...(stored as Record<string, boolean>) }
       : {};
   tiers[tier] = downloaded;
-  await chrome.storage.local.set({
+  await setStoredValues({
     [PREMIUM_STT_DOWNLOADED_TIERS_KEY]: tiers,
   });
 }
@@ -1120,7 +1135,7 @@ async function downloadManagedModel(id: ManagedModelId): Promise<void> {
 
 async function fallbackFromPremiumTts(): Promise<void> {
   premiumTtsEnabled = false;
-  await chrome.storage.local.set({
+  await setStoredValues({
     [PREMIUM_TTS_ENABLED_KEY]: false,
   });
   await askWorker({
@@ -1206,7 +1221,7 @@ async function deleteManagedModelCache(id: ManagedModelId): Promise<void> {
     premiumTtsBackend = undefined;
     premiumTtsError = undefined;
     premiumTtsIdleReleased = false;
-    await chrome.storage.local.set({
+    await setStoredValues({
       [PREMIUM_TTS_DOWNLOADED_KEY]: false,
       [PREMIUM_TTS_ENABLED_KEY]: false,
     });
@@ -1269,14 +1284,14 @@ async function ensurePremiumTts(
     premiumTtsState = "ready";
     premiumTtsIdleReleased = false;
     modelLru.markResident("premium-tts");
-    const stored = await chrome.storage.local.get(PREMIUM_TTS_ENABLED_KEY);
+    const stored = await getStoredValues([PREMIUM_TTS_ENABLED_KEY]);
     if (typeof stored[PREMIUM_TTS_ENABLED_KEY] !== "boolean") {
       premiumTtsEnabled = true;
-      await chrome.storage.local.set({
+      await setStoredValues({
         [PREMIUM_TTS_ENABLED_KEY]: true,
       });
     }
-    await chrome.storage.local.set({
+    await setStoredValues({
       [PREMIUM_TTS_DOWNLOADED_KEY]: true,
     });
     await publishPremiumStatus();
@@ -2692,7 +2707,7 @@ async function handleOffscreenMessage(
       }
       await ensurePremiumSettings();
       premiumTtsEnabled = message.enabled;
-      await chrome.storage.local.set({
+      await setStoredValues({
         [PREMIUM_TTS_ENABLED_KEY]: premiumTtsEnabled,
       });
       if (
@@ -2713,7 +2728,7 @@ async function handleOffscreenMessage(
       await ensurePremiumSettings();
       premiumTtsVoice = message.voice;
       premiumTts?.setVoice(premiumTtsVoice);
-      await chrome.storage.local.set({
+      await setStoredValues({
         [PREMIUM_TTS_VOICE_KEY]: premiumTtsVoice,
       });
       await publishPremiumStatus();
@@ -2787,7 +2802,7 @@ async function handleOffscreenMessage(
         throw new TypeError("Moonshine supports English speech only");
       }
       speechLanguage = message.language;
-      await chrome.storage.local.set({
+      await setStoredValues({
         [SPEECH_LANGUAGE_KEY]: speechLanguage,
       });
       await publishPremiumSttStatus();
@@ -2801,7 +2816,7 @@ async function handleOffscreenMessage(
         liveTranscriptPreviewAvailable && message.enabled;
       liveTranscriptPreview.setEnabled(liveTranscriptPreviewSetting);
       if (liveTranscriptPreviewAvailable) {
-        await chrome.storage.local.set({
+        await setStoredValues({
           [LIVE_TRANSCRIPT_PREVIEW_KEY]: liveTranscriptPreviewSetting,
         });
       }

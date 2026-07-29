@@ -89,11 +89,15 @@ function diagnosticFor(error: unknown): SttDiagnostic | undefined {
   }
   if (
     error instanceof Error &&
-    /self-test.*(?:blank|plausible)/i.test(error.message)
+    /self-test.*(?:blank|empty|plausible)/i.test(error.message)
   ) {
     return "blank-result";
   }
   return undefined;
+}
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function withDeadline<T>(
@@ -364,6 +368,7 @@ export class PremiumSttManager {
 
   async #loadPremium(downloadExpected: boolean): Promise<void> {
     this.#error = undefined;
+    this.#resumable = false;
     this.#setState(downloadExpected ? "downloading" : "loading");
     let candidate: SttEngine | undefined;
 
@@ -391,12 +396,32 @@ export class PremiumSttManager {
       }
       this.#setState("loading");
       this.#setState("warming");
-      const fixture = await this.#selfTestAudio();
+      let fixture: Float32Array;
+      try {
+        fixture = await this.#selfTestAudio();
+      } catch (error) {
+        throw new Error(
+          `Premium STT self-test fixture failed: ${errorDetail(error)}`,
+        );
+      }
       const startedAt = this.#now();
-      const text = await withDeadline(
-        this.#runInference(() => loaded.transcribe(fixture)),
-        this.#warmupMaxMs,
-      );
+      let text: string;
+      try {
+        text = await withDeadline(
+          this.#runInference(() => loaded.transcribe(fixture)),
+          this.#warmupMaxMs,
+        );
+      } catch (error) {
+        if (
+          error instanceof DOMException &&
+          error.name === "TimeoutError"
+        ) {
+          throw error;
+        }
+        throw new Error(
+          `Premium STT self-test failed: ${errorDetail(error)}`,
+        );
+      }
       const elapsed = this.#now() - startedAt;
       if (elapsed > this.#warmupMaxMs) {
         throw new DOMException(
@@ -404,9 +429,13 @@ export class PremiumSttManager {
           "TimeoutError",
         );
       }
+      if (typeof text !== "string" || text.trim().length === 0) {
+        throw new Error("Premium STT self-test returned empty text");
+      }
       if (!isPlausibleSttText(text, fixture.length)) {
+        const detail = JSON.stringify(text.trim().slice(0, 160));
         throw new Error(
-          "Premium STT self-test returned blank or implausible text",
+          `Premium STT self-test returned implausible text: ${detail}`,
         );
       }
 
