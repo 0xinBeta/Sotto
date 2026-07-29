@@ -9,6 +9,7 @@ import {
 
 const KNOWN_KEYS: readonly SpokenLineKey[] = [
   "done",
+  "bookmark-created",
   "note-saved",
   "note-deleted",
   "reminder-set",

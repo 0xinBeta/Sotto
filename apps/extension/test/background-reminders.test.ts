@@ -6,6 +6,7 @@ const worker = vi.hoisted(() => ({
 
 vi.mock("@sotto/actions", () => ({
   default: [],
+  findActiveTabBookmark: vi.fn(),
   findBestTabMatch: vi.fn(),
 }));
 vi.mock("@sotto/core", () => ({

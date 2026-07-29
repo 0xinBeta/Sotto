@@ -2218,6 +2218,73 @@
   },
 
   {
+    "id": "bookmarks-create-01",
+    "transcript": "bookmark this page",
+    "expected": { "action": "bookmarks", "operation": "create" }
+  },
+  {
+    "id": "bookmarks-create-02",
+    "transcript": "add this page to my bookmarks",
+    "expected": { "action": "bookmarks", "operation": "create" }
+  },
+  {
+    "id": "bookmarks-create-03",
+    "transcript": "save the current page as a bookmark",
+    "expected": { "action": "bookmarks", "operation": "create" }
+  },
+  {
+    "id": "bookmarks-create-04",
+    "transcript": "put this page in my bookmarks",
+    "expected": { "action": "bookmarks", "operation": "create" }
+  },
+  {
+    "id": "bookmarks-remove-01",
+    "transcript": "remove this bookmark",
+    "expected": { "action": "bookmarks", "operation": "remove" }
+  },
+  {
+    "id": "bookmarks-remove-02",
+    "transcript": "unbookmark this page",
+    "expected": { "action": "bookmarks", "operation": "remove" }
+  },
+  {
+    "id": "bookmarks-remove-03",
+    "transcript": "delete the bookmark for this page",
+    "expected": { "action": "bookmarks", "operation": "remove" }
+  },
+  {
+    "id": "bookmarks-remove-04",
+    "transcript": "remove the current page from my bookmarks",
+    "expected": { "action": "bookmarks", "operation": "remove" }
+  },
+  {
+    "id": "bookmarks-negative-01",
+    "transcript": "make a note to bookmark this page later",
+    "negativeFor": "bookmarks",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "create", "body": "Bookmark this page later" }
+  },
+  {
+    "id": "bookmarks-negative-02",
+    "transcript": "search the web for bookmark managers",
+    "negativeFor": "bookmarks",
+    "confusable": true,
+    "expected": { "action": "navigate", "operation": "search", "query": "bookmark managers" }
+  },
+  {
+    "id": "bookmarks-negative-03",
+    "transcript": "bookmark every open tab",
+    "negativeFor": "bookmarks",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "bookmarks-negative-04",
+    "transcript": "remove all bookmarks",
+    "negativeFor": "bookmarks",
+    "expected": { "action": "unknown" }
+  },
+
+  {
     "id": "settings-rate-slower-01",
     "transcript": "speak slower",
     "expected": { "action": "settings", "operation": "rate-slower" }

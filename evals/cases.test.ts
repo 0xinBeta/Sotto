@@ -154,6 +154,26 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(5);
   });
 
+  it("keeps bookmark create, remove, and negative cases", () => {
+    const positives = cases.filter(
+      (testCase) => testCase.expected.action === "bookmarks",
+    );
+    const negatives = cases.filter(
+      (testCase) =>
+        "negativeFor" in testCase &&
+        testCase.negativeFor === "bookmarks",
+    );
+
+    expect(
+      positives.some((testCase) => testCase.expected.operation === "create"),
+    ).toBe(true);
+    expect(
+      positives.some((testCase) => testCase.expected.operation === "remove"),
+    ).toBe(true);
+    expect(positives.length + negatives.length).toBeGreaterThanOrEqual(6);
+    expect(negatives.length).toBeGreaterThan(0);
+  });
+
   it("keeps at least eight page-control cases", () => {
     expect(
       cases.filter((testCase) =>

@@ -2,6 +2,7 @@ import type { ResponseVerbosity } from "./speech-settings.js";
 
 export const SPOKEN_LINE_KEYS = [
   "done",
+  "bookmark-created",
   "note-saved",
   "note-deleted",
   "reminder-set",
@@ -27,6 +28,10 @@ const SPOKEN_LINES: Record<SpokenLineKey, SpokenLineVariants> = {
   done: {
     normal: "Done.",
     brief: "Done.",
+  },
+  "bookmark-created": {
+    normal: "Bookmarked.",
+    brief: "Saved.",
   },
   "note-saved": {
     normal: "Saved your note.",

@@ -12,6 +12,11 @@ export function installChromeStub() {
       getZoom: vi.fn(),
       setZoom: vi.fn(),
     },
+    bookmarks: {
+      create: vi.fn(),
+      search: vi.fn(),
+      remove: vi.fn(),
+    },
     windows: {
       update: vi.fn(),
     },

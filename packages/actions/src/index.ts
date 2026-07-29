@@ -1,5 +1,6 @@
 import askPageAction from "./ask-page/index.js";
 import askScreenAction from "./ask-screen/index.js";
+import bookmarksAction from "./bookmarks/index.js";
 import dictationAction from "./dictation/index.js";
 import helpAction from "./help/index.js";
 import navigateAction from "./navigate/index.js";
@@ -22,6 +23,15 @@ export {
   default as askScreenAction,
 } from "./ask-screen/index.js";
 export type { AskScreenCommand } from "./ask-screen/index.js";
+export {
+  bookmarksSchema,
+  default as bookmarksAction,
+  findActiveTabBookmark,
+} from "./bookmarks/index.js";
+export type {
+  ActiveTabBookmark,
+  BookmarksCommand,
+} from "./bookmarks/index.js";
 export {
   default as dictationAction,
   dictationSchema,
@@ -146,6 +156,7 @@ export { default as tabsAction } from "./tabs/index.js";
 export const actions = [
   screenshotAction,
   tabsAction,
+  bookmarksAction,
   translateAction,
   summarizeAction,
   askPageAction,

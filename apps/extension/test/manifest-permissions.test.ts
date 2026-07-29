@@ -66,6 +66,7 @@ const sourceManifest = readManifest(sourceManifestUrl);
  *
  * activeTab: Run a user command on the active tab.
  * alarms: Start local reminder alarms.
+ * bookmarks: Add or remove a bookmark after a user command.
  * clipboardWrite: Copy text and screenshots after a user command.
  * downloads: Save user-requested files to Downloads.
  * notifications: Show local reminder notifications.
@@ -85,6 +86,7 @@ const expectedTrustSurface = {
   permissions: [
     "activeTab",
     "alarms",
+    "bookmarks",
     "clipboardWrite",
     "downloads",
     "notifications",

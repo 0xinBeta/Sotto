@@ -1,4 +1,4 @@
-import actions from "@sotto/actions";
+import actions, { findActiveTabBookmark } from "@sotto/actions";
 import { createNotesMarkdownExport } from "@sotto/actions/notes/markdown";
 import type {
   PlaybackCommand,
@@ -667,6 +667,25 @@ function firstWords(text: string, maximum = 8): string {
 async function confirmationResult(
   command: ActionCommand,
 ): Promise<{ readonly result: ActionResult; readonly pending: boolean }> {
+  if (
+    command.action === "bookmarks" &&
+    (command as { readonly operation?: unknown }).operation === "remove"
+  ) {
+    const bookmark = await findActiveTabBookmark();
+    if (!bookmark) {
+      return {
+        result: { spoken: "This page has no bookmark." },
+        pending: false,
+      };
+    }
+    return {
+      result: {
+        spoken: `Remove the bookmark for ${bookmark.title}? Say yes.`,
+      },
+      pending: true,
+    };
+  }
+
   if (
     command.action === "notes" &&
     (command as { readonly operation?: unknown }).operation === "delete-last"

@@ -5,6 +5,7 @@ const worker = vi.hoisted(() => ({
   route: vi.fn(),
   routeConfirmed: vi.fn(),
   requiresConfirmation: vi.fn(() => false),
+  findActiveTabBookmark: vi.fn(),
   followUp: vi.fn(),
   pause: vi.fn(() => true),
   resume: vi.fn(() => true),
@@ -15,6 +16,7 @@ const worker = vi.hoisted(() => ({
 
 vi.mock("@sotto/actions", () => ({
   default: [],
+  findActiveTabBookmark: worker.findActiveTabBookmark,
   sanitizeHostname: (value: string) => {
     const hostname = value.trim().toLowerCase();
     return /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/
@@ -290,6 +292,7 @@ afterEach(() => {
   worker.routeConfirmed.mockReset();
   worker.requiresConfirmation.mockReset();
   worker.requiresConfirmation.mockReturnValue(false);
+  worker.findActiveTabBookmark.mockReset();
   worker.followUp.mockReset();
   worker.pause.mockClear();
   worker.resume.mockClear();
@@ -724,6 +727,86 @@ describe("background screenshot clipboard injection", () => {
         actionCatalog: expect.anything(),
       }),
     );
+  });
+
+  it("asks for the bookmark title before confirmed removal", async () => {
+    const removeCommand = {
+      action: "bookmarks",
+      operation: "remove",
+    };
+    worker.requiresConfirmation.mockImplementation(
+      (command) =>
+        (command as { readonly action?: unknown }).action === "bookmarks",
+    );
+    worker.findActiveTabBookmark.mockResolvedValue({
+      id: "bookmark-4",
+      title: "Local article",
+    });
+    worker.routeConfirmed.mockResolvedValue({
+      spoken: "Removed the bookmark.",
+    });
+    const harness = await installBackground({
+      id: 4,
+      url: "https://example.com/current",
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "remove this bookmark",
+      command: removeCommand,
+    });
+
+    expect(worker.route).not.toHaveBeenCalled();
+    expect(worker.routeConfirmed).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-result",
+        transcript: "remove this bookmark",
+        result: {
+          spoken: "Remove the bookmark for Local article? Say yes.",
+        },
+      }),
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "yes",
+      command: { action: "unknown" },
+    });
+
+    expect(worker.routeConfirmed).toHaveBeenCalledWith(
+      removeCommand,
+      expect.objectContaining({
+        actionCatalog: expect.anything(),
+      }),
+    );
+  });
+
+  it("does not request confirmation when the page has no bookmark", async () => {
+    worker.requiresConfirmation.mockImplementation(
+      (command) =>
+        (command as { readonly action?: unknown }).action === "bookmarks",
+    );
+    worker.findActiveTabBookmark.mockResolvedValue(undefined);
+    const harness = await installBackground({
+      id: 4,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "remove this bookmark",
+        command: { action: "bookmarks", operation: "remove" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "This page has no bookmark." },
+    });
+
+    expect(worker.route).not.toHaveBeenCalled();
+    expect(worker.routeConfirmed).not.toHaveBeenCalled();
   });
 
   it("repeats the prompt without clearing a pending confirmation", async () => {

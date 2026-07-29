@@ -18,6 +18,10 @@
       "types": "./dist/ask-screen/index.d.ts",
       "import": "./dist/ask-screen/index.js"
     },
+    "./bookmarks": {
+      "types": "./dist/bookmarks/index.d.ts",
+      "import": "./dist/bookmarks/index.js"
+    },
     "./summarize": {
       "types": "./dist/summarize/index.d.ts",
       "import": "./dist/summarize/index.js"

@@ -4,6 +4,9 @@ Sotto uses the active tab only after a user command. It reads, changes, or captu
 Permission: alarms
 Sotto starts local alarms for reminders that the user creates.
 
+Permission: bookmarks
+Sotto adds or removes a bookmark only after a user command.
+
 Permission: clipboardWrite
 Sotto writes requested text or screenshots to the clipboard after a user command.
 

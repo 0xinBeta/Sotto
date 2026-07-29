@@ -8,6 +8,7 @@
   "permissions": [
     "activeTab",
     "alarms",
+    "bookmarks",
     "clipboardWrite",
     "downloads",
     "notifications",
