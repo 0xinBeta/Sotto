@@ -321,7 +321,9 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         Object.keys(command).length === 2 &&
         command.action === "screenshot" &&
         (command.destination === "copy" ||
-          command.destination === "claude")
+          command.destination === "claude" ||
+          command.destination === "chatgpt" ||
+          command.destination === "gemini")
       );
     }
     case "page-text":
@@ -1963,7 +1965,7 @@ function showClipboardWorkflow(workflow: ClipboardWorkflow): void {
   pendingScreenshot = workflow;
   copyScreenshot.textContent = workflow.buttonLabel;
   clipboardCopy.textContent = workflow.afterWrite?.followUp
-    ? "Copy the PNG, then Sotto will move you to Claude."
+    ? "Copy the PNG. Sotto will then open the destination."
     : "Copy the PNG to your clipboard.";
   clipboardCard.hidden = false;
 }

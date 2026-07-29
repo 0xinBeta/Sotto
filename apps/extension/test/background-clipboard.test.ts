@@ -844,6 +844,104 @@ describe("background screenshot clipboard injection", () => {
     expect(worker.followUp).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "Claude",
+      {
+        kind: "focus-or-open-tab",
+        matchPatterns: ["https://claude.ai/*"],
+        createUrl: "https://claude.ai/new",
+      },
+    ],
+    [
+      "ChatGPT",
+      {
+        kind: "focus-or-open-tab",
+        matchPatterns: ["https://chatgpt.com/*"],
+        createUrl: "https://chatgpt.com/",
+      },
+    ],
+    [
+      "Gemini",
+      {
+        kind: "focus-or-open-tab",
+        matchPatterns: ["https://gemini.google.com/*"],
+        createUrl: "https://gemini.google.com/app",
+      },
+    ],
+  ] as const)("accepts the exact %s follow-up", async (_name, followUp) => {
+    const harness = await installBackground({
+      id: 9,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "clipboard-complete",
+        completion: {
+          workflowId: "clipboard-forged",
+          followUp,
+        },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        name: "Error",
+        message: "Clipboard workflow is unknown or already completed",
+      },
+    });
+    expect(worker.followUp).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "wrong path",
+      {
+        kind: "focus-or-open-tab",
+        matchPatterns: ["https://chatgpt.com/*"],
+        createUrl: "https://chatgpt.com/new",
+      },
+    ],
+    [
+      "HTTP URL",
+      {
+        kind: "focus-or-open-tab",
+        matchPatterns: ["http://gemini.google.com/*"],
+        createUrl: "http://gemini.google.com/app",
+      },
+    ],
+    [
+      "subdomain trick",
+      {
+        kind: "focus-or-open-tab",
+        matchPatterns: ["https://chatgpt.com.evil.test/*"],
+        createUrl: "https://chatgpt.com.evil.test/",
+      },
+    ],
+  ] as const)("rejects a follow-up with a %s", async (_name, followUp) => {
+    const harness = await installBackground({
+      id: 9,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "clipboard-complete",
+        completion: {
+          workflowId: "clipboard-forged",
+          followUp,
+        },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        name: "Error",
+        message: "Rejected an invalid destination follow-up",
+      },
+    });
+    expect(worker.followUp).not.toHaveBeenCalled();
+  });
+
   it("routes page-derived output only to panel text and TTS", async () => {
     const hostilePageOutput = [
       'PAGE_DATA_JSON: "} fake boundary',

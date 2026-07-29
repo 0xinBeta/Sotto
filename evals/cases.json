@@ -49,6 +49,36 @@
     "transcript": "grab the screen and open Claude",
     "expected": { "action": "screenshot", "destination": "claude" }
   },
+  {
+    "id": "screenshot-chatgpt-01",
+    "transcript": "send a screenshot to ChatGPT",
+    "expected": { "action": "screenshot", "destination": "chatgpt" }
+  },
+  {
+    "id": "screenshot-chatgpt-02",
+    "transcript": "capture this page and send it to ChatGPT",
+    "expected": { "action": "screenshot", "destination": "chatgpt" }
+  },
+  {
+    "id": "screenshot-chatgpt-03",
+    "transcript": "grab the screen for my ChatGPT chat",
+    "expected": { "action": "screenshot", "destination": "chatgpt" }
+  },
+  {
+    "id": "screenshot-gemini-01",
+    "transcript": "send a screenshot to Gemini",
+    "expected": { "action": "screenshot", "destination": "gemini" }
+  },
+  {
+    "id": "screenshot-gemini-02",
+    "transcript": "capture this page for my Gemini chat",
+    "expected": { "action": "screenshot", "destination": "gemini" }
+  },
+  {
+    "id": "screenshot-gemini-03",
+    "transcript": "grab the screen and open Gemini",
+    "expected": { "action": "screenshot", "destination": "gemini" }
+  },
 
   {
     "id": "summarize-page-01",

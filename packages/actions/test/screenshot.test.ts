@@ -1,3 +1,4 @@
+import { validateSchema } from "@sotto/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import screenshot from "../src/screenshot/index.js";
@@ -8,6 +9,29 @@ describe("screenshot action", () => {
 
   beforeEach(() => {
     chromeStub = installChromeStub();
+  });
+
+  it("accepts only the four screenshot destinations", () => {
+    expect(screenshot.schema.properties?.destination?.enum).toEqual([
+      "copy",
+      "claude",
+      "chatgpt",
+      "gemini",
+    ]);
+    for (const destination of ["copy", "claude", "chatgpt", "gemini"]) {
+      expect(
+        validateSchema(screenshot.schema, {
+          action: "screenshot",
+          destination,
+        }).valid,
+      ).toBe(true);
+    }
+    expect(
+      validateSchema(screenshot.schema, {
+        action: "screenshot",
+        destination: "chatgpt.com",
+      }).valid,
+    ).toBe(false);
   });
 
   it("captures the active window and dispatches only the PNG", async () => {

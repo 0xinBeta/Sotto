@@ -43,6 +43,20 @@ describe("intent eval schema drift", () => {
     ).toBe(true);
   });
 
+  it("keeps at least six ChatGPT and Gemini screenshot cases", () => {
+    expect(
+      cases.filter(
+        (testCase) =>
+          testCase.expected.action === "screenshot" &&
+          "destination" in testCase.expected &&
+          (
+            testCase.expected.destination === "chatgpt" ||
+            testCase.expected.destination === "gemini"
+          ),
+      ).length,
+    ).toBeGreaterThanOrEqual(6);
+  });
+
   it("keeps at least eight playback-control cases", () => {
     expect(
       cases.filter((testCase) => testCase.expected.action === "playback")

@@ -1240,11 +1240,36 @@ function isAllowedFollowUp(value: unknown): value is DestinationFollowUp {
   };
   return (
     candidate.kind === "focus-or-open-tab" &&
-    candidate.createUrl === "https://claude.ai/new" &&
     Array.isArray(candidate.matchPatterns) &&
     candidate.matchPatterns.length === 1 &&
-    candidate.matchPatterns[0] === "https://claude.ai/*"
+    (
+      (
+        candidate.createUrl === "https://claude.ai/new" &&
+        candidate.matchPatterns[0] === "https://claude.ai/*"
+      ) ||
+      (
+        candidate.createUrl === "https://chatgpt.com/" &&
+        candidate.matchPatterns[0] === "https://chatgpt.com/*"
+      ) ||
+      (
+        candidate.createUrl === "https://gemini.google.com/app" &&
+        candidate.matchPatterns[0] === "https://gemini.google.com/*"
+      )
+    )
   );
+}
+
+function followUpDestinationName(followUp: DestinationFollowUp): string {
+  switch (followUp.createUrl) {
+    case "https://claude.ai/new":
+      return "Claude";
+    case "https://chatgpt.com/":
+      return "ChatGPT";
+    case "https://gemini.google.com/app":
+      return "Gemini";
+    default:
+      return "destination";
+  }
 }
 
 function parseClipboardWorkflowCompletion(
@@ -1303,7 +1328,9 @@ async function completeClipboardWorkflow(
   await sendPanel({
     type: "action-log",
     heard: "copy screenshot",
-    did: issued.followUp ? "copied and opened Claude" : "copied",
+    did: issued.followUp
+      ? `copied and opened ${followUpDestinationName(issued.followUp)}`
+      : "copied",
   });
 }
 

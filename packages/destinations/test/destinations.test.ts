@@ -52,6 +52,46 @@ describe("image destinations", () => {
       },
     });
   });
+
+  it("dispatches ChatGPT with a constrained focus-or-open follow-up", async () => {
+    const registry = new DestinationRegistry(destinations);
+
+    await expect(registry.dispatch("chatgpt", SCREENSHOT)).resolves.toMatchObject({
+      spoken: "Screenshot ready. Click Copy to open ChatGPT.",
+      workflow: {
+        buttonLabel: "Copy and open ChatGPT",
+        item: SCREENSHOT,
+        afterWrite: {
+          followUp: {
+            kind: "focus-or-open-tab",
+            matchPatterns: ["https://chatgpt.com/*"],
+            createUrl: "https://chatgpt.com/",
+          },
+          spoken: "Paste-ready — press Control V.",
+        },
+      },
+    });
+  });
+
+  it("dispatches Gemini with a constrained focus-or-open follow-up", async () => {
+    const registry = new DestinationRegistry(destinations);
+
+    await expect(registry.dispatch("gemini", SCREENSHOT)).resolves.toMatchObject({
+      spoken: "Screenshot ready. Click Copy to open Gemini.",
+      workflow: {
+        buttonLabel: "Copy and open Gemini",
+        item: SCREENSHOT,
+        afterWrite: {
+          followUp: {
+            kind: "focus-or-open-tab",
+            matchPatterns: ["https://gemini.google.com/*"],
+            createUrl: "https://gemini.google.com/app",
+          },
+          spoken: "Paste-ready — press Control V.",
+        },
+      },
+    });
+  });
 });
 
 describe("clipboard workflow", () => {
@@ -132,6 +172,65 @@ describe("Claude follow-up", () => {
 
     expect(create).toHaveBeenCalledWith({
       url: "https://claude.ai/new",
+      active: true,
+    });
+    expect(updateTab).not.toHaveBeenCalled();
+    expect(updateWindow).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatGPT follow-up", () => {
+  const followUp = {
+    kind: "focus-or-open-tab",
+    matchPatterns: ["https://chatgpt.com/*"],
+    createUrl: "https://chatgpt.com/",
+  } as const;
+
+  it("focuses an existing ChatGPT tab and its window", async () => {
+    const query = vi.fn().mockResolvedValue([
+      { id: 43, windowId: 8, url: "https://chatgpt.com/c/example" },
+    ]);
+    const updateTab = vi.fn().mockResolvedValue(undefined);
+    const updateWindow = vi.fn().mockResolvedValue(undefined);
+    const create = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("chrome", {
+      tabs: { query, update: updateTab, create },
+      windows: { update: updateWindow },
+    });
+
+    await executeDestinationFollowUp(followUp);
+
+    expect(query).toHaveBeenCalledWith({ url: ["https://chatgpt.com/*"] });
+    expect(updateTab).toHaveBeenCalledWith(43, { active: true });
+    expect(updateWindow).toHaveBeenCalledWith(8, { focused: true });
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("Gemini follow-up", () => {
+  const followUp = {
+    kind: "focus-or-open-tab",
+    matchPatterns: ["https://gemini.google.com/*"],
+    createUrl: "https://gemini.google.com/app",
+  } as const;
+
+  it("opens a new Gemini tab when no existing tab matches", async () => {
+    const query = vi.fn().mockResolvedValue([]);
+    const updateTab = vi.fn().mockResolvedValue(undefined);
+    const updateWindow = vi.fn().mockResolvedValue(undefined);
+    const create = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("chrome", {
+      tabs: { query, update: updateTab, create },
+      windows: { update: updateWindow },
+    });
+
+    await executeDestinationFollowUp(followUp);
+
+    expect(query).toHaveBeenCalledWith({
+      url: ["https://gemini.google.com/*"],
+    });
+    expect(create).toHaveBeenCalledWith({
+      url: "https://gemini.google.com/app",
       active: true,
     });
     expect(updateTab).not.toHaveBeenCalled();
