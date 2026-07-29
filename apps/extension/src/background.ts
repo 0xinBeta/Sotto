@@ -60,6 +60,12 @@ import {
 } from "./dictation.js";
 import { ConfirmationSession } from "./confirmation.js";
 import { ReminderSelectionSession } from "./reminder-selection.js";
+import {
+  buildDiagnosticReport,
+  PipelineErrorBuffer,
+  type DiagnosticOffscreenState,
+  type DiagnosticReportInput,
+} from "./diagnostic-report.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -109,6 +115,7 @@ let readingPaused = false;
 let lastSpokenResponse: string | undefined;
 let pendingReminderConfirmationId: string | undefined;
 const dictationSession = new DictationTargetSession();
+const pipelineErrors = new PipelineErrorBuffer();
 
 function actionContext(): ActionContext {
   return {
@@ -226,6 +233,12 @@ async function sendOffscreen(message: Record<string, unknown>): Promise<unknown>
 }
 
 async function sendPanel(message: Record<string, unknown>): Promise<boolean> {
+  if (
+    message.type === "pipeline-error" &&
+    typeof message.message === "string"
+  ) {
+    pipelineErrors.add(message.message);
+  }
   try {
     await chrome.runtime.sendMessage({ target: "sidepanel", ...message });
     return true;
@@ -233,6 +246,51 @@ async function sendPanel(message: Record<string, unknown>): Promise<boolean> {
     // The panel is intentionally optional; hotkey voice commands still work.
     return false;
   }
+}
+
+async function createDiagnosticReport(): Promise<string> {
+  const [rawState, settings, storageBytes] = await Promise.all([
+    sendOffscreen({ type: "get-diagnostic-state" }),
+    speechSettings.get(),
+    chrome.storage.local.getBytesInUse(null),
+  ]);
+  if (
+    typeof rawState !== "object" ||
+    rawState === null ||
+    Array.isArray(rawState)
+  ) {
+    throw new Error("Diagnostic state is unavailable");
+  }
+  const state = rawState as DiagnosticOffscreenState;
+  const input: DiagnosticReportInput = {
+    generatedAt: new Date().toISOString(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    chromeVersion: state.chromeVersion,
+    platform: state.platform,
+    webGpu: state.webGpu,
+    models: state.models,
+    modelStorageBytes: state.modelStorageBytes,
+    sttEngine: state.sttEngine,
+    sttTier: state.sttTier,
+    sttBackend: state.sttBackend,
+    premiumSttEnabled: state.premiumSttEnabled,
+    premiumSttState: state.premiumSttState,
+    ttsEngine: state.ttsEngine,
+    premiumTtsEnabled: state.premiumTtsEnabled,
+    premiumTtsState: state.premiumTtsState,
+    premiumTtsVoice: state.premiumTtsVoice,
+    ...(state.premiumTtsBackend === undefined
+      ? {}
+      : { premiumTtsBackend: state.premiumTtsBackend }),
+    nanoAvailability: state.nanoAvailability,
+    summarizerAvailability: state.summarizerAvailability,
+    micPermission: state.micPermission,
+    rate: settings.rate,
+    volume: settings.volume,
+    storageBytes,
+    pipelineErrors: pipelineErrors.snapshot(),
+  };
+  return buildDiagnosticReport(input);
 }
 
 async function speakAndPublishActionLog(
@@ -1663,6 +1721,8 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
   switch (message.type) {
     case "get-status":
       return sendOffscreen({ type: "get-status" });
+    case "get-diagnostic-report":
+      return createDiagnosticReport();
     case "get-speech-settings":
       return speechSettings.get();
     case "set-speech-settings": {
@@ -1970,6 +2030,21 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
 
 chrome.runtime.onMessage.addListener(
   (raw: unknown, _sender, sendResponse): boolean | void => {
+    if (
+      typeof raw === "object" &&
+      raw !== null &&
+      !Array.isArray(raw) &&
+      (raw as { readonly target?: unknown }).target === "sidepanel"
+    ) {
+      const message = raw as Record<string, unknown>;
+      if (
+        message.type === "pipeline-error" &&
+        typeof message.message === "string"
+      ) {
+        pipelineErrors.add(message.message);
+      }
+      return;
+    }
     if (
       typeof raw !== "object" ||
       raw === null ||

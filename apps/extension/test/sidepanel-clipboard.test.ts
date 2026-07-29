@@ -194,6 +194,7 @@ const elementIds = [
   "speech-rate-value",
   "speech-volume",
   "speech-volume-value",
+  "copy-diagnostic-report",
   "page-text-card",
   "page-text-title",
   "page-text-output",
@@ -260,8 +261,15 @@ async function installSidepanel(options: {
   let onMessage: ((message: unknown) => void) | undefined;
   const documentListeners = new Map<string, Listener[]>();
   const requestPermission = vi.fn().mockResolvedValue(true);
+  const clipboardWriteText = vi.fn().mockResolvedValue(undefined);
   const sendMessage = vi.fn().mockImplementation(
     async (message: { readonly type?: string }) => {
+      if (message.type === "get-diagnostic-report") {
+        return {
+          ok: true,
+          value: "# Sotto diagnostic report\nGenerated: 2026-07-29T10:20:30.000Z",
+        };
+      }
       if (message.type === "get-speech-settings") {
         return {
           ok: true,
@@ -302,6 +310,11 @@ async function installSidepanel(options: {
   vi.stubGlobal("window", {
     clearTimeout,
     setTimeout,
+  });
+  vi.stubGlobal("navigator", {
+    clipboard: {
+      writeText: clipboardWriteText,
+    },
   });
   vi.stubGlobal("chrome", {
     runtime: {
@@ -349,6 +362,7 @@ async function installSidepanel(options: {
 
   return {
     elements,
+    clipboardWriteText,
     emitDocument,
     onMessage,
     requestPermission,
@@ -365,6 +379,29 @@ afterEach(() => {
 });
 
 describe("side-panel screenshot clipboard fallback", () => {
+  it("copies one diagnostic report and adds one confirmation line", async () => {
+    const {
+      clipboardWriteText,
+      elements,
+      sendMessage,
+    } = await installSidepanel();
+
+    await elements["copy-diagnostic-report"].emit("click");
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "get-diagnostic-report",
+    });
+    expect(clipboardWriteText).toHaveBeenCalledOnce();
+    expect(clipboardWriteText).toHaveBeenCalledWith(
+      "# Sotto diagnostic report\nGenerated: 2026-07-29T10:20:30.000Z",
+    );
+    expect(elements["action-log"].children).toHaveLength(1);
+    expect(elements["action-log"].textContent).toContain(
+      "diagnostic report → Diagnostic report copied.",
+    );
+  });
+
   it("renders measured model storage and sends model actions", async () => {
     const { elements, onMessage, sendMessage } = await installSidepanel();
     onMessage({

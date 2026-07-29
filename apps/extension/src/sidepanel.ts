@@ -580,6 +580,8 @@ const speechVolume =
   requiredElement<HTMLInputElement>("#speech-volume");
 const speechVolumeValue =
   requiredElement<HTMLOutputElement>("#speech-volume-value");
+const copyDiagnosticReport =
+  requiredElement<HTMLButtonElement>("#copy-diagnostic-report");
 const pageTextCard = requiredElement<HTMLElement>("#page-text-card");
 const pageTextTitle = requiredElement<HTMLElement>("#page-text-title");
 const pageTextOutput = requiredElement<HTMLElement>("#page-text-output");
@@ -693,6 +695,36 @@ async function loadSpeechSettings(): Promise<void> {
     appendLog("speech settings", "Speech settings are unavailable.");
   }
 }
+
+copyDiagnosticReport.addEventListener("click", async () => {
+  copyDiagnosticReport.disabled = true;
+  try {
+    const report = await requestWorker<unknown>({
+      type: "get-diagnostic-report",
+    });
+    if (
+      typeof report !== "string" ||
+      !report.startsWith("# Sotto diagnostic report\n") ||
+      report.split("\n").length > 120
+    ) {
+      throw new Error("The diagnostic report is invalid.");
+    }
+    if (!navigator.clipboard?.writeText) {
+      throw new Error("Text clipboard writes are unavailable.");
+    }
+    await navigator.clipboard.writeText(report);
+    appendLog("diagnostic report", "Diagnostic report copied.");
+  } catch (error) {
+    appendLog(
+      "diagnostic report",
+      error instanceof Error
+        ? error.message
+        : "The diagnostic report could not be copied.",
+    );
+  } finally {
+    copyDiagnosticReport.disabled = false;
+  }
+});
 
 function selectPremiumVoiceInput(voice: KokoroVoiceId): void {
   for (const [voiceId, input] of premiumVoiceInputs) {

@@ -82,6 +82,7 @@ import {
   routeTranscriptForMode,
   type DictationState,
 } from "./dictation.js";
+import type { DiagnosticOffscreenState } from "./diagnostic-report.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -315,6 +316,51 @@ async function permissionState(): Promise<PermissionState | "unknown"> {
   }
 }
 
+interface UserAgentBrand {
+  readonly brand: string;
+  readonly version: string;
+}
+
+interface UserAgentDataLike {
+  readonly brands: readonly UserAgentBrand[];
+  readonly platform: string;
+  getHighEntropyValues?(
+    hints: readonly string[],
+  ): Promise<{
+    readonly fullVersionList?: readonly UserAgentBrand[];
+    readonly platformVersion?: string;
+  }>;
+}
+
+async function browserDetails(): Promise<{
+  readonly chromeVersion: string;
+  readonly platform: string;
+}> {
+  const userAgentData = (
+    navigator as Navigator & { readonly userAgentData?: UserAgentDataLike }
+  ).userAgentData;
+  if (!userAgentData) {
+    return { chromeVersion: "unknown", platform: "unknown" };
+  }
+
+  const details = userAgentData.getHighEntropyValues
+    ? await userAgentData.getHighEntropyValues([
+      "fullVersionList",
+      "platformVersion",
+    ]).catch(() => undefined)
+    : undefined;
+  const brands = details?.fullVersionList ?? userAgentData.brands;
+  const chrome = brands.find((brand) => brand.brand === "Google Chrome") ??
+    brands.find((brand) => brand.brand === "Chromium");
+  const platformVersion = details?.platformVersion?.trim();
+  return {
+    chromeVersion: chrome?.version ?? "unknown",
+    platform: platformVersion
+      ? `${userAgentData.platform} ${platformVersion}`
+      : userAgentData.platform,
+  };
+}
+
 let modelInventoryPublish: Promise<void> | undefined;
 
 async function getSummarizerAvailability(): Promise<ChromeAvailability> {
@@ -325,26 +371,34 @@ async function getSummarizerAvailability(): Promise<ChromeAvailability> {
   return await api.availability(SUMMARIZER_OPTIONS).catch(() => "unavailable");
 }
 
+async function currentModelInventory(
+  summarizer: ChromeAvailability,
+) {
+  await Promise.all([
+    ensurePremiumSettings(),
+    ensurePremiumSttSettings(),
+  ]);
+  const status = premiumSttStatus ?? premiumStt!.status;
+  return buildModelInventory({
+    cache: await modelCache.measure(),
+    tinyDownloading,
+    premiumSttTier: status.tier,
+    premiumSttState: status.state,
+    premiumTtsState,
+    premiumTtsEnabled,
+    premiumTtsVoice,
+    nano: nanoAvailability,
+    nanoActive: parserSession !== undefined || responderSession !== undefined,
+    summarizer,
+  });
+}
+
 async function publishModelInventory(): Promise<void> {
   if (modelInventoryPublish) return modelInventoryPublish;
   const pending = (async () => {
-    await Promise.all([
-      ensurePremiumSettings(),
-      ensurePremiumSttSettings(),
-    ]);
-    const status = premiumSttStatus ?? premiumStt!.status;
-    const inventory = buildModelInventory({
-      cache: await modelCache.measure(),
-      tinyDownloading,
-      premiumSttTier: status.tier,
-      premiumSttState: status.state,
-      premiumTtsState,
-      premiumTtsEnabled,
-      premiumTtsVoice,
-      nano: nanoAvailability,
-      nanoActive: parserSession !== undefined || responderSession !== undefined,
-      summarizer: await getSummarizerAvailability(),
-    });
+    const inventory = await currentModelInventory(
+      await getSummarizerAvailability(),
+    );
     await sendPanel({ type: "model-inventory", ...inventory });
   })();
   modelInventoryPublish = pending;
@@ -365,6 +419,58 @@ async function refreshModelInventory(): Promise<void> {
   modelCache.invalidate();
   await modelInventoryPublish?.catch(() => undefined);
   await publishModelInventory();
+}
+
+async function diagnosticState(): Promise<DiagnosticOffscreenState> {
+  const [nextNano, summarizer, micPermission, runtime] = await Promise.all([
+    getNanoAvailability(),
+    getSummarizerAvailability(),
+    permissionState(),
+    browserDetails(),
+  ]);
+  nanoAvailability = nextNano;
+  const inventory = await currentModelInventory(summarizer);
+  const status = premiumSttStatus ?? premiumStt!.status;
+  const usePremiumStt = status.enabled;
+  const webGpu = status.tier === "parakeet";
+
+  return {
+    ...runtime,
+    webGpu,
+    models: inventory.rows.map((row) => ({
+      id: row.id,
+      state: row.state,
+      ...(row.bytes === undefined ? {} : { bytes: row.bytes }),
+    })),
+    modelStorageBytes: inventory.totalBytes,
+    sttEngine:
+      usePremiumStt && status.tier === "parakeet"
+        ? "parakeet"
+        : "moonshine",
+    sttTier:
+      usePremiumStt
+        ? status.tier === "parakeet"
+          ? "v3"
+          : "base"
+        : "tiny",
+    sttBackend: usePremiumStt
+      ? status.backend
+      : webGpu
+        ? "webgpu"
+        : "wasm",
+    premiumSttEnabled: status.enabled,
+    premiumSttState: status.state,
+    ttsEngine: premiumTtsEnabled ? "kokoro" : "system",
+    premiumTtsEnabled,
+    premiumTtsState,
+    premiumTtsVoice,
+    ...(premiumTtsBackend === undefined
+      ? {}
+      : { premiumTtsBackend }),
+    nanoAvailability,
+    summarizerAvailability: summarizer,
+    micPermission,
+  };
 }
 
 async function publishStatus(error?: string): Promise<void> {
@@ -1941,6 +2047,8 @@ async function handleOffscreenMessage(
       modelCache.invalidate();
       await publishStatus();
       return;
+    case "get-diagnostic-state":
+      return diagnosticState();
     case "refresh-permissions":
       await publishStatus();
       return;

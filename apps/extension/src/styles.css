@@ -740,6 +740,10 @@ h2 {
   appearance: none;
 }
 
+.diagnostic-action {
+  margin-top: 20px;
+}
+
 .progress-copy {
   margin-bottom: 8px;
   color: var(--paper-dim);
