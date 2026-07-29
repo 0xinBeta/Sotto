@@ -138,6 +138,20 @@ describe("intent eval schema drift", () => {
     expect(reminderCases.length).toBeGreaterThanOrEqual(6);
   });
 
+  it("keeps six snooze cases, including the out-of-window negative", () => {
+    const snoozeCases = cases.filter((testCase) =>
+      testCase.id.startsWith("notes-snooze-reminder-") ||
+      testCase.id.startsWith("unknown-notes-snooze-out-of-window-")
+    );
+
+    expect(snoozeCases).toHaveLength(6);
+    expect(
+      snoozeCases.find((testCase) =>
+        testCase.id.startsWith("unknown-notes-snooze-out-of-window-")
+      )?.expected,
+    ).toEqual({ action: "unknown" });
+  });
+
   it("keeps at least six start and six stop dictation cases", () => {
     const dictationCases = cases.filter(
       (testCase) => testCase.expected.action === "dictation",

@@ -404,6 +404,74 @@ describe("reminder scheduling", () => {
     expect(storage.remove).toHaveBeenCalledWith("reminder:record-1");
   });
 
+  it("saves a snooze before its alarm and restores delivery on failure", async () => {
+    const delivered = reminder(
+      "snooze",
+      "2026-07-28T11:59:00.000Z",
+      "delivered",
+    );
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      "reminder:snooze": delivered,
+    });
+    const alarms = new MemoryAlarmStore();
+    const order: string[] = [];
+    storage.set.mockImplementation(async (items) => {
+      order.push(
+        (items["reminder:snooze"] as ReminderRecord).status,
+      );
+      Object.assign(storage.values, items);
+    });
+    alarms.create.mockImplementation(async () => {
+      order.push("alarm");
+      throw new Error("alarm unavailable");
+    });
+    const { store } = makeStore(storage, alarms);
+
+    await expect(store.snoozeReminder("snooze", 10)).rejects.toThrow(
+      "alarm unavailable",
+    );
+
+    expect(order).toEqual(["scheduled", "alarm", "delivered"]);
+    expect(storage.values["reminder:snooze"]).toEqual(delivered);
+  });
+
+  it("allows a new snooze after the rescheduled reminder fires", async () => {
+    let now = new Date(NOW);
+    const delivered = reminder(
+      "repeat",
+      "2026-07-28T11:59:00.000Z",
+      "delivered",
+    );
+    const storage = new MemoryStorageArea({
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      "reminder:repeat": delivered,
+    });
+    const alarms = new MemoryAlarmStore();
+    const store = new NotesReminderStore({
+      storage,
+      alarms,
+      now: () => new Date(now),
+    });
+
+    await expect(store.snoozeReminder("repeat", 5)).resolves.toMatchObject({
+      dueAt: "2026-07-28T12:05:00.000Z",
+      status: "scheduled",
+    });
+
+    now = new Date("2026-07-28T12:06:00.000Z");
+    await expect(
+      store.handleReminderAlarm("reminder:repeat", { now }),
+    ).resolves.toMatchObject({ status: "delivered" });
+    await expect(store.snoozeReminder("repeat", 30)).resolves.toMatchObject({
+      dueAt: "2026-07-28T12:36:00.000Z",
+      status: "scheduled",
+    });
+    expect(alarms.create).toHaveBeenLastCalledWith("reminder:repeat", {
+      when: Date.parse("2026-07-28T12:36:00.000Z"),
+    });
+  });
+
   it("retries duplicate reminder ids without overwriting the first record", async () => {
     const { store, storage } = makeStore(
       undefined,

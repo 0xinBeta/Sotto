@@ -625,6 +625,36 @@
     "transcript": "delete my reminder",
     "expected": { "action": "notes", "operation": "cancel-reminder" }
   },
+  {
+    "id": "notes-snooze-reminder-01",
+    "transcript": "snooze",
+    "expected": { "action": "notes", "operation": "snooze", "delayMinutes": 10 }
+  },
+  {
+    "id": "notes-snooze-reminder-02",
+    "transcript": "snooze ten minutes",
+    "expected": { "action": "notes", "operation": "snooze", "delayMinutes": 10 }
+  },
+  {
+    "id": "notes-snooze-reminder-03",
+    "transcript": "snooze for five minutes",
+    "expected": { "action": "notes", "operation": "snooze", "delayMinutes": 5 }
+  },
+  {
+    "id": "notes-snooze-reminder-04",
+    "transcript": "snooze the reminder for thirty minutes",
+    "expected": { "action": "notes", "operation": "snooze", "delayMinutes": 30 }
+  },
+  {
+    "id": "notes-snooze-reminder-05",
+    "transcript": "snooze it for one hour",
+    "expected": { "action": "notes", "operation": "snooze", "delayMinutes": 60 }
+  },
+  {
+    "id": "unknown-notes-snooze-out-of-window-01",
+    "transcript": "snooze the reminder from yesterday",
+    "expected": { "action": "unknown" }
+  },
 
   {
     "id": "page-control-scroll-down-01",

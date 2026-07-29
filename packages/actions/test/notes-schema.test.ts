@@ -24,6 +24,7 @@ describe("notes action schema", () => {
       text: "Stretch",
       delayMinutes: 0.5,
     },
+    { action: "notes", operation: "snooze", delayMinutes: 10 },
     { action: "notes", operation: "list-reminders" },
     { action: "notes", operation: "cancel-reminder" },
   ])("accepts a valid command", (command) => {
@@ -55,6 +56,11 @@ describe("notes action schema", () => {
       action: "notes",
       operation: "cancel-reminder",
       text: "Page-derived reminder",
+    },
+    {
+      action: "notes",
+      operation: "snooze",
+      delayMinutes: 15,
     },
   ])("rejects out-of-contract command data", (command) => {
     expect(validateSchema(notesSchema, command).valid).toBe(false);

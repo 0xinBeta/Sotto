@@ -74,6 +74,11 @@ import {
 import { ConfirmationSession } from "./confirmation.js";
 import { ReminderSelectionSession } from "./reminder-selection.js";
 import {
+  FreshReminderSession,
+  parseSnoozeDelayMinutes,
+  type SnoozeDelayMinutes,
+} from "./reminder-snooze.js";
+import {
   buildDiagnosticReport,
   PipelineErrorBuffer,
   type DiagnosticOffscreenState,
@@ -163,6 +168,7 @@ const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
 const confirmationSession = new ConfirmationSession();
 const reminderSelectionSession =
   new ReminderSelectionSession<ReminderRecord>();
+const freshReminderSession = new FreshReminderSession();
 
 let creatingOffscreen: Promise<void> | undefined;
 let commandGeneration = 0;
@@ -750,6 +756,7 @@ async function confirmationResult(
 }
 
 async function deliverReminder(reminder: ReminderRecord): Promise<void> {
+  freshReminderSession.remember(reminder.id);
   const notificationId = reminderNotificationId(reminder);
   const [permission, quiet] = await Promise.all([
     chrome.notifications.getPermissionLevel(),
@@ -764,6 +771,7 @@ async function deliverReminder(reminder: ReminderRecord): Promise<void> {
       message: reminder.text,
       eventTime: Date.parse(reminder.dueAt),
       silent: quiet,
+      buttons: [{ title: "Snooze 10 minutes" }],
     });
     notificationDelivered = true;
   }
@@ -784,6 +792,7 @@ async function deliverReminder(reminder: ReminderRecord): Promise<void> {
     console.warn("Sotto could not speak the reminder", error);
   }
   if (!notificationDelivered && !panelDelivered && !speechDelivered) {
+    freshReminderSession.clear(reminder.id);
     throw new Error(
       "Reminder delivery failed because notifications are denied and no fallback is available",
     );
@@ -810,6 +819,34 @@ async function cancelReminderResult(
     spoken: cancelled
       ? "Cancelled the reminder."
       : "That reminder is no longer pending.",
+  };
+}
+
+function isSnoozeReminderCommand(command: ActionCommand): boolean {
+  return command.action === "notes" &&
+    (command as { readonly operation?: unknown }).operation === "snooze";
+}
+
+function snoozeDelayText(delayMinutes: SnoozeDelayMinutes): string {
+  return delayMinutes === 60 ? "1 hour" : `${delayMinutes} minutes`;
+}
+
+async function snoozeReminderResult(
+  reminderId: string,
+  delayMinutes: SnoozeDelayMinutes,
+): Promise<ActionResult | undefined> {
+  const snoozed = await notesReminderStore.snoozeReminder(
+    reminderId,
+    delayMinutes,
+  );
+  freshReminderSession.clear(reminderId);
+  if (!snoozed) return undefined;
+  await chrome.notifications
+    .clear(reminderNotificationId(snoozed))
+    .catch(() => false);
+  return {
+    spoken:
+      `Snoozed the reminder for ${snoozeDelayText(delayMinutes)}.`,
   };
 }
 
@@ -2499,6 +2536,39 @@ async function executeCommand(
     }
 
     const validated = commandRouter.parse(command);
+    if (isSnoozeReminderCommand(validated)) {
+      generation = beginCommandGeneration();
+      generationStarted = true;
+      const actionStartedAt = performance.now();
+      const delayMinutes = parseSnoozeDelayMinutes(transcript);
+      const reminderId = freshReminderSession.current();
+      let publishedCommand: ActionCommand = { action: "unknown" };
+      let result: ActionResult | undefined;
+      if (delayMinutes !== undefined && reminderId !== undefined) {
+        result = await snoozeReminderResult(reminderId, delayMinutes);
+        if (result) {
+          publishedCommand = {
+            action: "notes",
+            operation: "snooze",
+            delayMinutes,
+          } as ActionCommand;
+        }
+      }
+      result ??= await routeAction({ action: "unknown" });
+      completedTimings = {
+        ...timings,
+        actionMs: Math.max(0, performance.now() - actionStartedAt),
+      };
+      if (!commandIsCurrent(generation)) return undefined;
+      await publishActionResult(
+        transcript,
+        publishedCommand,
+        result,
+        generation,
+        completedTimings,
+      );
+      return result;
+    }
     if (validated.action === "playback") {
       const operation = (validated as { readonly operation?: unknown })
         .operation;
@@ -3298,6 +3368,23 @@ chrome.notifications?.onClicked?.addListener((notificationId) => {
     "Sotto could not open the reminder",
   );
 });
+
+chrome.notifications?.onButtonClicked?.addListener(
+  (notificationId, buttonIndex) => {
+    if (buttonIndex !== 0) return;
+    const parsed = parseReminderNotificationId(notificationId);
+    if (!parsed) return;
+
+    runAndReport(
+      (async () => {
+        const result = await snoozeReminderResult(parsed.reminderId, 10);
+        await chrome.notifications.clear(notificationId);
+        if (result) await publishReminders();
+      })(),
+      "Sotto could not snooze the reminder",
+    );
+  },
+);
 
 if (chrome.storage?.local && chrome.alarms && chrome.notifications) {
   runAndReport(

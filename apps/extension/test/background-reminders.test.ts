@@ -11,7 +11,19 @@ vi.mock("@sotto/actions", () => ({
 }));
 vi.mock("@sotto/core", () => ({
   ActionRegistry: class ActionRegistry {},
-  CommandRouter: class CommandRouter {},
+  CommandRouter: class CommandRouter {
+    parse(command: unknown) {
+      return command;
+    }
+
+    route(command: { readonly action?: unknown }) {
+      return Promise.resolve({
+        spoken: command.action === "unknown"
+          ? "Sorry, say that again?"
+          : "Unexpected command.",
+      });
+    }
+  },
   CommandValidationError: class CommandValidationError extends Error {},
   DestinationRegistry: class DestinationRegistry {},
 }));
@@ -31,6 +43,10 @@ interface ReminderHarness {
   readonly values: Record<string, unknown>;
   readonly alarmCreate: ReturnType<typeof vi.fn>;
   readonly alarmListener: (alarm: { readonly name: string }) => void;
+  readonly notificationButtonListener: (
+    notificationId: string,
+    buttonIndex: number,
+  ) => void;
   readonly notificationClickListener: (notificationId: string) => void;
   readonly notificationCreate: ReturnType<typeof vi.fn>;
   readonly notificationClear: ReturnType<typeof vi.fn>;
@@ -40,6 +56,9 @@ interface ReminderHarness {
   readonly tabCreate: ReturnType<typeof vi.fn>;
   readonly tabUpdate: ReturnType<typeof vi.fn>;
   readonly windowUpdate: ReturnType<typeof vi.fn>;
+  readonly workerMessage: (
+    message: Record<string, unknown>,
+  ) => Promise<unknown>;
 }
 
 function reminder(
@@ -78,6 +97,16 @@ async function installBackground(options: {
     | undefined;
   let notificationClickListener:
     | ((notificationId: string) => void)
+    | undefined;
+  let notificationButtonListener:
+    | ((notificationId: string, buttonIndex: number) => void)
+    | undefined;
+  let onMessage:
+    | ((
+        message: unknown,
+        sender: unknown,
+        respond: (response: unknown) => void,
+      ) => boolean | void)
     | undefined;
   const panelSend = vi.fn();
   const runtimeSend = vi.fn(
@@ -132,7 +161,11 @@ async function installBackground(options: {
         .fn()
         .mockResolvedValue([{ contextType: "OFFSCREEN_DOCUMENT" }]),
       sendMessage: runtimeSend,
-      onMessage: { addListener: vi.fn() },
+      onMessage: {
+        addListener: vi.fn((listener) => {
+          onMessage = listener;
+        }),
+      },
       onInstalled: { addListener: vi.fn() },
       onStartup: { addListener: vi.fn() },
     },
@@ -145,6 +178,11 @@ async function installBackground(options: {
       local: {
         get: storageGet,
         set: storageSet,
+        remove: vi.fn(async (keys: string | readonly string[]) => {
+          for (const key of Array.isArray(keys) ? keys : [keys]) {
+            delete values[key];
+          }
+        }),
         setAccessLevel: vi.fn().mockResolvedValue(undefined),
       },
     },
@@ -170,6 +208,11 @@ async function installBackground(options: {
           notificationClickListener = listener;
         }),
       },
+      onButtonClicked: {
+        addListener: vi.fn((listener) => {
+          notificationButtonListener = listener;
+        }),
+      },
     },
     tabs: {
       query: vi.fn().mockResolvedValue([]),
@@ -187,13 +230,19 @@ async function installBackground(options: {
 
   await import("../src/background.js");
   await vi.waitFor(() => expect(storageGet).toHaveBeenCalled());
-  if (!alarmListener || !notificationClickListener) {
+  if (
+    !alarmListener ||
+    !notificationClickListener ||
+    !notificationButtonListener ||
+    !onMessage
+  ) {
     throw new Error("Background reminder listeners were not installed");
   }
   return {
     values,
     alarmCreate,
     alarmListener,
+    notificationButtonListener,
     notificationClickListener,
     notificationCreate,
     notificationClear,
@@ -203,6 +252,16 @@ async function installBackground(options: {
     tabCreate,
     tabUpdate,
     windowUpdate,
+    workerMessage: (message) =>
+      new Promise((resolve) => {
+        expect(
+          onMessage?.(
+            { target: "worker", ...message },
+            {},
+            resolve,
+          ),
+        ).toBe(true);
+      }),
   };
 }
 
@@ -323,9 +382,136 @@ describe("background reminder recovery", () => {
         expect.objectContaining({
           type: "basic",
           message: "Reminder windowed",
+          buttons: [{ title: "Snooze 10 minutes" }],
         }),
       ),
     );
+  });
+
+  it("snoozes from the notification button and publishes the new time", async () => {
+    const delivered = reminder(
+      "button",
+      "2000-01-01T00:00:00.000Z",
+      "delivered",
+    );
+    const harness = await installBackground({
+      values: {
+        schemaVersion: 1,
+        "reminder:button": delivered,
+      },
+    });
+    harness.alarmCreate.mockClear();
+    harness.panelSend.mockClear();
+
+    harness.notificationButtonListener("reminder:button", 0);
+
+    await vi.waitFor(() =>
+      expect(harness.values["reminder:button"]).toMatchObject({
+        status: "scheduled",
+      }),
+    );
+    const snoozed = harness.values["reminder:button"] as {
+      readonly dueAt: string;
+    };
+    expect(harness.alarmCreate).toHaveBeenCalledWith("reminder:button", {
+      when: Date.parse(snoozed.dueAt),
+    });
+    expect(harness.notificationClear).toHaveBeenCalledWith(
+      "reminder:button",
+    );
+    expect(harness.panelSend).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reminders-updated",
+      reminders: [
+        {
+          id: "button",
+          text: "Reminder button",
+          dueAt: snoozed.dueAt,
+        },
+      ],
+    });
+  });
+
+  it("snoozes by voice during the fresh reminder window", async () => {
+    const future = reminder("voice", "2099-01-01T00:00:00.000Z");
+    const harness = await installBackground({
+      values: {
+        schemaVersion: 1,
+        "reminder:voice": future,
+      },
+      existingAlarms: ["reminder:voice"],
+    });
+    harness.values["reminder:voice"] = reminder(
+      "voice",
+      "2000-01-01T00:00:00.000Z",
+    );
+    worker.speak.mockResolvedValue(undefined);
+    harness.alarmListener({ name: "reminder:voice" });
+    await vi.waitFor(() =>
+      expect(harness.values["reminder:voice"]).toMatchObject({
+        status: "delivered",
+      }),
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "snooze ten minutes",
+        command: {
+          action: "notes",
+          operation: "snooze",
+          delayMinutes: 10,
+        },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Snoozed the reminder for 10 minutes." },
+    });
+    expect(harness.values["reminder:voice"]).toMatchObject({
+      status: "scheduled",
+    });
+  });
+
+  it("uses the unknown path after the fresh reminder window", async () => {
+    const future = reminder("expired", "2099-01-01T00:00:00.000Z");
+    const harness = await installBackground({
+      values: {
+        schemaVersion: 1,
+        "reminder:expired": future,
+      },
+      existingAlarms: ["reminder:expired"],
+    });
+    harness.values["reminder:expired"] = reminder(
+      "expired",
+      "2000-01-01T00:00:00.000Z",
+    );
+    worker.speak.mockResolvedValue(undefined);
+    const firedAt = Date.now();
+    harness.alarmListener({ name: "reminder:expired" });
+    await vi.waitFor(() =>
+      expect(harness.values["reminder:expired"]).toMatchObject({
+        status: "delivered",
+      }),
+    );
+    vi.spyOn(Date, "now").mockReturnValue(firedAt + 61_000);
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "snooze",
+        command: {
+          action: "notes",
+          operation: "snooze",
+          delayMinutes: 10,
+        },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Sorry, say that again?" },
+    });
+    expect(harness.values["reminder:expired"]).toMatchObject({
+      status: "delivered",
+    });
   });
 
   it("shows a silent notification and skips the spoken ping in quiet mode", async () => {

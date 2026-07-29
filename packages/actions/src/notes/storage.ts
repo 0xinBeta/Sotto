@@ -526,6 +526,56 @@ export class NotesReminderStore {
     });
   }
 
+  snoozeReminder(
+    reminderId: string,
+    delayMinutes: number,
+  ): Promise<ReminderRecord | undefined> {
+    return this.#enqueueMutation(async () => {
+      if (!isId(reminderId)) {
+        throw new TypeError("A valid reminder id is required");
+      }
+      const delay = parseReminderDelayMinutes(delayMinutes);
+      const key = `${REMINDER_KEY_PREFIX}${reminderId}`;
+      const values = await this.#storage.get([
+        NOTES_SCHEMA_VERSION_KEY,
+        key,
+      ]);
+      assertSchemaVersion(values, values[key] !== undefined);
+      const reminder = values[key];
+      if (reminder === undefined) return undefined;
+      if (!isReminderRecord(reminder) || reminder.id !== reminderId) {
+        throw new Error(`Invalid reminder record at ${key}`);
+      }
+      if (reminder.status !== "delivered") return undefined;
+
+      const snoozed: ReminderRecord = {
+        ...reminder,
+        dueAt: new Date(
+          this.#now().getTime() + delay * 60_000,
+        ).toISOString(),
+        status: "scheduled",
+      };
+
+      // Storage is authoritative. Save the new time before the disposable
+      // alarm registry entry.
+      await this.#updateRecord(key, snoozed);
+      try {
+        await this.#alarms.create(snoozed.alarmName, {
+          when: Date.parse(snoozed.dueAt),
+        });
+      } catch (error) {
+        try {
+          await this.#updateRecord(key, reminder);
+        } catch {
+          // Do not leave a failed snooze ready for later reconciliation.
+          await this.#remove(key).catch(() => undefined);
+        }
+        throw error;
+      }
+      return snoozed;
+    });
+  }
+
   scheduleReminder(input: ScheduleReminderInput): Promise<ReminderRecord> {
     return this.#enqueueMutation(async () => {
       const delayMinutes = parseReminderDelayMinutes(input.delayMinutes);

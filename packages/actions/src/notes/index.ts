@@ -35,6 +35,11 @@ export type NotesCommand =
     }
   | {
       readonly action: "notes";
+      readonly operation: "snooze";
+      readonly delayMinutes: 5 | 10 | 30 | 60;
+    }
+  | {
+      readonly action: "notes";
       readonly operation: "list-reminders" | "cancel-reminder";
     };
 
@@ -101,6 +106,21 @@ export const notesSchema = {
         },
       },
       required: ["action", "operation", "text", "delayMinutes"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        action: { const: "notes" },
+        operation: { const: "snooze" },
+        delayMinutes: {
+          type: "number",
+          enum: [5, 10, 30, 60],
+          description:
+            "A closed snooze delay parsed only from the transcript",
+        },
+      },
+      required: ["action", "operation", "delayMinutes"],
       additionalProperties: false,
     },
     {
@@ -211,6 +231,22 @@ const notesAction = defineAction<NotesCommand>({
       emit: { action: "notes", operation: "list-reminders" },
     },
     {
+      say: "snooze",
+      emit: {
+        action: "notes",
+        operation: "snooze",
+        delayMinutes: 10,
+      },
+    },
+    {
+      say: "snooze for one hour",
+      emit: {
+        action: "notes",
+        operation: "snooze",
+        delayMinutes: 60,
+      },
+    },
+    {
       say: "cancel my reminder",
       emit: { action: "notes", operation: "cancel-reminder" },
     },
@@ -317,6 +353,8 @@ const notesAction = defineAction<NotesCommand>({
                 .join(". "),
           };
         }
+        case "snooze":
+          return { spoken: "Sorry, say that again?" };
         case "cancel-reminder": {
           const reminders = await notesReminderStore.listPendingReminders();
           const reminder = reminders[0];
