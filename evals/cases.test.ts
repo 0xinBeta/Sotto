@@ -6,6 +6,7 @@ import { composeResponseConstraint } from "../packages/nano/src/index.js";
 import cases from "./cases.json";
 
 const constraint = composeResponseConstraint(new ActionRegistry(actions));
+const actionIds = actions.map((action) => action.id);
 
 describe("intent eval schema drift", () => {
   it.each(cases)("$id expected command matches the composed schema", (testCase) => {
@@ -194,6 +195,48 @@ describe("intent eval schema drift", () => {
     ).toBe(true);
   });
 
+  it.each(actionIds)(
+    "keeps eight positives and four explicit negatives for %s",
+    (actionId) => {
+      const positives = cases.filter(
+        (testCase) => testCase.expected.action === actionId,
+      );
+      const negatives = cases.filter(
+        (testCase) =>
+          "negativeFor" in testCase &&
+          testCase.negativeFor === actionId,
+      );
+
+      expect(positives.length).toBeGreaterThanOrEqual(8);
+      expect(negatives.length).toBeGreaterThanOrEqual(4);
+      expect(
+        negatives.every(
+          (testCase) =>
+            typeof testCase.expected.action === "string" &&
+            testCase.expected.action !== actionId,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("keeps at least thirty cross-action confusable cases", () => {
+    const confusables = cases.filter(
+      (testCase) =>
+        "confusable" in testCase &&
+        testCase.confusable === true,
+    );
+
+    expect(confusables.length).toBeGreaterThanOrEqual(30);
+    expect(
+      confusables.every(
+        (testCase) =>
+          "negativeFor" in testCase &&
+          testCase.expected.action !== "unknown" &&
+          testCase.expected.action !== testCase.negativeFor,
+      ),
+    ).toBe(true);
+  });
+
   it("keeps follow-up memory in the approved structural form", () => {
     const memoryEntries = cases.flatMap((testCase) =>
       "memory" in testCase ? testCase.memory : []
@@ -363,5 +406,16 @@ describe("intent eval schema drift", () => {
     expect(new Set(cases.map((testCase) => testCase.id)).size).toBe(
       cases.length,
     );
+  });
+
+  it("keeps eval transcripts unique within the same context", () => {
+    const keys = cases.map((testCase) =>
+      JSON.stringify({
+        transcript: testCase.transcript.trim().toLowerCase(),
+        memory: "memory" in testCase ? testCase.memory : [],
+      })
+    );
+
+    expect(new Set(keys).size).toBe(cases.length);
   });
 });

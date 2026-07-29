@@ -1360,5 +1360,860 @@
     "id": "quiet-mode-off-03",
     "transcript": "turn quiet mode off",
     "expected": { "action": "quiet-mode", "operation": "off" }
+  },
+
+  {
+    "id": "matrix-screenshot-positive-01",
+    "transcript": "screenshot",
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "matrix-screenshot-positive-02",
+    "transcript": "please capture this tab",
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "matrix-screenshot-positive-03",
+    "transcript": "could you save a picture of everything visible in this browser tab",
+    "expected": { "action": "screenshot", "destination": "save" }
+  },
+  {
+    "id": "matrix-screenshot-positive-04",
+    "transcript": "send this screen grab to chat g p t",
+    "expected": { "action": "screenshot", "destination": "chatgpt" }
+  },
+  {
+    "id": "matrix-screenshot-positive-05",
+    "transcript": "captur ths screen for Gemini",
+    "expected": { "action": "screenshot", "destination": "gemini" }
+  },
+  {
+    "id": "matrix-screenshot-positive-06",
+    "transcript": "put a screen capture in my Claude chat",
+    "expected": { "action": "screenshot", "destination": "claude" }
+  },
+  {
+    "id": "matrix-screenshot-negative-01",
+    "transcript": "note a screenshot idea for the launch",
+    "negativeFor": "screenshot",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "create", "body": "A screenshot idea for the launch" }
+  },
+  {
+    "id": "matrix-screenshot-negative-02",
+    "transcript": "what does the screenshot on this page mean",
+    "negativeFor": "screenshot",
+    "confusable": true,
+    "expected": { "action": "ask-page", "question": "What does the screenshot on this page mean?", "scope": "page" }
+  },
+  {
+    "id": "matrix-screenshot-negative-03",
+    "transcript": "take screenshots every ten minutes",
+    "negativeFor": "screenshot",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-screenshot-negative-04",
+    "transcript": "edit this screenshot and blur the address",
+    "negativeFor": "screenshot",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-tabs-positive-01",
+    "transcript": "tab count",
+    "expected": { "action": "tabs", "operation": "count" }
+  },
+  {
+    "id": "matrix-tabs-positive-02",
+    "transcript": "please tell me how many browser tabs are open",
+    "expected": { "action": "tabs", "operation": "count" }
+  },
+  {
+    "id": "matrix-tabs-positive-03",
+    "transcript": "could you count every tab in this window for me",
+    "expected": { "action": "tabs", "operation": "count" }
+  },
+  {
+    "id": "matrix-tabs-positive-04",
+    "transcript": "how many browser taps do I got",
+    "expected": { "action": "tabs", "operation": "count" }
+  },
+  {
+    "id": "matrix-tabs-positive-05",
+    "transcript": "open me a fresh tab please",
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "matrix-tabs-positive-06",
+    "transcript": "bring back the browser tab I closed by mistake",
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "matrix-tabs-negative-01",
+    "transcript": "close the reminder",
+    "negativeFor": "tabs",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "cancel-reminder" }
+  },
+  {
+    "id": "matrix-tabs-negative-02",
+    "transcript": "how many notes do I have",
+    "negativeFor": "tabs",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "list" }
+  },
+  {
+    "id": "matrix-tabs-negative-03",
+    "transcript": "close every tab except this one",
+    "negativeFor": "tabs",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-tabs-negative-04",
+    "transcript": "move this tab into a new window",
+    "negativeFor": "tabs",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-translate-positive-01",
+    "transcript": "Spanish please for this page",
+    "expected": { "action": "translate", "targetLanguage": "es", "scope": "page" }
+  },
+  {
+    "id": "matrix-translate-positive-02",
+    "transcript": "could you translate the highlighted text into Italian",
+    "expected": { "action": "translate", "targetLanguage": "it", "scope": "selection" }
+  },
+  {
+    "id": "matrix-translate-positive-03",
+    "transcript": "please give me this whole article in Arabic",
+    "expected": { "action": "translate", "targetLanguage": "ar", "scope": "page" }
+  },
+  {
+    "id": "matrix-translate-positive-04",
+    "transcript": "translat my selection to Dutch",
+    "expected": { "action": "translate", "targetLanguage": "nl", "scope": "selection" }
+  },
+  {
+    "id": "matrix-translate-positive-05",
+    "transcript": "I would like a Russian version of the current page",
+    "expected": { "action": "translate", "targetLanguage": "ru", "scope": "page" }
+  },
+  {
+    "id": "matrix-translate-positive-06",
+    "transcript": "change the selected passage into Chinese",
+    "expected": { "action": "translate", "targetLanguage": "zh", "scope": "selection" }
+  },
+  {
+    "id": "matrix-translate-negative-01",
+    "transcript": "make a note to translate the contract tomorrow",
+    "negativeFor": "translate",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "create", "body": "Translate the contract tomorrow" }
+  },
+  {
+    "id": "matrix-translate-negative-02",
+    "transcript": "search the web for a French translation of Hamlet",
+    "negativeFor": "translate",
+    "confusable": true,
+    "expected": { "action": "navigate", "operation": "search", "query": "a French translation of Hamlet" }
+  },
+  {
+    "id": "matrix-translate-negative-03",
+    "transcript": "translate my microphone audio live",
+    "negativeFor": "translate",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-translate-negative-04",
+    "transcript": "add Klingon to the translation languages",
+    "negativeFor": "translate",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-summarize-positive-01",
+    "transcript": "page summary",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "page" }
+  },
+  {
+    "id": "matrix-summarize-positive-02",
+    "transcript": "please sum up the text I selected",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "selection" }
+  },
+  {
+    "id": "matrix-summarize-positive-03",
+    "transcript": "could you give me a brief overview of this entire article",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "page" }
+  },
+  {
+    "id": "matrix-summarize-positive-04",
+    "transcript": "summarise this pag for me",
+    "expected": { "action": "summarize", "mode": "summarize", "scope": "page" }
+  },
+  {
+    "id": "matrix-summarize-positive-05",
+    "transcript": "read the highlighted paragraph aloud please",
+    "expected": { "action": "summarize", "mode": "read", "scope": "selection" }
+  },
+  {
+    "id": "matrix-summarize-positive-06",
+    "transcript": "start reading the full article from here",
+    "expected": { "action": "summarize", "mode": "read", "scope": "page" }
+  },
+  {
+    "id": "matrix-summarize-negative-01",
+    "transcript": "note the article summary for later",
+    "negativeFor": "summarize",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "create", "body": "The article summary for later" }
+  },
+  {
+    "id": "matrix-summarize-negative-02",
+    "transcript": "search the web for article summarization tools",
+    "negativeFor": "summarize",
+    "confusable": true,
+    "expected": { "action": "navigate", "operation": "search", "query": "article summarization tools" }
+  },
+  {
+    "id": "matrix-summarize-negative-03",
+    "transcript": "summarize all my open tabs",
+    "negativeFor": "summarize",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-summarize-negative-04",
+    "transcript": "send this summary by email",
+    "negativeFor": "summarize",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-ask-page-positive-01",
+    "transcript": "does this page list any requirements",
+    "expected": { "action": "ask-page", "question": "Does this page list any requirements?", "scope": "page" }
+  },
+  {
+    "id": "matrix-ask-page-positive-02",
+    "transcript": "please tell me who the article quotes",
+    "expected": { "action": "ask-page", "question": "Who does the article quote?", "scope": "page" }
+  },
+  {
+    "id": "matrix-ask-page-positive-03",
+    "transcript": "in the selected text what does latency mean",
+    "expected": { "action": "ask-page", "question": "What does latency mean?", "scope": "selection" }
+  },
+  {
+    "id": "matrix-ask-page-positive-04",
+    "transcript": "whats the refund policy on this pag",
+    "expected": { "action": "ask-page", "question": "What is the refund policy?", "scope": "page" }
+  },
+  {
+    "id": "matrix-ask-page-positive-05",
+    "transcript": "could you use this article to explain why the launch was delayed",
+    "expected": { "action": "ask-page", "question": "Why was the launch delayed?", "scope": "page" }
+  },
+  {
+    "id": "matrix-ask-page-positive-06",
+    "transcript": "from my selection which date is important",
+    "expected": { "action": "ask-page", "question": "Which date is important?", "scope": "selection" }
+  },
+  {
+    "id": "matrix-ask-page-negative-01",
+    "transcript": "ask what is shown on my screen",
+    "negativeFor": "ask-page",
+    "confusable": true,
+    "expected": { "action": "ask-screen", "question": "What is shown on my screen?" }
+  },
+  {
+    "id": "matrix-ask-page-negative-02",
+    "transcript": "write this question into the form what time is check-in",
+    "negativeFor": "ask-page",
+    "confusable": true,
+    "expected": { "action": "type", "operation": "dictate", "text": "what time is check-in" }
+  },
+  {
+    "id": "matrix-ask-page-negative-03",
+    "transcript": "ask the next tab about pricing",
+    "negativeFor": "ask-page",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-ask-page-negative-04",
+    "transcript": "answer from your general knowledge not this page",
+    "negativeFor": "ask-page",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-ask-screen-positive-01",
+    "transcript": "screen check",
+    "expected": { "action": "ask-screen" }
+  },
+  {
+    "id": "matrix-ask-screen-positive-02",
+    "transcript": "please describe the window in front of me",
+    "expected": { "action": "ask-screen" }
+  },
+  {
+    "id": "matrix-ask-screen-positive-03",
+    "transcript": "could you inspect my display and tell me what is open",
+    "expected": { "action": "ask-screen", "question": "What is open?" }
+  },
+  {
+    "id": "matrix-ask-screen-positive-04",
+    "transcript": "whats on teh screen right now",
+    "expected": { "action": "ask-screen" }
+  },
+  {
+    "id": "matrix-ask-screen-positive-05",
+    "transcript": "look at this window and explain the graph in the middle",
+    "expected": { "action": "ask-screen", "question": "Explain the graph in the middle." }
+  },
+  {
+    "id": "matrix-ask-screen-positive-06",
+    "transcript": "please tell me whether a dialog is visible on my screen",
+    "expected": { "action": "ask-screen", "question": "Is a dialog visible on my screen?" }
+  },
+  {
+    "id": "matrix-ask-screen-negative-01",
+    "transcript": "take a screenshot of my screen",
+    "negativeFor": "ask-screen",
+    "confusable": true,
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "matrix-ask-screen-negative-02",
+    "transcript": "read the words on this page aloud",
+    "negativeFor": "ask-screen",
+    "confusable": true,
+    "expected": { "action": "summarize", "mode": "read", "scope": "page" }
+  },
+  {
+    "id": "matrix-ask-screen-negative-03",
+    "transcript": "watch my screen continuously",
+    "negativeFor": "ask-screen",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-ask-screen-negative-04",
+    "transcript": "click the green button you see",
+    "negativeFor": "ask-screen",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-navigate-positive-01",
+    "transcript": "open npmjs.com",
+    "expected": { "action": "navigate", "operation": "open", "site": "npmjs.com" }
+  },
+  {
+    "id": "matrix-navigate-positive-02",
+    "transcript": "please go to example.org",
+    "expected": { "action": "navigate", "operation": "open", "site": "example.org" }
+  },
+  {
+    "id": "matrix-navigate-positive-03",
+    "transcript": "could you take me to support.mozilla.org in a new tab",
+    "expected": { "action": "navigate", "operation": "open", "site": "support.mozilla.org" }
+  },
+  {
+    "id": "matrix-navigate-positive-04",
+    "transcript": "serch the web for offline speech recognition",
+    "expected": { "action": "navigate", "operation": "search", "query": "offline speech recognition" }
+  },
+  {
+    "id": "matrix-navigate-positive-05",
+    "transcript": "look up how browser speech synthesis works",
+    "expected": { "action": "navigate", "operation": "search", "query": "how browser speech synthesis works" }
+  },
+  {
+    "id": "matrix-navigate-positive-06",
+    "transcript": "find local first software on the web please",
+    "expected": { "action": "navigate", "operation": "search", "query": "local first software" }
+  },
+  {
+    "id": "matrix-navigate-negative-01",
+    "transcript": "search my notes for launch timing",
+    "negativeFor": "navigate",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "list" }
+  },
+  {
+    "id": "matrix-navigate-negative-02",
+    "transcript": "go to the bottom of this page",
+    "negativeFor": "navigate",
+    "confusable": true,
+    "expected": { "action": "page-control", "operation": "bottom" }
+  },
+  {
+    "id": "matrix-navigate-negative-03",
+    "transcript": "open every link on this page",
+    "negativeFor": "navigate",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-navigate-negative-04",
+    "transcript": "navigate to the site named in the selected text",
+    "negativeFor": "navigate",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-notes-positive-01",
+    "transcript": "note this review the privacy copy",
+    "expected": { "action": "notes", "operation": "create", "body": "Review the privacy copy" }
+  },
+  {
+    "id": "matrix-notes-positive-02",
+    "transcript": "please make a note that the demo starts at nine",
+    "expected": { "action": "notes", "operation": "create", "body": "The demo starts at nine" }
+  },
+  {
+    "id": "matrix-notes-positive-03",
+    "transcript": "could you show me every note I have saved",
+    "expected": { "action": "notes", "operation": "list" }
+  },
+  {
+    "id": "matrix-notes-positive-04",
+    "transcript": "read mi notes out loud",
+    "expected": { "action": "notes", "operation": "read" }
+  },
+  {
+    "id": "matrix-notes-positive-05",
+    "transcript": "set a reminder in forty five minutes to call Maya",
+    "expected": { "action": "notes", "operation": "remind", "text": "Call Maya", "delayMinutes": 45 }
+  },
+  {
+    "id": "matrix-notes-positive-06",
+    "transcript": "cancel the reminder I have pending",
+    "expected": { "action": "notes", "operation": "cancel-reminder" }
+  },
+  {
+    "id": "matrix-notes-negative-01",
+    "transcript": "read this page not my notes",
+    "negativeFor": "notes",
+    "confusable": true,
+    "expected": { "action": "summarize", "mode": "read", "scope": "page" }
+  },
+  {
+    "id": "matrix-notes-negative-02",
+    "transcript": "save a screenshot to Downloads",
+    "negativeFor": "notes",
+    "confusable": true,
+    "expected": { "action": "screenshot", "destination": "save" }
+  },
+  {
+    "id": "matrix-notes-negative-03",
+    "transcript": "email my newest note",
+    "negativeFor": "notes",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-notes-negative-04",
+    "transcript": "make a note from whatever the page says",
+    "negativeFor": "notes",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-page-control-positive-01",
+    "transcript": "down a bit",
+    "expected": { "action": "page-control", "operation": "scroll-down" }
+  },
+  {
+    "id": "matrix-page-control-positive-02",
+    "transcript": "please move the page upward",
+    "expected": { "action": "page-control", "operation": "scroll-up" }
+  },
+  {
+    "id": "matrix-page-control-positive-03",
+    "transcript": "could you take me all the way to the beginning of this document",
+    "expected": { "action": "page-control", "operation": "top" }
+  },
+  {
+    "id": "matrix-page-control-positive-04",
+    "transcript": "go rite to the end of this pag",
+    "expected": { "action": "page-control", "operation": "bottom" }
+  },
+  {
+    "id": "matrix-page-control-positive-05",
+    "transcript": "make the text on this page larger",
+    "expected": { "action": "page-control", "operation": "zoom-in" }
+  },
+  {
+    "id": "matrix-page-control-positive-06",
+    "transcript": "please put the zoom back at one hundred percent",
+    "expected": { "action": "page-control", "operation": "zoom-reset" }
+  },
+  {
+    "id": "matrix-page-control-negative-01",
+    "transcript": "make a note to scroll back up later",
+    "negativeFor": "page-control",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "create", "body": "Scroll back up later" }
+  },
+  {
+    "id": "matrix-page-control-negative-02",
+    "transcript": "switch to the page called Zoom",
+    "negativeFor": "page-control",
+    "confusable": true,
+    "expected": { "action": "tabs", "operation": "switch", "target": "Zoom" }
+  },
+  {
+    "id": "matrix-page-control-negative-03",
+    "transcript": "scroll every open tab to the bottom",
+    "negativeFor": "page-control",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-page-control-negative-04",
+    "transcript": "set page zoom from the article instructions",
+    "negativeFor": "page-control",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-playback-positive-01",
+    "transcript": "hold the reading",
+    "expected": { "action": "playback", "operation": "pause" }
+  },
+  {
+    "id": "matrix-playback-positive-02",
+    "transcript": "please carry on reading",
+    "expected": { "action": "playback", "operation": "resume" }
+  },
+  {
+    "id": "matrix-playback-positive-03",
+    "transcript": "could you pause the page reader for a moment",
+    "expected": { "action": "playback", "operation": "pause" }
+  },
+  {
+    "id": "matrix-playback-positive-04",
+    "transcript": "continuw reading from where you stopped",
+    "expected": { "action": "playback", "operation": "resume" }
+  },
+  {
+    "id": "matrix-playback-positive-05",
+    "transcript": "end the page reading now",
+    "expected": { "action": "playback", "operation": "stop" }
+  },
+  {
+    "id": "matrix-playback-positive-06",
+    "transcript": "jump over this sentence",
+    "expected": { "action": "playback", "operation": "skip" }
+  },
+  {
+    "id": "matrix-playback-negative-01",
+    "transcript": "mute this browser tab",
+    "negativeFor": "playback",
+    "confusable": true,
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "matrix-playback-negative-02",
+    "transcript": "read my notes from the start",
+    "negativeFor": "playback",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "read" }
+  },
+  {
+    "id": "matrix-playback-negative-03",
+    "transcript": "pause the YouTube video",
+    "negativeFor": "playback",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-playback-negative-04",
+    "transcript": "skip to the next song",
+    "negativeFor": "playback",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-quiet-mode-positive-01",
+    "transcript": "quiet mode on please",
+    "expected": { "action": "quiet-mode", "operation": "on" }
+  },
+  {
+    "id": "matrix-quiet-mode-positive-02",
+    "transcript": "please stop speaking after commands",
+    "expected": { "action": "quiet-mode", "operation": "on" }
+  },
+  {
+    "id": "matrix-quiet-mode-positive-03",
+    "transcript": "could you keep responses silent until I turn sound back on",
+    "expected": { "action": "quiet-mode", "operation": "on" }
+  },
+  {
+    "id": "matrix-quiet-mode-positive-04",
+    "transcript": "turn qiet mode of",
+    "expected": { "action": "quiet-mode", "operation": "off" }
+  },
+  {
+    "id": "matrix-quiet-mode-positive-05",
+    "transcript": "you can speak responses again",
+    "expected": { "action": "quiet-mode", "operation": "off" }
+  },
+  {
+    "id": "matrix-quiet-mode-positive-06",
+    "transcript": "disable do not disturb for Sotto",
+    "expected": { "action": "quiet-mode", "operation": "off" }
+  },
+  {
+    "id": "matrix-quiet-mode-negative-01",
+    "transcript": "mute this tab but keep Sotto speaking",
+    "negativeFor": "quiet-mode",
+    "confusable": true,
+    "expected": { "action": "tabs", "operation": "mute" }
+  },
+  {
+    "id": "matrix-quiet-mode-negative-02",
+    "transcript": "pause reading but keep quiet mode unchanged",
+    "negativeFor": "quiet-mode",
+    "confusable": true,
+    "expected": { "action": "playback", "operation": "pause" }
+  },
+  {
+    "id": "matrix-quiet-mode-negative-03",
+    "transcript": "silence every site permanently",
+    "negativeFor": "quiet-mode",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-quiet-mode-negative-04",
+    "transcript": "change quiet hours to start at ten",
+    "negativeFor": "quiet-mode",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-repeat-positive-01",
+    "transcript": "again please",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "matrix-repeat-positive-02",
+    "transcript": "come again",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "matrix-repeat-positive-03",
+    "transcript": "could you say your answer one more time",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "matrix-repeat-positive-04",
+    "transcript": "repeet ur last reply",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "matrix-repeat-positive-05",
+    "transcript": "I missed that say it once more",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "matrix-repeat-positive-06",
+    "transcript": "tell me your previous response again",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "matrix-repeat-negative-01",
+    "transcript": "reopen that tab again",
+    "negativeFor": "repeat",
+    "confusable": true,
+    "expected": { "action": "tabs", "operation": "reopen" }
+  },
+  {
+    "id": "matrix-repeat-negative-02",
+    "transcript": "take the screenshot again",
+    "negativeFor": "repeat",
+    "confusable": true,
+    "expected": { "action": "screenshot", "destination": "copy" }
+  },
+  {
+    "id": "matrix-repeat-negative-03",
+    "transcript": "repeat this task every hour",
+    "negativeFor": "repeat",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-repeat-negative-04",
+    "transcript": "repeat the page instructions as browser actions",
+    "negativeFor": "repeat",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-type-positive-01",
+    "transcript": "write okay I will check",
+    "expected": { "action": "type", "operation": "dictate", "text": "okay I will check" }
+  },
+  {
+    "id": "matrix-type-positive-02",
+    "transcript": "please enter the meeting moved to Friday",
+    "expected": { "action": "type", "operation": "dictate", "text": "the meeting moved to Friday" }
+  },
+  {
+    "id": "matrix-type-positive-03",
+    "transcript": "could you put thanks for your patience into the active field",
+    "expected": { "action": "type", "operation": "dictate", "text": "thanks for your patience" }
+  },
+  {
+    "id": "matrix-type-positive-04",
+    "transcript": "tipe see you at noon",
+    "expected": { "action": "type", "operation": "dictate", "text": "see you at noon" }
+  },
+  {
+    "id": "matrix-type-positive-05",
+    "transcript": "rewrite the selection so it sounds friendlier",
+    "expected": { "action": "type", "operation": "rewrite", "transformation": "friendlier" }
+  },
+  {
+    "id": "matrix-type-positive-06",
+    "transcript": "please correct the spelling and grammar in this",
+    "expected": { "action": "type", "operation": "rewrite", "transformation": "fix-grammar" }
+  },
+  {
+    "id": "matrix-type-negative-01",
+    "transcript": "start dictation mode",
+    "negativeFor": "type",
+    "confusable": true,
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "matrix-type-negative-02",
+    "transcript": "make a note that says call Nina",
+    "negativeFor": "type",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "create", "body": "Call Nina" }
+  },
+  {
+    "id": "matrix-type-negative-03",
+    "transcript": "type the password saved on this page",
+    "negativeFor": "type",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-type-negative-04",
+    "transcript": "submit what I typed",
+    "negativeFor": "type",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-dictation-positive-01",
+    "transcript": "dictation on",
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "matrix-dictation-positive-02",
+    "transcript": "please start listening for continuous dictation",
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "matrix-dictation-positive-03",
+    "transcript": "could you begin dictation mode so I can speak several sentences",
+    "expected": { "action": "dictation", "operation": "start" }
+  },
+  {
+    "id": "matrix-dictation-positive-04",
+    "transcript": "stop dictashun",
+    "expected": { "action": "dictation", "operation": "stop" }
+  },
+  {
+    "id": "matrix-dictation-positive-05",
+    "transcript": "please stop listening for dictated text",
+    "expected": { "action": "dictation", "operation": "stop" }
+  },
+  {
+    "id": "matrix-dictation-positive-06",
+    "transcript": "I am done dictating now",
+    "expected": { "action": "dictation", "operation": "stop" }
+  },
+  {
+    "id": "matrix-dictation-negative-01",
+    "transcript": "write start dictation in the field",
+    "negativeFor": "dictation",
+    "confusable": true,
+    "expected": { "action": "type", "operation": "dictate", "text": "start dictation" }
+  },
+  {
+    "id": "matrix-dictation-negative-02",
+    "transcript": "make a note to stop dictation before the call",
+    "negativeFor": "dictation",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "create", "body": "Stop dictation before the call" }
+  },
+  {
+    "id": "matrix-dictation-negative-03",
+    "transcript": "transcribe the meeting in the background",
+    "negativeFor": "dictation",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-dictation-negative-04",
+    "transcript": "start dictation in every text box",
+    "negativeFor": "dictation",
+    "expected": { "action": "unknown" }
+  },
+
+  {
+    "id": "matrix-help-positive-01",
+    "transcript": "commands",
+    "expected": { "action": "help", "mode": "show" }
+  },
+  {
+    "id": "matrix-help-positive-02",
+    "transcript": "please show me what Sotto understands",
+    "expected": { "action": "help", "mode": "show" }
+  },
+  {
+    "id": "matrix-help-positive-03",
+    "transcript": "could you open the full list of supported voice commands",
+    "expected": { "action": "help", "mode": "show" }
+  },
+  {
+    "id": "matrix-help-positive-04",
+    "transcript": "show me the comand list",
+    "expected": { "action": "help", "mode": "show" }
+  },
+  {
+    "id": "matrix-help-positive-05",
+    "transcript": "please read the available commands to me",
+    "expected": { "action": "help", "mode": "read" }
+  },
+  {
+    "id": "matrix-help-positive-06",
+    "transcript": "I want to hear every command Sotto supports",
+    "expected": { "action": "help", "mode": "read" }
+  },
+  {
+    "id": "matrix-help-negative-01",
+    "transcript": "open support.google.com",
+    "negativeFor": "help",
+    "confusable": true,
+    "expected": { "action": "navigate", "operation": "open", "site": "support.google.com" }
+  },
+  {
+    "id": "matrix-help-negative-02",
+    "transcript": "make a note to ask for help tomorrow",
+    "negativeFor": "help",
+    "confusable": true,
+    "expected": { "action": "notes", "operation": "create", "body": "Ask for help tomorrow" }
+  },
+  {
+    "id": "matrix-help-negative-03",
+    "transcript": "help me file a tax return",
+    "negativeFor": "help",
+    "expected": { "action": "unknown" }
+  },
+  {
+    "id": "matrix-help-negative-04",
+    "transcript": "show keyboard shortcuts for macOS",
+    "negativeFor": "help",
+    "expected": { "action": "unknown" }
   }
 ]

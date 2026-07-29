@@ -2,7 +2,7 @@ import { appendFile, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const MINIMUM_EVAL_CASES = 252;
+export const MINIMUM_EVAL_CASES = 402;
 
 export function evaluateEvalCases(cases, minimumCount = MINIMUM_EVAL_CASES) {
   if (!Array.isArray(cases)) {
