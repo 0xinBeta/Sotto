@@ -2,6 +2,7 @@ import { DestinationRegistry } from "@sotto/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import destinations, {
+  createScreenshotFilename,
   executeDestinationFollowUp,
   performClipboardWorkflow,
 } from "../src/index.js";
@@ -13,6 +14,7 @@ const SCREENSHOT = {
 } as const;
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -91,6 +93,55 @@ describe("image destinations", () => {
         },
       },
     });
+  });
+
+  it("saves the PNG to Downloads with a local timestamp", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 0, 2, 3, 4, 5));
+    const download = vi.fn().mockResolvedValue(42);
+    vi.stubGlobal("chrome", { downloads: { download } });
+    const registry = new DestinationRegistry(destinations);
+
+    await expect(registry.dispatch("save", SCREENSHOT)).resolves.toEqual({
+      spoken: "Screenshot saved to Downloads.",
+    });
+    expect(download).toHaveBeenCalledWith({
+      url: SCREENSHOT.dataUrl,
+      filename: "sotto-screenshot-2026-01-02-030405.png",
+      conflictAction: "uniquify",
+      saveAs: false,
+    });
+    expect(createScreenshotFilename()).toMatch(
+      /^sotto-screenshot-\d{4}-\d{2}-\d{2}-\d{6}\.png$/,
+    );
+  });
+
+  it("returns one clear error when the download fails", async () => {
+    const download = vi.fn().mockRejectedValue(new Error("Download failed"));
+    vi.stubGlobal("chrome", { downloads: { download } });
+    const registry = new DestinationRegistry(destinations);
+
+    await expect(registry.dispatch("save", SCREENSHOT)).resolves.toEqual({
+      spoken: "I could not save the screenshot.",
+    });
+  });
+
+  it("never puts external screenshot data in the filename", async () => {
+    const externalText = "page-title-model-output.example";
+    const download = vi.fn().mockResolvedValue(42);
+    vi.stubGlobal("chrome", { downloads: { download } });
+    const registry = new DestinationRegistry(destinations);
+
+    await registry.dispatch("save", {
+      ...SCREENSHOT,
+      dataUrl: `data:image/png;base64,${externalText}`,
+    });
+
+    const options = download.mock.calls[0]?.[0] as chrome.downloads.DownloadOptions;
+    expect(options.filename).not.toContain(externalText);
+    expect(options.filename).toMatch(
+      /^sotto-screenshot-\d{4}-\d{2}-\d{2}-\d{6}\.png$/,
+    );
   });
 });
 

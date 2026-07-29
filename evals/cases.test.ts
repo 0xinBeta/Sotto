@@ -57,6 +57,17 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(6);
   });
 
+  it("keeps at least five save screenshot cases", () => {
+    expect(
+      cases.filter(
+        (testCase) =>
+          testCase.expected.action === "screenshot" &&
+          "destination" in testCase.expected &&
+          testCase.expected.destination === "save",
+      ).length,
+    ).toBeGreaterThanOrEqual(5);
+  });
+
   it("keeps at least eight playback-control cases", () => {
     expect(
       cases.filter((testCase) => testCase.expected.action === "playback")

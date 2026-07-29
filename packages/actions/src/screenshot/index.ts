@@ -1,7 +1,12 @@
 import { defineAction } from "@sotto/core";
 import type { ActionCommand, JsonSchema } from "@sotto/core";
 
-export type ScreenshotDestination = "copy" | "claude" | "chatgpt" | "gemini";
+export type ScreenshotDestination =
+  | "copy"
+  | "save"
+  | "claude"
+  | "chatgpt"
+  | "gemini";
 
 export interface ScreenshotCommand extends ActionCommand {
   readonly action: "screenshot";
@@ -14,7 +19,7 @@ const schema = {
     action: { const: "screenshot" },
     destination: {
       type: "string",
-      enum: ["copy", "claude", "chatgpt", "gemini"],
+      enum: ["copy", "save", "claude", "chatgpt", "gemini"],
     },
   },
   required: ["action", "destination"],
@@ -47,6 +52,14 @@ const screenshot = defineAction<ScreenshotCommand>({
     {
       say: "take a screenshot",
       emit: { action: "screenshot", destination: "copy" },
+    },
+    {
+      say: "take a screenshot and save it",
+      emit: { action: "screenshot", destination: "save" },
+    },
+    {
+      say: "save a screenshot",
+      emit: { action: "screenshot", destination: "save" },
     },
     {
       say: "send a screenshot to my Claude chat",

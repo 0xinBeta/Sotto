@@ -30,6 +30,31 @@
     "expected": { "action": "screenshot", "destination": "copy" }
   },
   {
+    "id": "screenshot-save-01",
+    "transcript": "take a screenshot and save it",
+    "expected": { "action": "screenshot", "destination": "save" }
+  },
+  {
+    "id": "screenshot-save-02",
+    "transcript": "save a screenshot",
+    "expected": { "action": "screenshot", "destination": "save" }
+  },
+  {
+    "id": "screenshot-save-03",
+    "transcript": "save this screen to Downloads",
+    "expected": { "action": "screenshot", "destination": "save" }
+  },
+  {
+    "id": "screenshot-save-04",
+    "transcript": "capture this page and save the image",
+    "expected": { "action": "screenshot", "destination": "save" }
+  },
+  {
+    "id": "screenshot-save-05",
+    "transcript": "download a screenshot of this tab",
+    "expected": { "action": "screenshot", "destination": "save" }
+  },
+  {
     "id": "screenshot-claude-01",
     "transcript": "send a screenshot to Claude",
     "expected": { "action": "screenshot", "destination": "claude" }

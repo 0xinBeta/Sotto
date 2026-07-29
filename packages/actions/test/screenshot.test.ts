@@ -11,14 +11,21 @@ describe("screenshot action", () => {
     chromeStub = installChromeStub();
   });
 
-  it("accepts only the four screenshot destinations", () => {
+  it("accepts only the five screenshot destinations", () => {
     expect(screenshot.schema.properties?.destination?.enum).toEqual([
       "copy",
+      "save",
       "claude",
       "chatgpt",
       "gemini",
     ]);
-    for (const destination of ["copy", "claude", "chatgpt", "gemini"]) {
+    for (const destination of [
+      "copy",
+      "save",
+      "claude",
+      "chatgpt",
+      "gemini",
+    ]) {
       expect(
         validateSchema(screenshot.schema, {
           action: "screenshot",
@@ -32,6 +39,17 @@ describe("screenshot action", () => {
         destination: "chatgpt.com",
       }).valid,
     ).toBe(false);
+  });
+
+  it("registers two save screenshot examples", () => {
+    expect(screenshot.examples).toContainEqual({
+      say: "take a screenshot and save it",
+      emit: { action: "screenshot", destination: "save" },
+    });
+    expect(screenshot.examples).toContainEqual({
+      say: "save a screenshot",
+      emit: { action: "screenshot", destination: "save" },
+    });
   });
 
   it("captures the active window and dispatches only the PNG", async () => {

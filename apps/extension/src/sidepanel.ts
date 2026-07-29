@@ -321,6 +321,7 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         Object.keys(command).length === 2 &&
         command.action === "screenshot" &&
         (command.destination === "copy" ||
+          command.destination === "save" ||
           command.destination === "claude" ||
           command.destination === "chatgpt" ||
           command.destination === "gemini")
