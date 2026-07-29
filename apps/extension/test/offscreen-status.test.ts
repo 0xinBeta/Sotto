@@ -1719,6 +1719,65 @@ describe("offscreen fail-soft status", () => {
     });
   });
 
+  it.each([
+    ["normal", "Opened a new window."],
+    ["brief", "Opened."],
+  ] as const)(
+    "uses the %s window confirmation without responder changes",
+    async (verbosity, spoken) => {
+      const harness = await installPremiumOffscreen();
+      harness.sendMessage.mockClear();
+      nano.respondOneSentence.mockReset();
+
+      await expect(
+        harness.message({
+          type: "action-result",
+          transcript: "open a new window",
+          command: { action: "windows", operation: "new" },
+          result: { spoken: "Opened a new window." },
+          verbosity,
+        }),
+      ).resolves.toEqual({ ok: true });
+
+      expect(nano.respondOneSentence).not.toHaveBeenCalled();
+      expect(harness.sendMessage).toHaveBeenCalledWith({
+        target: "worker",
+        type: "speak",
+        text: spoken,
+        heard: "open a new window",
+        did: "Opened a new window.",
+        timings: { input: "voice" },
+      });
+    },
+  );
+
+  it("keeps the window tab count in brief mode", async () => {
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockClear();
+    nano.respondOneSentence.mockReset();
+    const confirmation = "Close this window with 12 tabs? Say yes.";
+
+    await expect(
+      harness.message({
+        type: "action-result",
+        transcript: "close this window",
+        command: { action: "windows", operation: "close" },
+        result: { spoken: confirmation },
+        verbosity: "brief",
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(nano.respondOneSentence).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "speak",
+      text: confirmation,
+      heard: "close this window",
+      did: confirmation,
+      timings: { input: "voice" },
+    });
+  });
+
   it("keeps informational lines unchanged in brief mode", async () => {
     const harness = await installPremiumOffscreen();
     harness.sendMessage.mockClear();

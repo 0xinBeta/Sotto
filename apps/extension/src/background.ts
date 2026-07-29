@@ -868,6 +868,21 @@ async function confirmationResult(
     };
   }
 
+  if (
+    command.action === "windows" &&
+    (command as { readonly operation?: unknown }).operation === "close"
+  ) {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const tabLabel = tabs.length === 1 ? "tab" : "tabs";
+    return {
+      result: {
+        spoken:
+          `Close this window with ${tabs.length} ${tabLabel}? Say yes.`,
+      },
+      pending: true,
+    };
+  }
+
   if (isCancelReminderCommand(command)) {
     const reminders = await notesReminderStore.listPendingReminders();
     if (reminders.length === 0) {

@@ -18,6 +18,7 @@ import tabGroupsAction from "./tab-groups/index.js";
 import tabsAction from "./tabs/index.js";
 import translateAction from "./translate/index.js";
 import typeAction from "./type/index.js";
+import windowsAction from "./windows/index.js";
 
 export { default as askPageAction } from "./ask-page/index.js";
 export type { AskPageCommand } from "./ask-page/index.js";
@@ -179,12 +180,21 @@ export type {
   TranslateLanguage,
   TranslateScope,
 } from "./translate/index.js";
+export {
+  default as windowsAction,
+  windowsSchema,
+} from "./windows/index.js";
+export type {
+  WindowOperation,
+  WindowsCommand,
+} from "./windows/index.js";
 
 export { default as tabsAction } from "./tabs/index.js";
 
 export const actions = [
   screenshotAction,
   tabsAction,
+  windowsAction,
   tabGroupsAction,
   bookmarksAction,
   translateAction,

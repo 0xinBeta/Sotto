@@ -24,6 +24,9 @@ export function installChromeStub() {
       remove: vi.fn(),
     },
     windows: {
+      create: vi.fn(),
+      getCurrent: vi.fn(),
+      remove: vi.fn(),
       update: vi.fn(),
     },
     sessions: {

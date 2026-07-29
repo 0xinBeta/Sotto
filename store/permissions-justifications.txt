@@ -35,7 +35,7 @@ Permission: tabGroups
 Sotto creates, names, removes, collapses, and expands tab groups after user commands.
 
 Permission: tabs
-Sotto lists, opens, switches, closes, mutes, groups, and ungroups tabs after user commands.
+Sotto lists, opens, switches, closes, moves, mutes, groups, and ungroups tabs after user commands.
 
 Permission: tts
 Sotto speaks responses with a local system voice.

@@ -222,6 +222,19 @@ describe("intent eval schema drift", () => {
     );
   });
 
+  it("keeps window cases for each operation", () => {
+    const windowCases = cases.filter(
+      (testCase) => testCase.expected.action === "windows",
+    );
+
+    expect(windowCases.length).toBeGreaterThanOrEqual(8);
+    expect(
+      new Set(windowCases.map((testCase) => testCase.expected.operation)),
+    ).toEqual(
+      new Set(["new", "close", "move-tab", "toggle-fullscreen"]),
+    );
+  });
+
   it("keeps eight translate cases and an unsupported-language negative", () => {
     expect(
       cases.filter((testCase) => testCase.expected.action === "translate")

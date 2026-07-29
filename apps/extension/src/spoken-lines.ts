@@ -16,6 +16,11 @@ export const SPOKEN_LINE_KEYS = [
   "tabs-ungrouped",
   "tab-groups-collapsed",
   "tab-groups-expanded",
+  "window-opened",
+  "window-closed",
+  "tab-moved-to-window",
+  "fullscreen-on",
+  "fullscreen-off",
   "typed",
   "rewritten",
   "searching",
@@ -91,6 +96,26 @@ const SPOKEN_LINES: Record<SpokenLineKey, SpokenLineVariants> = {
   "tab-groups-expanded": {
     normal: "Expanded your groups.",
     brief: "Expanded.",
+  },
+  "window-opened": {
+    normal: "Opened a new window.",
+    brief: "Opened.",
+  },
+  "window-closed": {
+    normal: "Closed the window.",
+    brief: "Closed.",
+  },
+  "tab-moved-to-window": {
+    normal: "Moved the tab to a new window.",
+    brief: "Moved.",
+  },
+  "fullscreen-on": {
+    normal: "Fullscreen is on.",
+    brief: "Fullscreen.",
+  },
+  "fullscreen-off": {
+    normal: "Fullscreen is off.",
+    brief: "Exited.",
   },
   typed: {
     normal: "Typed it.",

@@ -1016,6 +1016,66 @@ describe("background screenshot clipboard injection", () => {
     );
   });
 
+  it.each([
+    [1, "1 tab"],
+    [3, "3 tabs"],
+  ] as const)(
+    "includes %s in the window close confirmation",
+    async (tabCount, countText) => {
+      const closeCommand = {
+        action: "windows",
+        operation: "close",
+      };
+      worker.requiresConfirmation.mockImplementation(
+        (command) =>
+          (command as { readonly action?: unknown }).action === "windows",
+      );
+      worker.routeConfirmed.mockResolvedValue({
+        spoken: "Closed the window.",
+      });
+      const harness = await installBackground({
+        id: 4,
+        url: "https://example.com/current",
+      });
+      harness.queryTabs.mockResolvedValue(
+        Array.from({ length: tabCount }, (_, index) => ({
+          id: index + 1,
+          windowId: 2,
+        })),
+      );
+
+      await harness.workerMessage({
+        type: "execute-command",
+        transcript: "close this window",
+        command: closeCommand,
+      });
+
+      expect(harness.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: "offscreen",
+          type: "action-result",
+          transcript: "close this window",
+          result: {
+            spoken: `Close this window with ${countText}? Say yes.`,
+          },
+        }),
+      );
+      expect(worker.routeConfirmed).not.toHaveBeenCalled();
+
+      await harness.workerMessage({
+        type: "execute-command",
+        transcript: "yes",
+        command: { action: "unknown" },
+      });
+      expect(worker.routeConfirmed).toHaveBeenCalledWith(
+        closeCommand,
+        expect.objectContaining({
+          actionCatalog: expect.anything(),
+        }),
+      );
+    },
+  );
+
   it("captures, saves, resolves, and deletes an exact command alias", async () => {
     const target = {
       action: "navigate",

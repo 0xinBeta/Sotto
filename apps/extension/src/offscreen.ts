@@ -2563,6 +2563,7 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
     command.action !== "media" &&
     command.action !== "ask-screen" &&
     command.action !== "settings" &&
+    command.action !== "windows" &&
     (verbosity === "normal" || selectedLine.key !== undefined);
   const spoken =
     command.action === "unknown"

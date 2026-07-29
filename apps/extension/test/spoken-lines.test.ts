@@ -23,6 +23,11 @@ const KNOWN_KEYS: readonly SpokenLineKey[] = [
   "tabs-ungrouped",
   "tab-groups-collapsed",
   "tab-groups-expanded",
+  "window-opened",
+  "window-closed",
+  "tab-moved-to-window",
+  "fullscreen-on",
+  "fullscreen-off",
   "typed",
   "rewritten",
   "searching",
@@ -51,6 +56,7 @@ describe("spoken confirmation lines", () => {
   it("does not change informational lines or errors", () => {
     for (const text of [
       "You have 12 tabs open.",
+      "Close this window with 12 tabs? Say yes.",
       "Your reminder is set for 4:30 PM.",
       "Here is the Turkish translation.",
       "The answer is forty-two.",

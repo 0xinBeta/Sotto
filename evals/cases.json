@@ -1656,6 +1656,75 @@
     "id": "matrix-tabs-negative-04",
     "transcript": "move this tab into a new window",
     "negativeFor": "tabs",
+    "confusable": true,
+    "expected": { "action": "windows", "operation": "move-tab" }
+  },
+
+  {
+    "id": "windows-new-01",
+    "transcript": "open a new window",
+    "expected": { "action": "windows", "operation": "new" }
+  },
+  {
+    "id": "windows-new-02",
+    "transcript": "start another browser window",
+    "expected": { "action": "windows", "operation": "new" }
+  },
+  {
+    "id": "windows-close-01",
+    "transcript": "close this window",
+    "expected": { "action": "windows", "operation": "close" }
+  },
+  {
+    "id": "windows-close-02",
+    "transcript": "close the current browser window",
+    "expected": { "action": "windows", "operation": "close" }
+  },
+  {
+    "id": "windows-move-tab-01",
+    "transcript": "move this tab to a new window",
+    "expected": { "action": "windows", "operation": "move-tab" }
+  },
+  {
+    "id": "windows-move-tab-02",
+    "transcript": "put this tab in its own window",
+    "expected": { "action": "windows", "operation": "move-tab" }
+  },
+  {
+    "id": "windows-fullscreen-01",
+    "transcript": "fullscreen",
+    "expected": { "action": "windows", "operation": "toggle-fullscreen" }
+  },
+  {
+    "id": "windows-fullscreen-02",
+    "transcript": "exit fullscreen",
+    "expected": { "action": "windows", "operation": "toggle-fullscreen" }
+  },
+  {
+    "id": "windows-negative-01",
+    "transcript": "create a new tab in this window",
+    "negativeFor": "windows",
+    "confusable": true,
+    "expected": { "action": "tabs", "operation": "new" }
+  },
+  {
+    "id": "windows-negative-02",
+    "transcript": "close the current tab, not the window",
+    "negativeFor": "windows",
+    "confusable": true,
+    "expected": { "action": "tabs", "operation": "close" }
+  },
+  {
+    "id": "windows-negative-03",
+    "transcript": "group this tab as research",
+    "negativeFor": "windows",
+    "confusable": true,
+    "expected": { "action": "tab-groups", "operation": "group", "title": "research" }
+  },
+  {
+    "id": "windows-negative-04",
+    "transcript": "make the video fill the page",
+    "negativeFor": "windows",
     "expected": { "action": "unknown" }
   },
 
