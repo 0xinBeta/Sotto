@@ -15,7 +15,7 @@ import {
   KOKORO_VOICE,
   KOKORO_VOICES,
   type KokoroVoiceId,
-} from "@sotto/tts/kokoro";
+} from "@sotto/tts/kokoro-voices";
 import { nextLogEntry, type LogEntry } from "./log.js";
 import {
   formatExchangeTimings,

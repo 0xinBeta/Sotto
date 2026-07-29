@@ -25,18 +25,17 @@ import {
   type NanoSession,
   type RewriteTransformation,
 } from "@sotto/nano";
-import {
-  MoonshineEngine,
-  ParakeetSttEngine,
-  type SttProgress,
-} from "@sotto/stt";
+import type { SttProgress } from "@sotto/stt";
+import { MoonshineEngine } from "@sotto/stt/moonshine";
+import type {
+  KokoroInitProgress,
+  KokoroTtsEngine,
+} from "@sotto/tts/kokoro";
 import {
   isKokoroVoiceId,
   KOKORO_VOICE,
-  KokoroTtsEngine,
-  type KokoroInitProgress,
   type KokoroVoiceId,
-} from "@sotto/tts/kokoro";
+} from "@sotto/tts/kokoro-voices";
 import { InferenceMutex } from "./inference-mutex.js";
 import { computeRms, smoothMicLevel } from "./mic-level.js";
 import { ModelResidencyLru } from "./model-lru.js";
@@ -93,6 +92,10 @@ import {
   type DictationState,
 } from "./dictation.js";
 import type { DiagnosticOffscreenState } from "./diagnostic-report.js";
+import {
+  loadKokoroTtsEngine,
+  loadParakeetSttEngine,
+} from "./premium-engine-loaders.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -692,13 +695,15 @@ function scheduleSttTimeoutRecovery(): void {
   }, 0);
 }
 
-function createPremiumSttEngine(tier: PremiumSttTier) {
-  return tier === "parakeet"
-    ? new ParakeetSttEngine({
-        runtimeUrl: (path) => chrome.runtime.getURL(path),
-        runLoad: (task) => inferenceMutex.run(task),
-      })
-    : new MoonshineEngine({ model: "base", backend: "wasm" });
+async function createPremiumSttEngine(tier: PremiumSttTier) {
+  if (tier === "moonshine-base") {
+    return new MoonshineEngine({ model: "base", backend: "wasm" });
+  }
+  const ParakeetSttEngine = await loadParakeetSttEngine();
+  return new ParakeetSttEngine({
+    runtimeUrl: (path) => chrome.runtime.getURL(path),
+    runLoad: (task) => inferenceMutex.run(task),
+  });
 }
 
 async function ensurePremiumSttSettings(): Promise<void> {
@@ -966,9 +971,10 @@ function isWebGpuFailure(error: unknown): boolean {
   );
 }
 
-function createPremiumEngine(
+async function createPremiumEngine(
   backend: "auto" | "wasm" = "auto",
-): KokoroTtsEngine {
+): Promise<KokoroTtsEngine> {
+  const KokoroTtsEngine = await loadKokoroTtsEngine();
   return new KokoroTtsEngine({
     backend,
     voice: premiumTtsVoice,
@@ -992,19 +998,21 @@ async function ensurePremiumTts(
   premiumTtsState = "downloading";
   premiumTtsError = undefined;
   await publishPremiumStatus();
-  const engine = createPremiumEngine(backend);
-  premiumTts = engine;
-  const pending = engine.init((progress) => {
-    const ratio = progressRatioFromKokoro(progress);
-    if (ratio === undefined) return;
-    void sendPanel({
-      type: "model-progress",
-      model: "premium-tts",
-      progress: Math.max(0, Math.min(1, ratio)),
-      status: progress.status,
-      ...(progress.file === undefined ? {} : { file: progress.file }),
+  let engine: KokoroTtsEngine | undefined;
+  const pending = (async () => {
+    engine = await createPremiumEngine(backend);
+    premiumTts = engine;
+    await engine.init((progress) => {
+      const ratio = progressRatioFromKokoro(progress);
+      if (ratio === undefined) return;
+      void sendPanel({
+        type: "model-progress",
+        model: "premium-tts",
+        progress: Math.max(0, Math.min(1, ratio)),
+        status: progress.status,
+        ...(progress.file === undefined ? {} : { file: progress.file }),
+      });
     });
-  }).then(async () => {
     premiumTtsDownloaded = true;
     premiumTtsBackend = engine.backend;
     premiumTtsState = "ready";
@@ -1022,9 +1030,9 @@ async function ensurePremiumTts(
     });
     await publishPremiumStatus();
     await refreshModelInventory();
-  }).catch(async (error: unknown) => {
-    if (premiumTts === engine) premiumTts = undefined;
-    await engine.dispose().catch(() => undefined);
+  })().catch(async (error: unknown) => {
+    if (engine && premiumTts === engine) premiumTts = undefined;
+    await engine?.dispose().catch(() => undefined);
     premiumTtsState = "error";
     premiumTtsBackend = undefined;
     premiumTtsError =

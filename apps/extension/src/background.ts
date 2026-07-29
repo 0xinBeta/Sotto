@@ -41,7 +41,7 @@ import {
 import {
   isKokoroVoiceId,
   type KokoroVoiceId,
-} from "@sotto/tts/kokoro";
+} from "@sotto/tts/kokoro-voices";
 import {
   PremiumTtsRouter,
   previewPremiumVoiceSelection,

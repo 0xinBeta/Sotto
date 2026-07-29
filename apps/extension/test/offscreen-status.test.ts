@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const nano = vi.hoisted(() => ({
   askPageWithPrompt: vi.fn(),
@@ -34,6 +34,10 @@ const speech = vi.hoisted(() => ({
 }));
 const vad = vi.hoisted(() => ({
   create: vi.fn(),
+}));
+const engineLoaders = vi.hoisted(() => ({
+  loadKokoroTtsEngine: vi.fn(),
+  loadParakeetSttEngine: vi.fn(),
 }));
 
 vi.mock("@ricky0123/vad-web", () => ({
@@ -75,7 +79,7 @@ vi.mock("@sotto/nano", () => ({
   rewriteWithPrompt: nano.rewriteWithPrompt,
   summarizeWithPrompt: nano.summarizeWithPrompt,
 }));
-vi.mock("@sotto/stt", () => ({
+vi.mock("@sotto/stt/moonshine", () => ({
   MoonshineEngine: class MoonshineEngine {
     constructor(options?: unknown) {
       speech.moonshineOptions.push(options);
@@ -84,33 +88,39 @@ vi.mock("@sotto/stt", () => ({
     transcribe = speech.moonshineTranscribe;
     dispose = speech.moonshineDispose;
   },
-  ParakeetSttEngine: class ParakeetSttEngine {
-    constructor(options?: unknown) {
-      speech.parakeetOptions.push(options);
-    }
-    init = speech.parakeetInit;
-    transcribe = speech.parakeetTranscribe;
-    dispose = speech.parakeetDispose;
-  },
 }));
-vi.mock("@sotto/tts/kokoro", () => ({
-  KokoroTtsEngine: class KokoroTtsEngine {
-    backend = "webgpu" as const;
-    constructor(options?: unknown) {
-      premium.engineOptions.push(options);
-    }
-    init = premium.init;
-    speak = premium.speak;
-    stop = premium.stop;
-    setVoice = premium.setVoice;
-    prewarm = premium.prewarm;
-    probe = premium.probe;
-    dispose = premium.dispose;
-  },
-  KOKORO_VOICE: "af_heart",
-  isKokoroVoiceId: (value: unknown) =>
-    value === "af_heart" || value === "bf_emma",
+vi.mock("../src/premium-engine-loaders.js", () => ({
+  loadKokoroTtsEngine: engineLoaders.loadKokoroTtsEngine,
+  loadParakeetSttEngine: engineLoaders.loadParakeetSttEngine,
 }));
+
+beforeEach(() => {
+  engineLoaders.loadKokoroTtsEngine.mockResolvedValue(
+    class KokoroTtsEngine {
+      backend = "webgpu" as const;
+      constructor(options?: unknown) {
+        premium.engineOptions.push(options);
+      }
+      init = premium.init;
+      speak = premium.speak;
+      stop = premium.stop;
+      setVoice = premium.setVoice;
+      prewarm = premium.prewarm;
+      probe = premium.probe;
+      dispose = premium.dispose;
+    },
+  );
+  engineLoaders.loadParakeetSttEngine.mockResolvedValue(
+    class ParakeetSttEngine {
+      constructor(options?: unknown) {
+        speech.parakeetOptions.push(options);
+      }
+      init = speech.parakeetInit;
+      transcribe = speech.parakeetTranscribe;
+      dispose = speech.parakeetDispose;
+    },
+  );
+});
 
 type OffscreenListener = (
   message: unknown,
@@ -238,6 +248,8 @@ afterEach(() => {
   premium.prewarm.mockReset();
   premium.probe.mockReset();
   premium.dispose.mockReset();
+  engineLoaders.loadKokoroTtsEngine.mockReset();
+  engineLoaders.loadParakeetSttEngine.mockReset();
   speech.moonshineOptions.splice(0);
   speech.moonshineInit.mockReset();
   speech.moonshineTranscribe.mockReset();
@@ -477,6 +489,92 @@ describe("offscreen fail-soft status", () => {
         state: "ready",
         enabled: true,
         backend: "webgpu",
+      }),
+    );
+  });
+
+  it("loads premium engine modules only when setup starts", async () => {
+    const harness = await installPremiumOffscreen({ webGpu: true });
+
+    await expect(harness.message({ type: "get-status" })).resolves.toEqual({
+      ok: true,
+    });
+    expect(engineLoaders.loadKokoroTtsEngine).not.toHaveBeenCalled();
+    expect(engineLoaders.loadParakeetSttEngine).not.toHaveBeenCalled();
+
+    await expect(
+      harness.message({ type: "prepare-premium-tts" }),
+    ).resolves.toEqual({ ok: true });
+    expect(engineLoaders.loadKokoroTtsEngine).toHaveBeenCalledOnce();
+    expect(engineLoaders.loadParakeetSttEngine).not.toHaveBeenCalled();
+    const kokoroOptions = premium.engineOptions[0] as {
+      runtimeUrl(path: string): string;
+    };
+    expect(kokoroOptions.runtimeUrl("assets/ort-kokoro/runtime.wasm")).toBe(
+      "chrome-extension://sotto/assets/ort-kokoro/runtime.wasm",
+    );
+
+    await expect(
+      harness.message({ type: "prepare-premium-stt" }),
+    ).resolves.toEqual({ ok: true });
+    expect(engineLoaders.loadParakeetSttEngine).toHaveBeenCalledOnce();
+    const parakeetOptions = speech.parakeetOptions[0] as {
+      runtimeUrl(path: string): string;
+    };
+    expect(
+      parakeetOptions.runtimeUrl("assets/ort-parakeet/runtime.wasm"),
+    ).toBe("chrome-extension://sotto/assets/ort-parakeet/runtime.wasm");
+  });
+
+  it("reports a Kokoro module load failure as a setup failure", async () => {
+    const harness = await installPremiumOffscreen();
+    engineLoaders.loadKokoroTtsEngine.mockRejectedValueOnce(
+      new Error("Kokoro chunk could not load"),
+    );
+
+    await expect(
+      harness.message({ type: "prepare-premium-tts" }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        name: "Error",
+        message: "Kokoro chunk could not load",
+      },
+    });
+    expect(premium.init).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "premium-tts-state",
+        state: "error",
+        error: "Kokoro chunk could not load",
+      }),
+    );
+  });
+
+  it("reports a Parakeet module load failure and keeps tiny STT", async () => {
+    const harness = await installPremiumOffscreen({ webGpu: true });
+    engineLoaders.loadParakeetSttEngine.mockRejectedValueOnce(
+      new Error("Parakeet chunk could not load"),
+    );
+
+    await expect(
+      harness.message({ type: "prepare-premium-stt" }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        name: "Error",
+        message: "Parakeet chunk could not load",
+      },
+    });
+    expect(speech.moonshineInit).toHaveBeenCalledOnce();
+    expect(speech.parakeetInit).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "sidepanel",
+        type: "premium-stt-state",
+        state: "error",
+        error: "Parakeet chunk could not load",
       }),
     );
   });

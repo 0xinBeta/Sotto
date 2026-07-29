@@ -42,7 +42,9 @@ export interface PremiumSttManagerOptions {
   readonly tier: PremiumSttTier;
   readonly downloaded?: boolean;
   readonly storedEnabled?: unknown;
-  readonly createPremium: (tier: PremiumSttTier) => SttEngine;
+  readonly createPremium: (
+    tier: PremiumSttTier,
+  ) => SttEngine | Promise<SttEngine>;
   readonly runInference: <T>(task: () => Promise<T>) => Promise<T>;
   readonly runTranscription?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly selfTestAudio: () => Promise<Float32Array>;
@@ -120,7 +122,9 @@ async function withDeadline<T>(
 export class PremiumSttManager {
   readonly #tiny: SttEngine;
   readonly #tier: PremiumSttTier;
-  readonly #createPremium: (tier: PremiumSttTier) => SttEngine;
+  readonly #createPremium: (
+    tier: PremiumSttTier,
+  ) => SttEngine | Promise<SttEngine>;
   readonly #runInference: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #runTranscription: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #selfTestAudio: () => Promise<Float32Array>;
@@ -333,12 +337,14 @@ export class PremiumSttManager {
   }
 
   async #loadPremium(downloadExpected: boolean): Promise<void> {
-    const candidate = this.#createPremium(this.#tier);
     this.#error = undefined;
     this.#setState(downloadExpected ? "downloading" : "loading");
+    let candidate: SttEngine | undefined;
 
     try {
-      await candidate.init((progress) => {
+      const loaded = await this.#createPremium(this.#tier);
+      candidate = loaded;
+      await loaded.init((progress) => {
         if (typeof progress.resumable === "boolean") {
           this.#resumable = progress.resumable;
         }
@@ -362,7 +368,7 @@ export class PremiumSttManager {
       const fixture = await this.#selfTestAudio();
       const startedAt = this.#now();
       const text = await withDeadline(
-        this.#runInference(() => candidate.transcribe(fixture)),
+        this.#runInference(() => loaded.transcribe(fixture)),
         this.#warmupMaxMs,
       );
       const elapsed = this.#now() - startedAt;
@@ -379,7 +385,7 @@ export class PremiumSttManager {
       }
 
       const previous = this.#premium;
-      this.#premium = candidate;
+      this.#premium = loaded;
       this.#downloaded = true;
       this.#resumable = false;
       this.#onResidentChange(true);
@@ -389,16 +395,19 @@ export class PremiumSttManager {
         this.#setState("active");
         await this.#disposeTinyIfActive(this.#settingGeneration);
       }
-      if (previous && previous !== candidate) {
+      if (previous && previous !== loaded) {
         await this.#runInference(() => previous.dispose());
       }
     } catch (error) {
       const timedOut = error instanceof DOMException &&
         error.name === "TimeoutError";
-      if (timedOut) {
-        void this.#runInference(() => candidate.dispose()).catch(() => undefined);
-      } else {
-        await this.#runInference(() => candidate.dispose()).catch(() => undefined);
+      const failedCandidate = candidate;
+      if (failedCandidate) {
+        const disposal = this.#runInference(() =>
+          failedCandidate.dispose()
+        );
+        if (timedOut) void disposal.catch(() => undefined);
+        else await disposal.catch(() => undefined);
       }
       await this.#fallbackToTiny(error);
       throw error;

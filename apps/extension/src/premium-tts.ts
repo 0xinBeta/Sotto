@@ -7,7 +7,7 @@ import type {
 import {
   KOKORO_VOICE,
   type KokoroVoiceId,
-} from "@sotto/tts/kokoro";
+} from "@sotto/tts/kokoro-voices";
 import { createReadingPlan } from "./reading-progress.js";
 
 export { splitReadingChunks as splitPremiumSentences } from "./reading-progress.js";

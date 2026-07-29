@@ -13,6 +13,10 @@
     "./kokoro": {
       "types": "./dist/kokoro.d.ts",
       "import": "./dist/kokoro.js"
+    },
+    "./kokoro-voices": {
+      "types": "./dist/kokoro-voices.d.ts",
+      "import": "./dist/kokoro-voices.js"
     }
   },
   "files": [

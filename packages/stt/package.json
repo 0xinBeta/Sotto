@@ -9,6 +9,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./parakeet": {
+      "types": "./dist/parakeet.d.ts",
+      "import": "./dist/parakeet.js"
+    },
+    "./moonshine": {
+      "types": "./dist/moonshine.d.ts",
+      "import": "./dist/moonshine.js"
     }
   },
   "files": [

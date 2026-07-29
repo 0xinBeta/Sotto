@@ -10,6 +10,12 @@ const vadDist = realpathSync(
 const ortTransformersDist = realpathSync(
   resolve(extensionRoot, "node_modules/onnxruntime-web-transformers/dist"),
 );
+const moonshineTransformers = realpathSync(
+  resolve(
+    extensionRoot,
+    "../../packages/stt/node_modules/@huggingface/transformers",
+  ),
+);
 const parakeetPackage = realpathSync(
   resolve(extensionRoot, "../../packages/stt/node_modules/parakeet.js"),
 );
@@ -76,21 +82,19 @@ function localOrtRuntimeUrls(): Plugin {
       return localized === code ? undefined : { code: localized, map: null };
     },
     generateBundle(_options, bundle) {
-      const offscreen = bundle["offscreen.js"];
-      if (!offscreen || offscreen.type !== "chunk") return;
-      offscreen.code = offscreen.code.replace(
-        /(["`])H4sIA[A-Za-z0-9+/=]+\1/,
-        (embedded, delimiter: string) =>
-          embedded.replaceAll(
-            "cdn",
-            delimiter === "`"
-              ? "cd${String.fromCharCode(110)}"
-              : 'cd"+String.fromCharCode(110)+"',
-          ),
-      );
       for (const asset of Object.values(bundle)) {
+        if (asset.type !== "chunk") continue;
+        asset.code = asset.code.replace(
+          /(["`])H4sIA[A-Za-z0-9+/=]+\1/,
+          (embedded, delimiter: string) =>
+            embedded.replaceAll(
+              "cdn",
+              delimiter === "`"
+                ? "cd${String.fromCharCode(110)}"
+                : 'cd"+String.fromCharCode(110)+"',
+            ),
+        );
         if (
-          asset.type === "chunk" &&
           /https:\/\/(?:cdn\.jsdelivr\.net|unpkg\.com)\/.*(?:onnxruntime|transformers)/i
             .test(asset.code)
         ) {
@@ -155,6 +159,80 @@ function inlineExtractPageRuntime(): Plugin {
   };
 }
 
+function verifyPremiumEngineChunks(): Plugin {
+  const engineModules = {
+    kokoro: [
+      /\/packages\/tts\/dist\/kokoro\.js$/,
+      /\/node_modules\/kokoro-js\//,
+    ],
+    parakeet: [
+      /\/packages\/stt\/dist\/parakeet\.js$/,
+      /\/node_modules\/parakeet\.js\//,
+    ],
+  } as const;
+
+  return {
+    name: "sotto-verify-premium-engine-chunks",
+    generateBundle(_options, bundle) {
+      const offscreen = bundle["offscreen.js"];
+      if (!offscreen || offscreen.type !== "chunk") {
+        throw new Error("The offscreen entry chunk was not emitted");
+      }
+      if (Buffer.byteLength(offscreen.code) >= 1024 * 1024) {
+        throw new Error("The offscreen entry chunk must stay under 1 MiB");
+      }
+
+      const staticChunks = new Set<string>();
+      const visitStaticChunk = (fileName: string): void => {
+        if (staticChunks.has(fileName)) return;
+        const asset = bundle[fileName];
+        if (!asset || asset.type !== "chunk") return;
+        staticChunks.add(fileName);
+        for (const imported of asset.imports) visitStaticChunk(imported);
+      };
+      visitStaticChunk(offscreen.fileName);
+
+      for (const [engine, patterns] of Object.entries(engineModules)) {
+        const chunks = Object.values(bundle).filter(
+          (asset) =>
+            asset.type === "chunk" &&
+            Object.keys(asset.modules).some((id) =>
+              patterns.some((pattern) => pattern.test(id))
+            ),
+        );
+        if (chunks.length === 0) {
+          throw new Error(`The ${engine} engine chunk was not emitted`);
+        }
+        if (
+          !chunks.some((chunk) =>
+            chunk.fileName.startsWith(`assets/${engine}-`)
+          )
+        ) {
+          throw new Error(`The ${engine} engine chunk name is not stable`);
+        }
+        const staticEngine = chunks.find((chunk) =>
+          staticChunks.has(chunk.fileName)
+        );
+        if (staticEngine) {
+          throw new Error(
+            `The offscreen static import graph contains ${engine} in ${staticEngine.fileName}`,
+          );
+        }
+      }
+
+      for (const asset of Object.values(bundle)) {
+        if (
+          asset.type === "chunk" &&
+          (/\beval\s*\(/.test(asset.code) ||
+            /\bnew\s+Function\s*\(/.test(asset.code))
+        ) {
+          throw new Error(`The extension chunk ${asset.fileName} uses eval`);
+        }
+      }
+    },
+  };
+}
+
 export default defineConfig({
   resolve: {
     conditions: ["onnxruntime-web-use-extern-wasm"],
@@ -202,6 +280,7 @@ export default defineConfig({
       ],
     }),
     inlineExtractPageRuntime(),
+    verifyPremiumEngineChunks(),
   ],
   build: {
     outDir: "dist",
@@ -217,6 +296,12 @@ export default defineConfig({
       },
       output: {
         entryFileNames: "[name].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        manualChunks(id) {
+          if (id.startsWith(moonshineTransformers)) {
+            return "moonshine-runtime";
+          }
+        },
       },
     },
   },
