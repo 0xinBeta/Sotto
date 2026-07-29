@@ -19,6 +19,10 @@ class FakeElement {
   checked = false;
   dateTime = "";
   disabled = false;
+  files?: readonly {
+    readonly size: number;
+    text(): Promise<string>;
+  }[];
   hidden = false;
   open = false;
   parent?: FakeElement;
@@ -105,6 +109,8 @@ class FakeElement {
   }
   setPointerCapture(): void {}
   releasePointerCapture(): void {}
+  click = vi.fn();
+  focus = vi.fn();
   scrollIntoView = vi.fn();
 
   async emit(
@@ -218,6 +224,14 @@ const elementIds = [
   "speech-volume-value",
   "response-verbosity",
   "copy-diagnostic-report",
+  "export-settings-backup",
+  "choose-settings-backup",
+  "settings-backup-file",
+  "settings-backup-status",
+  "settings-backup-confirm",
+  "settings-backup-confirm-copy",
+  "confirm-settings-import",
+  "cancel-settings-import",
   "page-text-card",
   "page-text-title",
   "page-text-output",
@@ -270,6 +284,14 @@ async function installSidepanel(options: {
   readonly quietMode?: boolean;
   readonly retryWorkflow?: typeof workflow;
   readonly reducedMotion?: boolean;
+  readonly backupPreview?: {
+    readonly valid: boolean;
+    readonly noteCount?: number;
+  };
+  readonly backupImport?: {
+    readonly valid: boolean;
+    readonly addedNoteCount?: number;
+  };
   readonly speechSettings?: {
     readonly rate: number;
     readonly volume: number;
@@ -284,6 +306,7 @@ async function installSidepanel(options: {
   elements["reading-text-output"].hidden = true;
   elements["reading-controls"].hidden = true;
   elements["latency-readout"].hidden = true;
+  elements["settings-backup-confirm"].hidden = true;
   const emptyLog = new FakeElement("li");
   emptyLog.className = "empty-log";
   emptyLog.textContent = "No commands yet.";
@@ -316,6 +339,38 @@ async function installSidepanel(options: {
           value: options.quietMode ?? false,
         };
       }
+      if (message.type === "preview-settings-import") {
+        const preview = options.backupPreview ?? {
+          valid: true,
+          noteCount: 0,
+        };
+        return {
+          ok: true,
+          value: preview.valid
+            ? {
+                valid: true,
+                preview: { noteCount: preview.noteCount ?? 0 },
+              }
+            : { valid: false },
+        };
+      }
+      if (message.type === "import-settings-backup") {
+        const result = options.backupImport ?? {
+          valid: true,
+          addedNoteCount: 0,
+        };
+        return {
+          ok: true,
+          value: result.valid
+            ? {
+                valid: true,
+                result: {
+                  addedNoteCount: result.addedNoteCount ?? 0,
+                },
+              }
+            : { valid: false },
+        };
+      }
       if (message.type === "set-quiet-mode") {
         return {
           ok: true,
@@ -340,7 +395,9 @@ async function installSidepanel(options: {
     },
   );
 
+  const body = new FakeElement("body");
   vi.stubGlobal("document", {
+    body,
     hasFocus: vi.fn(() => true),
     addEventListener: vi.fn((type: string, listener: Listener) => {
       const listeners = documentListeners.get(type) ?? [];
@@ -1646,6 +1703,66 @@ describe("side-panel screenshot clipboard fallback", () => {
       elements["action-log"].firstElementChild
         ?.querySelector(".recovery-hint"),
     ).toBeUndefined();
+  });
+
+  it("shows one backup confirmation before it applies the import", async () => {
+    const { elements, sendMessage } = await installSidepanel({
+      backupPreview: { valid: true, noteCount: 12 },
+      backupImport: { valid: true, addedNoteCount: 10 },
+    });
+    const backup = '{"schemaVersion":1}';
+    elements["settings-backup-file"].files = [{
+      size: backup.length,
+      text: async () => backup,
+    }];
+
+    await elements["settings-backup-file"].emit("change");
+
+    expect(elements["settings-backup-confirm"].hidden).toBe(false);
+    expect(elements["settings-backup-confirm-copy"].textContent).toBe(
+      "Import 12 notes and settings? This replaces your settings.",
+    );
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "preview-settings-import",
+      backup,
+    });
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "import-settings-backup" }),
+    );
+
+    await elements["confirm-settings-import"].emit("click");
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "import-settings-backup",
+      backup,
+    });
+    expect(elements["settings-backup-confirm"].hidden).toBe(true);
+    expect(elements["settings-backup-status"].textContent).toBe(
+      "Import complete. Settings replaced. Added 10 notes.",
+    );
+  });
+
+  it("shows one clear line for an invalid backup", async () => {
+    const { elements, sendMessage } = await installSidepanel({
+      backupPreview: { valid: false },
+    });
+    const backup = "not json";
+    elements["settings-backup-file"].files = [{
+      size: backup.length,
+      text: async () => backup,
+    }];
+
+    await elements["settings-backup-file"].emit("change");
+
+    expect(elements["settings-backup-status"].textContent).toBe(
+      "This backup file is not valid.",
+    );
+    expect(elements["settings-backup-confirm"].hidden).toBe(true);
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "import-settings-backup" }),
+    );
   });
 
   it("clears a successful automatic workflow so a later click cannot write twice", async () => {

@@ -83,6 +83,15 @@ export class SpeechSettingsStore {
     return { ...this.#settings };
   }
 
+  adopt(settings: SpeechSettings): void {
+    this.#settings = {
+      rate: clampSpeechRate(settings.rate),
+      volume: clampSpeechVolume(settings.volume),
+      verbosity: settings.verbosity,
+    };
+    this.#ready = Promise.resolve();
+  }
+
   update(
     update: Partial<SpeechSettings>,
   ): Promise<SpeechSettings> {

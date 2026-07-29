@@ -939,6 +939,50 @@ h2 {
   margin-top: 20px;
 }
 
+.settings-backup {
+  margin-top: 20px;
+  border-top: 1px solid var(--rule);
+  padding-top: 18px;
+}
+
+.settings-backup h3,
+.settings-backup p {
+  margin: 0;
+}
+
+.settings-backup h3 {
+  font-size: 14px;
+}
+
+.settings-backup > p {
+  margin-top: 7px;
+  color: var(--paper-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.settings-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.settings-backup-status:empty {
+  display: none;
+}
+
+.settings-backup-confirm {
+  margin-top: 14px;
+  border-left: 2px solid var(--acid);
+  padding-left: 12px;
+}
+
+.settings-backup-confirm p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .progress-copy {
   margin-bottom: 8px;
   color: var(--paper-dim);

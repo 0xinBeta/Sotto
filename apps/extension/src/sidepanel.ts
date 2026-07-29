@@ -718,6 +718,22 @@ const responseVerbosity =
   requiredElement<HTMLSelectElement>("#response-verbosity");
 const copyDiagnosticReport =
   requiredElement<HTMLButtonElement>("#copy-diagnostic-report");
+const exportSettingsBackup =
+  requiredElement<HTMLButtonElement>("#export-settings-backup");
+const chooseSettingsBackup =
+  requiredElement<HTMLButtonElement>("#choose-settings-backup");
+const settingsBackupFile =
+  requiredElement<HTMLInputElement>("#settings-backup-file");
+const settingsBackupStatus =
+  requiredElement<HTMLElement>("#settings-backup-status");
+const settingsBackupConfirm =
+  requiredElement<HTMLElement>("#settings-backup-confirm");
+const settingsBackupConfirmCopy =
+  requiredElement<HTMLElement>("#settings-backup-confirm-copy");
+const confirmSettingsImport =
+  requiredElement<HTMLButtonElement>("#confirm-settings-import");
+const cancelSettingsImport =
+  requiredElement<HTMLButtonElement>("#cancel-settings-import");
 const pageTextCard = requiredElement<HTMLElement>("#page-text-card");
 const pageTextTitle = requiredElement<HTMLElement>("#page-text-title");
 const pageTextOutput = requiredElement<HTMLElement>("#page-text-output");
@@ -775,12 +791,14 @@ let highAccuracyState: PremiumSttState = "not-downloaded";
 let premiumSetupSpeechState: PremiumSttState | undefined;
 let highAccuracyTier: PremiumSttTier = "moonshine-base";
 let highAccuracyResumable = false;
+let pendingSettingsBackup: string | undefined;
 let meterAccessibleTimer: number | undefined;
 let pendingMeterAccessibleValue: number | undefined;
 let lastMeterAccessibleUpdate = Number.NEGATIVE_INFINITY;
 const progressHideTimers:
   Partial<Record<"nano" | "stt" | "premium-tts" | "premium-stt", number>> = {};
 const METER_ACCESSIBLE_INTERVAL_MS = 500;
+const MAX_SETTINGS_BACKUP_FILE_BYTES = 20 * 1024 * 1024;
 
 function isSpeechSettings(value: unknown): value is SpeechSettings {
   if (!isRecord(value)) return false;
@@ -2206,6 +2224,19 @@ closePageText.addEventListener("click", () => {
 
 notesSearch.addEventListener("input", renderNoteList);
 
+function downloadDataUrl(
+  filename: string,
+  dataUrl: string,
+): void {
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = filename;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
 exportNotes.addEventListener("click", async () => {
   exportNotes.disabled = true;
   try {
@@ -2221,13 +2252,7 @@ exportNotes.addEventListener("click", async () => {
     ) {
       throw new Error("Notes export returned invalid data");
     }
-    const link = document.createElement("a");
-    link.href = result.dataUrl;
-    link.download = result.filename;
-    link.hidden = true;
-    document.body.append(link);
-    link.click();
-    link.remove();
+    downloadDataUrl(result.filename, result.dataUrl);
   } catch (error) {
     appendLog(
       "export notes",
@@ -2235,6 +2260,135 @@ exportNotes.addEventListener("click", async () => {
     );
   } finally {
     exportNotes.disabled = panelNotes.length === 0;
+  }
+});
+
+function clearSettingsImport(): void {
+  pendingSettingsBackup = undefined;
+  settingsBackupFile.value = "";
+  settingsBackupConfirm.hidden = true;
+  confirmSettingsImport.disabled = false;
+  cancelSettingsImport.disabled = false;
+}
+
+function showSettingsBackupStatus(message: string): void {
+  settingsBackupStatus.textContent = message;
+}
+
+exportSettingsBackup.addEventListener("click", async () => {
+  exportSettingsBackup.disabled = true;
+  showSettingsBackupStatus("");
+  try {
+    const result = await requestWorker<{
+      readonly filename: string;
+      readonly dataUrl: string;
+    }>({ type: "export-settings-backup" });
+    if (
+      !result ||
+      !/^sotto-backup-\d{4}-\d{2}-\d{2}\.json$/.test(result.filename) ||
+      !result.dataUrl.startsWith(
+        "data:application/json;charset=utf-8,",
+      ) ||
+      result.dataUrl.length > MAX_SETTINGS_BACKUP_FILE_BYTES * 3 + 100
+    ) {
+      throw new Error("Backup export returned invalid data");
+    }
+    downloadDataUrl(result.filename, result.dataUrl);
+    showSettingsBackupStatus("Backup exported.");
+  } catch {
+    showSettingsBackupStatus("Backup export failed.");
+  } finally {
+    exportSettingsBackup.disabled = false;
+  }
+});
+
+chooseSettingsBackup.addEventListener("click", () => {
+  clearSettingsImport();
+  showSettingsBackupStatus("");
+  settingsBackupFile.click();
+});
+
+settingsBackupFile.addEventListener("change", async () => {
+  pendingSettingsBackup = undefined;
+  settingsBackupConfirm.hidden = true;
+  showSettingsBackupStatus("");
+  const file = settingsBackupFile.files?.[0];
+  if (!file) return;
+  try {
+    if (file.size > MAX_SETTINGS_BACKUP_FILE_BYTES) {
+      throw new TypeError("Backup file is too large");
+    }
+    const backup = await file.text();
+    const response = await requestWorker<unknown>({
+      type: "preview-settings-import",
+      backup,
+    });
+    if (
+      !isRecord(response) ||
+      response.valid !== true ||
+      !isRecord(response.preview) ||
+      typeof response.preview.noteCount !== "number" ||
+      !Number.isSafeInteger(response.preview.noteCount) ||
+      response.preview.noteCount < 0 ||
+      response.preview.noteCount > MAX_NOTES
+    ) {
+      throw new TypeError("Backup file is invalid");
+    }
+    pendingSettingsBackup = backup;
+    settingsBackupConfirmCopy.textContent =
+      `Import ${response.preview.noteCount} notes and settings? ` +
+      "This replaces your settings.";
+    settingsBackupConfirm.hidden = false;
+    confirmSettingsImport.focus();
+  } catch {
+    clearSettingsImport();
+    showSettingsBackupStatus("This backup file is not valid.");
+  }
+});
+
+cancelSettingsImport.addEventListener("click", () => {
+  clearSettingsImport();
+  showSettingsBackupStatus("Import canceled.");
+  chooseSettingsBackup.focus();
+});
+
+confirmSettingsImport.addEventListener("click", async () => {
+  const backup = pendingSettingsBackup;
+  if (backup === undefined) return;
+  confirmSettingsImport.disabled = true;
+  cancelSettingsImport.disabled = true;
+  showSettingsBackupStatus("");
+  try {
+    const response = await requestWorker<unknown>({
+      type: "import-settings-backup",
+      backup,
+    });
+    if (
+      !isRecord(response) ||
+      response.valid !== true ||
+      !isRecord(response.result) ||
+      typeof response.result.addedNoteCount !== "number" ||
+      !Number.isSafeInteger(response.result.addedNoteCount) ||
+      response.result.addedNoteCount < 0 ||
+      response.result.addedNoteCount > MAX_NOTES
+    ) {
+      throw new TypeError("Backup file is invalid");
+    }
+    const added = response.result.addedNoteCount;
+    clearSettingsImport();
+    showSettingsBackupStatus(
+      added === 0
+        ? "Import complete. Settings replaced. No notes added."
+        : `Import complete. Settings replaced. Added ${added} notes.`,
+    );
+    await Promise.all([loadSpeechSettings(), loadQuietMode()]);
+  } catch (error) {
+    clearSettingsImport();
+    showSettingsBackupStatus(
+      error instanceof TypeError
+        ? "This backup file is not valid."
+        : "Import failed. Nothing changed.",
+    );
   }
 });
 

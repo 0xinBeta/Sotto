@@ -331,6 +331,55 @@
         >
           Copy diagnostic report
         </button>
+        <div class="settings-backup" aria-labelledby="settings-backup-heading">
+          <h3 id="settings-backup-heading">Settings and notes backup</h3>
+          <p>Save your settings and notes in one JSON file.</p>
+          <div class="settings-backup-actions">
+            <button class="button" id="export-settings-backup" type="button">
+              Export backup
+            </button>
+            <button class="button" id="choose-settings-backup" type="button">
+              Import backup
+            </button>
+            <input
+              id="settings-backup-file"
+              type="file"
+              accept="application/json,.json"
+              hidden
+            />
+          </div>
+          <p
+            class="settings-backup-status"
+            id="settings-backup-status"
+            role="status"
+            aria-live="polite"
+          ></p>
+          <div
+            class="settings-backup-confirm"
+            id="settings-backup-confirm"
+            role="group"
+            aria-labelledby="settings-backup-confirm-copy"
+            hidden
+          >
+            <p id="settings-backup-confirm-copy"></p>
+            <div class="settings-backup-actions">
+              <button
+                class="button primary"
+                id="confirm-settings-import"
+                type="button"
+              >
+                Import
+              </button>
+              <button
+                class="button"
+                id="cancel-settings-import"
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="transcript-panel" aria-labelledby="transcript-heading">

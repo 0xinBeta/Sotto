@@ -27,6 +27,11 @@ export class QuietModeStore {
     return this.#enabled;
   }
 
+  adopt(enabled: boolean): void {
+    this.#enabled = enabled;
+    this.#ready = Promise.resolve();
+  }
+
   update(enabled: boolean): Promise<boolean> {
     const pending = this.#updateTail
       .catch(() => undefined)

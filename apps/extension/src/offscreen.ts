@@ -112,6 +112,8 @@ interface OffscreenMessage {
   readonly volume?: unknown;
   readonly verbosity?: unknown;
   readonly voice?: unknown;
+  readonly premiumTtsEnabled?: unknown;
+  readonly premiumSttEnabled?: unknown;
   readonly modelId?: unknown;
   readonly preview?: unknown;
   readonly timings?: unknown;
@@ -2314,6 +2316,23 @@ async function handleOffscreenMessage(
         [PREMIUM_TTS_VOICE_KEY]: premiumTtsVoice,
       });
       await publishPremiumStatus();
+      return;
+    case "adopt-settings-backup":
+      if (
+        typeof message.premiumTtsEnabled !== "boolean" ||
+        typeof message.premiumSttEnabled !== "boolean" ||
+        !isKokoroVoiceId(message.voice)
+      ) {
+        throw new TypeError("Valid imported settings are required");
+      }
+      await ensurePremiumSettings();
+      premiumTtsEnabled = message.premiumTtsEnabled;
+      premiumTtsVoice = message.voice;
+      premiumTts?.setVoice(premiumTtsVoice);
+      await ensurePremiumSttSettings();
+      await premiumStt!.setEnabled(message.premiumSttEnabled);
+      await publishPremiumStatus();
+      await publishPremiumSttStatus();
       return;
     case "prepare-premium-stt":
       await ensurePremiumSttSettings();

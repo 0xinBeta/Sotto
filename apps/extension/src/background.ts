@@ -71,6 +71,7 @@ import {
   type DiagnosticOffscreenState,
   type DiagnosticReportInput,
 } from "./diagnostic-report.js";
+import { SettingsBackupStore } from "./settings-backup.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -95,6 +96,7 @@ interface WorkerMessage {
   readonly did?: unknown;
   readonly timings?: unknown;
   readonly operation?: unknown;
+  readonly backup?: unknown;
 }
 
 const actionRegistry = new ActionRegistry(actions);
@@ -111,6 +113,13 @@ const speechSettings = new SpeechSettingsStore({
 });
 const quietMode = new QuietModeStore({
   get: async (key) => await chrome.storage.local.get(key),
+  set: async (values) => await chrome.storage.local.set(values),
+});
+const settingsBackup = new SettingsBackupStore({
+  get: async (keys) =>
+    await chrome.storage.local.get(
+      keys as string | string[] | null | undefined,
+    ),
   set: async (values) => await chrome.storage.local.set(values),
 });
 const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
@@ -2147,6 +2156,62 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
     }
     case "get-command-reference":
       return createCommandReference(actionRegistry);
+    case "export-settings-backup":
+      return settingsBackup.export();
+    case "preview-settings-import":
+      if (typeof message.backup !== "string") {
+        return { valid: false };
+      }
+      try {
+        return {
+          valid: true,
+          preview: await settingsBackup.previewImport(message.backup),
+        };
+      } catch (error) {
+        if (error instanceof TypeError || error instanceof RangeError) {
+          return { valid: false };
+        }
+        throw error;
+      }
+    case "import-settings-backup": {
+      if (typeof message.backup !== "string") {
+        return { valid: false };
+      }
+      try {
+        const result = await settingsBackup.import(message.backup);
+        speechSettings.adopt({
+          rate: result.settings.rate,
+          volume: result.settings.volume,
+          verbosity: result.settings.verbosity,
+        });
+        quietMode.adopt(result.settings.doNotDisturb);
+        if (result.settings.doNotDisturb) tts.stop();
+        await Promise.all([
+          publishQuietMode(result.settings.doNotDisturb).catch(
+            (error: unknown) => {
+              console.warn("Imported quiet mode is pending", error);
+            },
+          ),
+          publishNotes().catch((error: unknown) => {
+            console.warn("Imported notes panel update is pending", error);
+          }),
+          sendOffscreen({
+            type: "adopt-settings-backup",
+            premiumTtsEnabled: result.settings.premiumTts.enabled,
+            voice: result.settings.premiumTts.voice,
+            premiumSttEnabled: result.settings.premiumStt.enabled,
+          }).catch((error: unknown) => {
+            console.warn("Imported premium settings are pending", error);
+          }),
+        ]);
+        return { valid: true, result };
+      } catch (error) {
+        if (error instanceof TypeError || error instanceof RangeError) {
+          return { valid: false };
+        }
+        throw error;
+      }
+    }
     case "get-reminder": {
       if (
         typeof message.reminderId !== "string" ||

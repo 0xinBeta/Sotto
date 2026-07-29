@@ -27,6 +27,12 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("status-chip")).toContain('role="status"');
     expect(openingTag("transcript")).toContain('aria-live="polite"');
     expect(openingTag("pipeline-error")).toContain('role="alert"');
+    expect(openingTag("settings-backup-status")).toContain(
+      'role="status"',
+    );
+    expect(openingTag("settings-backup-confirm")).toContain(
+      'role="group"',
+    );
     expect(openingTag("action-log-announcer")).toContain(
       'aria-live="polite"',
     );
@@ -106,6 +112,16 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("response-verbosity")).toMatch(/^<select\b/);
     expect(panelMarkup).toContain('<option value="normal">Normal</option>');
     expect(panelMarkup).toContain('<option value="brief">Brief</option>');
+    expect(openingTag("settings-backup-file")).toContain('type="file"');
+    expect(openingTag("settings-backup-file")).toContain(
+      'accept="application/json,.json"',
+    );
+    expect(openingTag("confirm-settings-import")).toContain(
+      'type="button"',
+    );
+    expect(openingTag("cancel-settings-import")).toContain(
+      'type="button"',
+    );
 
     const headingLevels = Array.from(
       panelMarkup.matchAll(/<h([1-6])(?:\s|>)/g),
