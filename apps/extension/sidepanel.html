@@ -268,6 +268,20 @@
             <span class="voice-switch-track" aria-hidden="true"></span>
           </label>
         </div>
+        <fieldset
+          class="speech-language-setting"
+          id="speech-language-setting"
+        >
+          <legend data-i18n="speechLanguage"></legend>
+          <select
+            id="speech-language"
+            aria-describedby="speech-language-note"
+          ></select>
+          <output id="speech-language-fixed" hidden>
+            <span data-i18n="english"></span>
+          </output>
+          <p id="speech-language-note"></p>
+        </fieldset>
         <div class="premium-progress" id="premium-stt-progress-card" hidden>
           <div class="progress-copy">
             <span id="premium-stt-progress-label" data-i18n="speechModel"></span>

@@ -1,3 +1,5 @@
+import type { SpeechLanguage } from "./languages.js";
+
 export interface SttProgress {
   readonly status: string;
   readonly file?: string;
@@ -13,6 +15,11 @@ export type SttProgressCallback = (progress: SttProgress) => void;
 
 export interface SttTranscriptionOptions {
   readonly signal?: AbortSignal;
+  /**
+   * The requested speech language. Engines can use automatic detection when
+   * their decoder does not accept language input.
+   */
+  readonly language?: SpeechLanguage;
 }
 
 export interface SttEngine {

@@ -257,7 +257,10 @@ export class PremiumSttManager {
     this.#emitStatus();
   }
 
-  async transcribe(audio: Float32Array): Promise<string> {
+  async transcribe(
+    audio: Float32Array,
+    options: SttTranscriptionOptions = {},
+  ): Promise<string> {
     const premium = this.#premium;
     if (!premium || !this.#enabled || this.#state !== "active") {
       await this.#ensureTiny();
@@ -276,7 +279,13 @@ export class PremiumSttManager {
     }
 
     try {
-      return await this.#runTranscription(() => premium.transcribe(audio));
+      const premiumOptions: SttTranscriptionOptions =
+        this.#tier === "parakeet"
+          ? options
+          : {};
+      return await this.#runTranscription(() =>
+        premium.transcribe(audio, premiumOptions)
+      );
     } catch (error) {
       if (this.#tier !== "parakeet" || !isWebGpuSttFailure(error)) {
         throw error;
@@ -291,7 +300,10 @@ export class PremiumSttManager {
           throw new Error("Premium STT reload did not produce a resident model");
         }
         return await this.#runTranscription(() =>
-          replacement.transcribe(audio)
+          replacement.transcribe(
+            audio,
+            this.#tier === "parakeet" ? options : {},
+          )
         );
       } catch (retryError) {
         if (this.status.state !== "error") {

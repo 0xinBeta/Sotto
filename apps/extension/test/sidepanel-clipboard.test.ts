@@ -265,6 +265,10 @@ const elementIds = [
   "premium-stt-progress",
   "premium-stt-progress-value",
   "premium-stt-progress-label",
+  "speech-language-setting",
+  "speech-language",
+  "speech-language-fixed",
+  "speech-language-note",
   "models-list",
   "models-total",
   "speech-rate",
@@ -1240,9 +1244,13 @@ describe("side-panel screenshot clipboard fallback", () => {
       resident: false,
       tier: "parakeet",
       backend: "webgpu",
+      language: "auto",
     });
     expect(elements["premium-stt-copy"].textContent).toContain("409 MB");
     expect(elements["download-premium-stt"].textContent).toContain("409 MB");
+    expect(elements["speech-language"].hidden).toBe(false);
+    expect(elements["speech-language"].value).toBe("auto");
+    expect(elements["speech-language-fixed"].hidden).toBe(true);
 
     onMessage({
       target: "sidepanel",
@@ -1295,10 +1303,16 @@ describe("side-panel screenshot clipboard fallback", () => {
       resident: true,
       tier: "moonshine-base",
       backend: "wasm",
+      language: "en",
     });
     expect(elements["premium-stt-copy"].textContent).toContain("63 MB");
     expect(elements["premium-stt-enabled"].checked).toBe(true);
     expect(elements["premium-stt-enabled"].disabled).toBe(false);
+    expect(elements["speech-language"].hidden).toBe(true);
+    expect(elements["speech-language-fixed"].hidden).toBe(false);
+    expect(elements["speech-language-note"].textContent).toBe(
+      "Moonshine supports English speech only.",
+    );
 
     elements["premium-stt-enabled"].checked = false;
     await elements["premium-stt-enabled"].emit("change");
@@ -1306,6 +1320,26 @@ describe("side-panel screenshot clipboard fallback", () => {
       target: "worker",
       type: "set-premium-stt-enabled",
       enabled: false,
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "premium-stt-state",
+      state: "active",
+      enabled: true,
+      downloaded: true,
+      resident: true,
+      tier: "parakeet",
+      backend: "webgpu",
+      language: "es",
+    });
+    expect(elements["speech-language"].value).toBe("es");
+    elements["speech-language"].value = "fr";
+    await elements["speech-language"].emit("change");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "set-speech-language",
+      language: "fr",
     });
 
     onMessage({

@@ -7,6 +7,7 @@ import type {
   SttEngine,
   SttProgress,
   SttProgressCallback,
+  SttTranscriptionOptions,
 } from "./types.js";
 
 export const PARAKEET_MODEL_ID =
@@ -178,7 +179,10 @@ export class ParakeetSttEngine implements SttEngine {
     }
   }
 
-  async transcribe(audio: Float32Array): Promise<string> {
+  async transcribe(
+    audio: Float32Array,
+    options: SttTranscriptionOptions = {},
+  ): Promise<string> {
     if (!this.#model) {
       throw new Error("ParakeetSttEngine must be initialized before transcription");
     }
@@ -192,11 +196,15 @@ export class ParakeetSttEngine implements SttEngine {
     }
     if (audio.length === 0) return "";
 
+    options.signal?.throwIfAborted();
+    // Parakeet v3 detects language from audio. The pinned parakeet.js
+    // decoder does not accept a language token or language configuration.
     const result = await this.#model.transcribe(audio, 16_000, {
       returnTimestamps: false,
       returnConfidences: true,
       enableProfiling: false,
     });
+    options.signal?.throwIfAborted();
     if (typeof result?.utterance_text !== "string") {
       throw new Error("Parakeet returned an invalid transcription result");
     }

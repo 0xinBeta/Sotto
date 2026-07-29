@@ -17,6 +17,11 @@ import {
   KOKORO_VOICES,
   type KokoroVoiceId,
 } from "@sotto/tts/kokoro-voices";
+import {
+  normalizeSpeechLanguage,
+  PARAKEET_SPEECH_LANGUAGES,
+  type SpeechLanguage,
+} from "@sotto/stt/languages";
 
 import {
   PREMIUM_STT_ENABLED_KEY,
@@ -44,6 +49,7 @@ import {
   type ResponseVerbosity,
 } from "./speech-settings.js";
 import { WAKE_WORD_ENABLED_KEY } from "./wake-word-settings.js";
+import { SPEECH_LANGUAGE_KEY } from "./stt-language.js";
 import {
   COMMAND_ALIASES_KEY,
   type CommandAlias,
@@ -76,6 +82,7 @@ export interface SettingsBackupSettings {
   readonly premiumStt: {
     readonly enabled: boolean;
     readonly tier: PremiumSttTier;
+    readonly language: SpeechLanguage;
   };
 }
 
@@ -215,6 +222,12 @@ export const SETTINGS_BACKUP_SCHEMA: JsonSchema = {
           properties: {
             enabled: { type: "boolean" },
             tier: { enum: ["parakeet", "moonshine-base"] },
+            language: {
+              enum: [
+                "auto",
+                ...PARAKEET_SPEECH_LANGUAGES.map(({ code }) => code),
+              ],
+            },
           },
           required: ["enabled", "tier"],
           additionalProperties: false,
@@ -292,6 +305,7 @@ function backupSettings(
       tier: isPremiumSttTier(values[PREMIUM_STT_TIER_KEY])
         ? values[PREMIUM_STT_TIER_KEY]
         : "moonshine-base",
+      language: normalizeSpeechLanguage(values[SPEECH_LANGUAGE_KEY]),
     },
   };
 }
@@ -406,6 +420,7 @@ export function parseSettingsBackup(text: string): SettingsBackup {
     [PREMIUM_TTS_VOICE_KEY]: settings.premiumTts.voice,
     [PREMIUM_STT_ENABLED_KEY]: settings.premiumStt.enabled,
     [PREMIUM_STT_TIER_KEY]: settings.premiumStt.tier,
+    [SPEECH_LANGUAGE_KEY]: settings.premiumStt.language,
   });
   return {
     schemaVersion: SETTINGS_BACKUP_SCHEMA_VERSION,
@@ -457,6 +472,7 @@ function importPlan(
     [PREMIUM_TTS_VOICE_KEY]: settings.premiumTts.voice,
     [PREMIUM_STT_ENABLED_KEY]: settings.premiumStt.enabled,
     [PREMIUM_STT_TIER_KEY]: settings.premiumStt.tier,
+    [SPEECH_LANGUAGE_KEY]: settings.premiumStt.language,
     [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
     [COMMAND_ALIASES_KEY]: aliases,
   };

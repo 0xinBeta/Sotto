@@ -305,6 +305,28 @@ describe("PremiumSttManager", () => {
     expect(order).toEqual(["stt:open calendar", "tts"]);
   });
 
+  it("passes the selected language to the Parakeet engine seam", async () => {
+    const tiny = engineHarness();
+    const premium = engineHarness();
+    const manager = new PremiumSttManager({
+      tiny,
+      tier: "parakeet",
+      createPremium: () => premium,
+      runInference: (task) => task(),
+      selfTestAudio: fixture,
+    });
+    await manager.initializeDefault();
+    await manager.prepare();
+    const audio = new Float32Array([0.1]);
+
+    await manager.transcribe(audio, { language: "es" });
+
+    expect(premium.transcribe).toHaveBeenLastCalledWith(
+      audio,
+      { language: "es" },
+    );
+  });
+
   it("evicts the LRU peer and retries Parakeet once after device loss", async () => {
     const tiny = engineHarness();
     const first = engineHarness(

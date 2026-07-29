@@ -1,5 +1,10 @@
 export { MoonshineEngine } from "./moonshine.js";
 export {
+  isSpeechLanguage,
+  normalizeSpeechLanguage,
+  PARAKEET_SPEECH_LANGUAGES,
+} from "./languages.js";
+export {
   PARAKEET_MODEL_BYTES,
   PARAKEET_MODEL_ID,
   PARAKEET_MODEL_REVISION,
@@ -16,3 +21,7 @@ export type {
   SttProgressCallback,
   SttTranscriptionOptions,
 } from "./types.js";
+export type {
+  ParakeetSpeechLanguage,
+  SpeechLanguage,
+} from "./languages.js";

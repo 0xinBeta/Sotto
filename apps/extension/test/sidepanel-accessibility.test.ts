@@ -128,6 +128,10 @@ describe("side-panel accessibility structure", () => {
     expect(panelMarkup).toMatch(
       /<label class="voice-switch" for="premium-stt-enabled">/,
     );
+    expect(openingTag("speech-language")).toMatch(/^<select\b/);
+    expect(openingTag("speech-language")).toContain(
+      'aria-describedby="speech-language-note"',
+    );
     expect(panelMarkup).toMatch(
       /<label class="voice-switch" for="live-transcript-preview">/,
     );

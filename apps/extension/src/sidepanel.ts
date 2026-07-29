@@ -13,6 +13,12 @@ import { sanitizeHostname } from "@sotto/actions";
 import { performClipboardWorkflow } from "@sotto/destinations";
 import type { TtsProgressEventType } from "@sotto/tts";
 import {
+  isSpeechLanguage,
+  normalizeSpeechLanguage,
+  PARAKEET_SPEECH_LANGUAGES,
+  type SpeechLanguage,
+} from "@sotto/stt/languages";
+import {
   isKokoroVoiceId,
   KOKORO_VOICE,
   KOKORO_VOICES,
@@ -80,6 +86,7 @@ import {
   type WakeWordPanelState,
   type WakeWordRuntimeState,
 } from "./wake-word-settings.js";
+import { speechLanguageControl } from "./stt-language.js";
 import "./styles.css";
 
 localizePanel();
@@ -491,6 +498,7 @@ type PanelMessage =
       resumable?: boolean;
       tier: PremiumSttTier;
       backend: "webgpu" | "wasm";
+      language?: SpeechLanguage;
       error?: string;
     }
   | {
@@ -752,6 +760,8 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
           message.tier === "moonshine-base") &&
         (message.backend === "webgpu" ||
           message.backend === "wasm") &&
+        (message.language === undefined ||
+          isSpeechLanguage(message.language)) &&
         (message.error === undefined ||
           isBoundedString(message.error, 1_000))
       );
@@ -983,6 +993,14 @@ const premiumSttProgressValue =
   requiredElement<HTMLOutputElement>("#premium-stt-progress-value");
 const premiumSttProgressLabel =
   requiredElement<HTMLElement>("#premium-stt-progress-label");
+const speechLanguageSetting =
+  requiredElement<HTMLFieldSetElement>("#speech-language-setting");
+const speechLanguage =
+  requiredElement<HTMLSelectElement>("#speech-language");
+const speechLanguageFixed =
+  requiredElement<HTMLOutputElement>("#speech-language-fixed");
+const speechLanguageNote =
+  requiredElement<HTMLElement>("#speech-language-note");
 const modelsList =
   requiredElement<HTMLUListElement>("#models-list");
 const modelsTotal =
@@ -1107,6 +1125,7 @@ let highAccuracyState: PremiumSttState = "not-downloaded";
 let premiumSetupSpeechState: PremiumSttState | undefined;
 let highAccuracyTier: PremiumSttTier = "moonshine-base";
 let highAccuracyResumable = false;
+let selectedSpeechLanguage: SpeechLanguage = "auto";
 let pendingSettingsBackup: string | undefined;
 let meterAccessibleTimer: number | undefined;
 let pendingMeterAccessibleValue: number | undefined;
@@ -2426,6 +2445,39 @@ const PREMIUM_SPEECH_STATE_LABELS: Readonly<
   error: t("stateError"),
 };
 
+function renderSpeechLanguageOptions(): void {
+  const options = [
+    { code: "auto", label: t("speechLanguageAuto") },
+    ...PARAKEET_SPEECH_LANGUAGES,
+  ].map(({ code, label }) => {
+    const option = document.createElement("option");
+    option.value = code;
+    option.textContent = label;
+    return option;
+  });
+  speechLanguage.replaceChildren(...options);
+}
+
+renderSpeechLanguageOptions();
+
+function showSpeechLanguage(
+  tier: PremiumSttTier,
+  language: SpeechLanguage,
+): void {
+  const control = speechLanguageControl(tier);
+  selectedSpeechLanguage = control === "select"
+    ? normalizeSpeechLanguage(language)
+    : "en";
+  speechLanguageSetting.hidden = false;
+  speechLanguage.hidden = control !== "select";
+  speechLanguage.disabled = control !== "select";
+  speechLanguage.value = selectedSpeechLanguage;
+  speechLanguageFixed.hidden = control !== "english-fixed";
+  speechLanguageNote.textContent = control === "select"
+    ? t("parakeetLanguageNote")
+    : t("moonshineLanguageNote");
+}
+
 function showPremiumSttState(
   state: PremiumSttState,
   enabled: boolean,
@@ -2434,6 +2486,7 @@ function showPremiumSttState(
   tier: PremiumSttTier,
   resumable = false,
   error?: string,
+  language: SpeechLanguage = tier === "parakeet" ? "auto" : "en",
 ): void {
   highAccuracyState = state;
   premiumSetupSpeechState = state;
@@ -2444,6 +2497,7 @@ function showPremiumSttState(
   premiumSttEnabled.checked = enabled;
   premiumSttEnabled.disabled = !downloaded ||
     (state !== "ready" && state !== "active");
+  showSpeechLanguage(tier, language);
   const busy =
     state === "downloading" ||
     state === "validating" ||
@@ -3580,6 +3634,26 @@ premiumSttEnabled.addEventListener("change", async () => {
   premiumSttEnabled.disabled = false;
 });
 
+speechLanguage.addEventListener("change", async () => {
+  if (!isSpeechLanguage(speechLanguage.value)) {
+    speechLanguage.value = selectedSpeechLanguage;
+    return;
+  }
+  const requested = speechLanguage.value;
+  speechLanguage.disabled = true;
+  if (
+    await send({
+      type: "set-speech-language",
+      language: requested,
+    })
+  ) {
+    selectedSpeechLanguage = requested;
+  } else {
+    speechLanguage.value = selectedSpeechLanguage;
+  }
+  speechLanguage.disabled = false;
+});
+
 liveTranscriptPreview.addEventListener("change", async () => {
   const requested = liveTranscriptPreview.checked;
   liveTranscriptPreview.disabled = true;
@@ -3770,6 +3844,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
         message.tier,
         message.resumable,
         message.error,
+        message.language,
       );
       break;
     case "live-transcript-preview-state":

@@ -1616,6 +1616,7 @@ describe("background screenshot clipboard injection", () => {
       premiumTtsEnabled: true,
       voice: "af_heart",
       premiumSttEnabled: false,
+      language: "auto",
       wakeWordEnabled: true,
       liveTranscriptPreview: false,
     });
@@ -2035,6 +2036,37 @@ describe("background screenshot clipboard injection", () => {
     expect(worker.speak).toHaveBeenLastCalledWith(
       "That action could not be completed.",
       expect.objectContaining({ rate: 1, volume: 1 }),
+    );
+  });
+
+  it("gives one English-command line when non-English typing is unavailable", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    worker.route.mockRejectedValueOnce(new Error("No focused editor"));
+    const harness = await installBackground({
+      id: 65,
+      url: "https://example.com/current",
+    });
+
+    await harness.workerMessage({
+      type: "execute-non-english-dictation",
+      transcript: "abre una pestaña",
+      timings: { input: "voice", sttMs: 12, parseMs: 0 },
+    });
+
+    expect(worker.parse).toHaveBeenCalledWith({
+      action: "type",
+      operation: "dictate",
+      text: "abre una pestaña",
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-error",
+        spoken:
+          "Commands work in English. Dictation works in your language.",
+        detail:
+          "Commands work in English. Dictation works in your language.",
+      }),
     );
   });
 

@@ -25,7 +25,11 @@ import {
   type NanoSession,
   type RewriteTransformation,
 } from "@sotto/nano";
-import type { SttProgress } from "@sotto/stt";
+import type {
+  SpeechLanguage,
+  SttProgress,
+} from "@sotto/stt";
+import { isSpeechLanguage } from "@sotto/stt/languages";
 import { MoonshineEngine } from "@sotto/stt/moonshine";
 import type {
   KokoroInitProgress,
@@ -117,6 +121,11 @@ import {
   WAKE_WORD_ENABLED_KEY,
   type WakeWordRuntimeState,
 } from "./wake-word-settings.js";
+import {
+  isNonEnglishSpeech,
+  SPEECH_LANGUAGE_KEY,
+  speechLanguageForTier,
+} from "./stt-language.js";
 
 interface OffscreenMessage {
   readonly target: "offscreen";
@@ -138,6 +147,7 @@ interface OffscreenMessage {
   readonly voice?: unknown;
   readonly premiumTtsEnabled?: unknown;
   readonly premiumSttEnabled?: unknown;
+  readonly language?: unknown;
   readonly wakeWordEnabled?: unknown;
   readonly liveTranscriptPreview?: unknown;
   readonly modelId?: unknown;
@@ -190,6 +200,7 @@ let sttReady: Promise<void> | undefined;
 let premiumStt: PremiumSttManager | undefined;
 let premiumSttStatus: PremiumSttStatus | undefined;
 let premiumSttSettingsReady: Promise<void> | undefined;
+let speechLanguage: SpeechLanguage = "auto";
 let liveTranscriptPreviewAvailable = false;
 let liveTranscriptPreviewSetting = false;
 let activeModelTask: AbortController | undefined;
@@ -845,6 +856,7 @@ async function publishPremiumSttStatus(): Promise<void> {
     resumable: status.resumable,
     tier: status.tier,
     backend: status.backend,
+    language: speechLanguage,
     ...(status.error === undefined ? {} : { error: status.error }),
   });
   queueModelInventoryPublish();
@@ -934,6 +946,7 @@ async function ensurePremiumSttSettings(): Promise<void> {
           PREMIUM_STT_DOWNLOADED_TIERS_KEY,
           PREMIUM_STT_ENABLED_KEY,
           PREMIUM_STT_TIER_KEY,
+          SPEECH_LANGUAGE_KEY,
           LIVE_TRANSCRIPT_PREVIEW_KEY,
         ]);
       }
@@ -952,6 +965,10 @@ async function ensurePremiumSttSettings(): Promise<void> {
     const downloaded = downloadedByTier ||
       (stored[PREMIUM_STT_DOWNLOADED_KEY] === true &&
         stored[PREMIUM_STT_TIER_KEY] === tier);
+    speechLanguage = speechLanguageForTier(
+      tier,
+      stored[SPEECH_LANGUAGE_KEY],
+    );
     liveTranscriptPreviewAvailable = tier === "parakeet";
     liveTranscriptPreviewSetting = liveTranscriptPreviewEnabled(
       liveTranscriptPreviewAvailable,
@@ -2147,6 +2164,19 @@ async function processTranscript(
   lastExchangeAt = Date.now();
   await sendPanel({ type: "transcript", text: transcript });
 
+  if (
+    timings.input === "voice" &&
+    dictationState === "inactive" &&
+    isNonEnglishSpeech(speechLanguage, transcript)
+  ) {
+    await askWorker({
+      type: "execute-non-english-dictation",
+      transcript,
+      timings: { ...timings, parseMs: 0 },
+    });
+    return;
+  }
+
   await routeTranscriptForMode(dictationState, transcript, {
     parse: async () => processCommandTranscript(transcript, timings),
     insert: insertDictationTranscript,
@@ -2178,7 +2208,9 @@ async function processSpeech(
           ? modelLru.acquire("premium-stt")
           : () => undefined;
         try {
-          return await premiumStt!.transcribe(audio);
+          return await premiumStt!.transcribe(audio, {
+            language: speechLanguage,
+          });
         } finally {
           releaseModel();
         }
@@ -2563,6 +2595,7 @@ async function handleActionResult(message: OffscreenMessage): Promise<unknown> {
     command.action !== "media" &&
     command.action !== "ask-screen" &&
     command.action !== "settings" &&
+    command.action !== "type" &&
     command.action !== "windows" &&
     (verbosity === "normal" || selectedLine.key !== undefined);
   const spoken =
@@ -2691,6 +2724,7 @@ async function handleOffscreenMessage(
         typeof message.premiumSttEnabled !== "boolean" ||
         typeof message.wakeWordEnabled !== "boolean" ||
         typeof message.liveTranscriptPreview !== "boolean" ||
+        !isSpeechLanguage(message.language) ||
         !isKokoroVoiceId(message.voice)
       ) {
         throw new TypeError("Valid imported settings are required");
@@ -2701,6 +2735,10 @@ async function handleOffscreenMessage(
       premiumTts?.setVoice(premiumTtsVoice);
       await ensurePremiumSttSettings();
       await premiumStt!.setEnabled(message.premiumSttEnabled);
+      speechLanguage = speechLanguageForTier(
+        premiumStt!.status.tier,
+        message.language,
+      );
       liveTranscriptPreviewSetting =
         liveTranscriptPreviewAvailable &&
         message.liveTranscriptPreview;
@@ -2738,6 +2776,20 @@ async function handleOffscreenMessage(
       await ensurePremiumSttSettings();
       await premiumStt!.setEnabled(message.enabled);
       await persistPremiumSttStatus();
+      await publishPremiumSttStatus();
+      return;
+    case "set-speech-language":
+      if (!isSpeechLanguage(message.language)) {
+        throw new TypeError("A valid speech language is required");
+      }
+      await ensurePremiumSttSettings();
+      if (premiumStt!.status.tier !== "parakeet") {
+        throw new TypeError("Moonshine supports English speech only");
+      }
+      speechLanguage = message.language;
+      await chrome.storage.local.set({
+        [SPEECH_LANGUAGE_KEY]: speechLanguage,
+      });
       await publishPremiumSttStatus();
       return;
     case "set-live-transcript-preview-enabled":

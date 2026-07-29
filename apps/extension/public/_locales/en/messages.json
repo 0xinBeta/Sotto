@@ -122,6 +122,21 @@
   "speechModel": {
     "message": "Speech model"
   },
+  "speechLanguage": {
+    "message": "Speech language"
+  },
+  "speechLanguageAuto": {
+    "message": "Auto"
+  },
+  "english": {
+    "message": "English"
+  },
+  "parakeetLanguageNote": {
+    "message": "Commands work in English. Dictation works in the selected language."
+  },
+  "moonshineLanguageNote": {
+    "message": "Moonshine supports English speech only."
+  },
   "localStorageIndex": {
     "message": "LOCAL STORAGE"
   },

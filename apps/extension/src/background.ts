@@ -1,4 +1,5 @@
 import actions, { findActiveTabBookmark } from "@sotto/actions";
+import { isSpeechLanguage } from "@sotto/stt/languages";
 import { createNotesMarkdownExport } from "@sotto/actions/notes/markdown";
 import type {
   PlaybackCommand,
@@ -100,6 +101,7 @@ import {
   SITE_BLOCKED_RESPONSE,
 } from "./blocked-sites.js";
 import { SessionHistoryStore } from "./session-history.js";
+import { NON_ENGLISH_COMMAND_LINE } from "./stt-language.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -129,6 +131,7 @@ interface WorkerMessage {
   readonly playbackId?: unknown;
   readonly phrase?: unknown;
   readonly aliasExecutionId?: unknown;
+  readonly language?: unknown;
 }
 
 const actionRegistry = new ActionRegistry(actions);
@@ -2622,6 +2625,7 @@ async function executeCommand(
   transcript: string,
   timings: ExchangeTimings,
   fromAlias = false,
+  nonEnglish = false,
 ): Promise<ActionResult | undefined> {
   let completedTimings = timings;
   let generation = commandGeneration;
@@ -2843,17 +2847,23 @@ async function executeCommand(
       ? PAGE_CHANGED_RESPONSE
       : rejected
         ? "Sorry, say that again?"
-        : actionId === "type"
-          ? "I couldn't safely type in that editor."
-        : actionId === "dictation"
-          ? "Focus a text field before you start dictation."
-        : "That action could not be completed.";
+        : actionId === "type" && nonEnglish
+          ? NON_ENGLISH_COMMAND_LINE
+          : actionId === "type"
+            ? "I couldn't safely type in that editor."
+            : actionId === "dictation"
+              ? "Focus a text field before you start dictation."
+              : "That action could not be completed.";
     console.warn("Sotto command failed", error);
     await sendOffscreen({
       type: "action-error",
       transcript,
       spoken,
-      detail: rejected ? "rejected invalid command" : detail,
+      detail: nonEnglish
+        ? spoken
+        : rejected
+          ? "rejected invalid command"
+          : detail,
       timings: completedTimings,
     });
     return undefined;
@@ -3119,6 +3129,7 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
             premiumTtsEnabled: result.settings.premiumTts.enabled,
             voice: result.settings.premiumTts.voice,
             premiumSttEnabled: result.settings.premiumStt.enabled,
+            language: result.settings.premiumStt.language,
             wakeWordEnabled: result.settings.wakeWordEnabled,
             liveTranscriptPreview:
               result.settings.liveTranscriptPreview,
@@ -3209,6 +3220,25 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         transcript: text,
         timings: { input: "typed" },
       });
+    }
+    case "execute-non-english-dictation": {
+      const transcript = safeTranscript(message.transcript);
+      if (!transcript) {
+        throw new TypeError("Valid dictation text is required");
+      }
+      return executeCommand(
+        {
+          action: "type",
+          operation: "dictate",
+          text: transcript,
+        },
+        transcript,
+        isExchangeTimings(message.timings)
+          ? message.timings
+          : { input: "voice" },
+        false,
+        true,
+      );
     }
     case "execute-command": {
       const transcript = safeTranscript(message.transcript);
@@ -3380,6 +3410,14 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return sendOffscreen({
         type: "set-premium-stt-enabled",
         enabled: message.enabled,
+      });
+    case "set-speech-language":
+      if (!isSpeechLanguage(message.language)) {
+        throw new TypeError("A valid speech language is required");
+      }
+      return sendOffscreen({
+        type: "set-speech-language",
+        language: message.language,
       });
     case "set-live-transcript-preview-enabled":
       if (typeof message.enabled !== "boolean") {

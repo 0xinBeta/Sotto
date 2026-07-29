@@ -437,6 +437,67 @@ describe("offscreen fail-soft status", () => {
     expect(nano.parseCommand).toHaveBeenCalledOnce();
   });
 
+  it("routes selected non-English speech to typing without Nano", async () => {
+    const harness = await installPremiumOffscreen({ webGpu: true });
+    speech.parakeetTranscribe.mockResolvedValue("ready");
+    await harness.message({ type: "prepare-premium-stt" });
+    await harness.message({
+      type: "set-speech-language",
+      language: "es",
+    });
+    harness.sendMessage.mockClear();
+    await harness.message({ type: "start-listening" });
+    await vi.waitFor(() => {
+      const states = harness.sendMessage.mock.calls.map(
+        ([message]) => message as {
+          readonly type?: string;
+          readonly state?: string;
+          readonly language?: string;
+        },
+      );
+      const warmingIndex = states.findIndex(
+        (message) =>
+          message.type === "premium-stt-state" &&
+          message.state === "warming" &&
+          message.language === "es",
+      );
+      expect(warmingIndex).toBeGreaterThanOrEqual(0);
+      expect(
+        states.slice(warmingIndex + 1).some(
+          (message) =>
+            message.type === "premium-stt-state" &&
+            message.state === "active" &&
+            message.language === "es",
+        ),
+      ).toBe(true);
+    });
+    speech.parakeetTranscribe.mockResolvedValue("abre una pestaña");
+    const vadOptions = vad.create.mock.calls[0]?.[0] as {
+      onSpeechEnd(audio: Float32Array): void;
+    };
+    const audio = new Float32Array(16_000).fill(0.02);
+
+    vadOptions.onSpeechEnd(audio);
+
+    await vi.waitFor(() =>
+      expect(harness.sendMessage).toHaveBeenCalledWith({
+        target: "worker",
+        type: "execute-non-english-dictation",
+        transcript: "abre una pestaña",
+        timings: {
+          input: "voice",
+          sttMs: expect.any(Number),
+          parseMs: 0,
+        },
+      })
+    );
+    expect(speech.parakeetTranscribe).toHaveBeenLastCalledWith(
+      audio,
+      { language: "es" },
+    );
+    expect(nano.parseCommand).not.toHaveBeenCalled();
+  });
+
   it("does not decode or publish command partials during dictation", async () => {
     const harness = await installPremiumOffscreen({ webGpu: true });
 
