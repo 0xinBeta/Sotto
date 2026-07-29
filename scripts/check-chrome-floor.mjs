@@ -6,6 +6,12 @@ export const CHROME_VERSION_FLOOR = 138;
 
 export const CHROME_FLOOR_TOKENS = [
   {
+    token: "chrome.storage.session",
+    minVersion: 102,
+    sourceUrl:
+      "https://developer.chrome.com/docs/extensions/reference/api/storage#property-session",
+  },
+  {
     token: "persistAcrossSessions",
     minVersion: 150,
     sourceUrl:

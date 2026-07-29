@@ -340,6 +340,19 @@
             <option value="brief" data-i18n="responseBrief"></option>
           </select>
         </div>
+        <div class="history-setting">
+          <label class="voice-switch" for="session-history-enabled">
+            <span data-i18n="keepSessionHistory"></span>
+            <input
+              id="session-history-enabled"
+              type="checkbox"
+              role="switch"
+              aria-describedby="session-history-note"
+            />
+            <span class="voice-switch-track" aria-hidden="true"></span>
+          </label>
+          <p id="session-history-note" data-i18n="sessionHistoryPrivacy"></p>
+        </div>
         <div class="blocked-sites" aria-labelledby="blocked-sites-heading">
           <h3 id="blocked-sites-heading" data-i18n="blockedSitesHeading"></h3>
           <p data-i18n="blockedSitesCopy"></p>
@@ -648,6 +661,31 @@
           aria-live="polite"
           aria-atomic="true"
         ></p>
+      </section>
+
+      <section
+        class="log-panel history-panel"
+        id="session-history-panel"
+        aria-labelledby="session-history-heading"
+        hidden
+      >
+        <div class="section-heading">
+          <h2
+            class="section-index"
+            id="session-history-heading"
+            data-i18n="history"
+          ></h2>
+          <button class="link-button" id="clear-session-history" type="button">
+            <span data-i18n="clearAll"></span>
+          </button>
+        </div>
+        <ol
+          class="action-log"
+          id="session-history-list"
+          aria-live="polite"
+        >
+          <li class="empty-log" data-i18n="noSessionHistory"></li>
+        </ol>
       </section>
 
       <section class="commands-panel" aria-labelledby="commands-heading">

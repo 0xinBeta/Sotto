@@ -80,6 +80,7 @@ import {
   isPageTouchingAction,
   SITE_BLOCKED_RESPONSE,
 } from "./blocked-sites.js";
+import { SessionHistoryStore } from "./session-history.js";
 
 interface WorkerMessage {
   readonly target: "worker";
@@ -134,6 +135,21 @@ const settingsBackup = new SettingsBackupStore({
 const blockedSites = new BlockedSitesStore({
   get: async (key) => await chrome.storage.local.get(key),
   set: async (values) => await chrome.storage.local.set(values),
+});
+const sessionHistory = new SessionHistoryStore({
+  get: async (key) => await chrome.storage.session?.get(key) ?? {},
+  set: async (values) => {
+    if (!chrome.storage.session) {
+      throw new Error("Session storage is unavailable");
+    }
+    await chrome.storage.session.set(values);
+  },
+  remove: async (key) => {
+    if (!chrome.storage.session) {
+      throw new Error("Session storage is unavailable");
+    }
+    await chrome.storage.session.remove(key);
+  },
 });
 const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
 const confirmationSession = new ConfirmationSession();
@@ -397,13 +413,42 @@ async function setQuietMode(enabled: boolean): Promise<boolean> {
   return saved;
 }
 
+async function recordSessionHistory(
+  transcript: string,
+  actionId: string,
+  resultLine: string,
+): Promise<void> {
+  try {
+    const appended = await sessionHistory.append(
+      transcript,
+      actionId,
+      resultLine,
+    );
+    if (!appended) return;
+    await sendPanel({
+      type: "session-history-entry",
+      entry: appended.entry,
+      count: appended.count,
+    });
+  } catch (error) {
+    console.warn("Sotto could not save session history", error);
+  }
+}
+
 async function createDiagnosticReport(): Promise<string> {
-  const [rawState, settings, storageBytes, blockedHostnames] =
+  const [
+    rawState,
+    settings,
+    storageBytes,
+    blockedHostnames,
+    history,
+  ] =
     await Promise.all([
       sendOffscreen({ type: "get-diagnostic-state" }),
       speechSettings.get(),
       chrome.storage.local.getBytesInUse(null),
       blockedSites.get(),
+      sessionHistory.get(),
     ]);
   if (
     typeof rawState !== "object" ||
@@ -439,6 +484,8 @@ async function createDiagnosticReport(): Promise<string> {
     rate: settings.rate,
     volume: settings.volume,
     blockedSiteCount: blockedHostnames.length,
+    sessionHistoryEnabled: history.enabled,
+    sessionHistoryCount: history.entries.length,
     storageBytes,
     pipelineErrors: pipelineErrors.snapshot(),
     latency: exchangeTimings.statistics(),
@@ -1637,6 +1684,8 @@ async function publishActionResult(
     await publishReminders();
     if (!commandIsCurrent(generation)) return;
   }
+  await recordSessionHistory(transcript, command.action, result.spoken);
+  if (!commandIsCurrent(generation)) return;
   if (result.silent === true) {
     await sendPanel({
       type: "action-log",
@@ -1870,6 +1919,7 @@ async function publishPlaybackResult(
   did: string,
   timings: ExchangeTimings,
 ): Promise<void> {
+  await recordSessionHistory(transcript, "playback", did);
   await sendPanel({
     type: "action-log",
     heard: transcript,
@@ -2039,6 +2089,11 @@ async function executeCommand(
         did: result.spoken,
         timings: completedTimings,
       });
+      await recordSessionHistory(
+        transcript,
+        validated.action,
+        result.spoken,
+      );
       return result;
     }
     generation = beginCommandGeneration();
@@ -2144,6 +2199,15 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         throw new TypeError("A quiet mode setting is required");
       }
       return setQuietMode(message.enabled);
+    case "get-session-history":
+      return sessionHistory.get();
+    case "set-session-history-enabled":
+      if (typeof message.enabled !== "boolean") {
+        throw new TypeError("A session history setting is required");
+      }
+      return sessionHistory.setEnabled(message.enabled);
+    case "clear-session-history":
+      return sessionHistory.clear();
     case "get-diagnostic-report":
       return createDiagnosticReport();
     case "get-latency-statistics":

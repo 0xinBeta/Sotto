@@ -7,7 +7,11 @@ import {
   MINIMUM_EVAL_CASES,
   evaluateEvalCases,
 } from "./check-evals-count.mjs";
-import { scanChromeFloor } from "./check-chrome-floor.mjs";
+import {
+  CHROME_FLOOR_TOKENS,
+  CHROME_VERSION_FLOOR,
+  scanChromeFloor,
+} from "./check-chrome-floor.mjs";
 import { generateReleaseNotes } from "./generate-release-notes.mjs";
 
 const chromeFloorTokens = [
@@ -46,6 +50,16 @@ describe("eval count check", () => {
 });
 
 describe("Chrome floor check", () => {
+  it("supports session storage at the Chrome floor", () => {
+    const sessionStorage = CHROME_FLOOR_TOKENS.find(
+      ({ token }) => token === "chrome.storage.session",
+    );
+
+    expect(sessionStorage?.minVersion).toBeLessThanOrEqual(
+      CHROME_VERSION_FLOOR,
+    );
+  });
+
   it("reports a token hit from injected file contents", () => {
     const hits = scanChromeFloor(
       [

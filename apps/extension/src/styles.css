@@ -920,6 +920,19 @@ h2 {
   font: inherit;
 }
 
+.history-setting {
+  margin-top: 20px;
+  border-top: 1px solid var(--rule);
+  padding-top: 18px;
+}
+
+.history-setting > p {
+  margin: 8px 0 0;
+  color: var(--paper-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .speech-setting input[type="range"]::-webkit-slider-runnable-track {
   height: 2px;
   background: var(--switch-border);
@@ -1520,6 +1533,10 @@ progress::-webkit-progress-value {
   padding-bottom: 32px;
 }
 
+.history-panel {
+  padding-bottom: 22px;
+}
+
 .latency-readout {
   margin-top: 10px;
   color: var(--paper-dim);
@@ -1666,6 +1683,12 @@ progress::-webkit-progress-value {
 .action-log strong {
   color: var(--acid);
   font-weight: 600;
+}
+
+.history-action {
+  color: var(--paper-dim);
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 9px;
 }
 
 .log-count {

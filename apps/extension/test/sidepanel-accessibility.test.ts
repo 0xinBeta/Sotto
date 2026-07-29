@@ -48,6 +48,13 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("quiet-mode")).toContain(
       'aria-labelledby="quiet-mode-label"',
     );
+    expect(openingTag("session-history-enabled")).toContain('role="switch"');
+    expect(openingTag("session-history-enabled")).toContain(
+      'aria-describedby="session-history-note"',
+    );
+    expect(openingTag("session-history-list")).toContain(
+      'aria-live="polite"',
+    );
     expect(openingTag("mic-meter")).toContain('role="meter"');
     expect(openingTag("mic-meter")).toContain('aria-valuemin="0"');
     expect(openingTag("mic-meter")).toContain('aria-valuemax="100"');
@@ -67,6 +74,18 @@ describe("side-panel accessibility structure", () => {
     );
     expect(panelSource).not.toContain("innerHTML");
     expect(panelSource).not.toContain("insertAdjacentHTML");
+  });
+
+  it("renders session history fields through textContent only", () => {
+    expect(panelSource).toContain(
+      "transcriptText.textContent = entry.transcript;",
+    );
+    expect(panelSource).toContain(
+      'actionText.textContent = t("historyAction", entry.actionId);',
+    );
+    expect(panelSource).toContain(
+      "resultText.textContent = entry.resultLine;",
+    );
   });
 
   it("uses labels and ordered headings", () => {

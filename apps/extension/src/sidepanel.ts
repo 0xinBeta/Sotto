@@ -59,6 +59,11 @@ import {
 } from "./recovery-hint.js";
 import { localizePanel, t } from "./panel-i18n.js";
 import { hostnameMatchesBlocked } from "./blocked-sites.js";
+import {
+  SESSION_HISTORY_LIMIT,
+  type SessionHistoryEntry,
+  type SessionHistoryState,
+} from "./session-history.js";
 import "./styles.css";
 
 localizePanel();
@@ -132,6 +137,37 @@ function isBoundedString(
     typeof value === "string" &&
     value.length >= minimum &&
     value.length <= maximum
+  );
+}
+
+function isSessionHistoryEntry(
+  value: unknown,
+): value is SessionHistoryEntry {
+  if (!isRecord(value)) return false;
+  return (
+    Object.keys(value).length === 4 &&
+    Object.hasOwn(value, "timestamp") &&
+    Object.hasOwn(value, "transcript") &&
+    Object.hasOwn(value, "actionId") &&
+    Object.hasOwn(value, "resultLine") &&
+    isBoundedString(value.timestamp, 35, 1) &&
+    Number.isFinite(Date.parse(value.timestamp)) &&
+    isBoundedString(value.transcript, 2_000, 1) &&
+    isBoundedString(value.actionId, 100, 1) &&
+    isBoundedString(value.resultLine, 2_000, 1)
+  );
+}
+
+function isSessionHistoryState(
+  value: unknown,
+): value is SessionHistoryState {
+  if (!isRecord(value) || !Array.isArray(value.entries)) return false;
+  return (
+    Object.keys(value).length === 2 &&
+    typeof value.enabled === "boolean" &&
+    value.entries.length <= SESSION_HISTORY_LIMIT &&
+    value.entries.every(isSessionHistoryEntry) &&
+    (value.enabled || value.entries.length === 0)
   );
 }
 
@@ -232,6 +268,12 @@ type PanelMessage =
       heard: string;
       did: string;
       timings?: ExchangeTimings;
+    }
+  | {
+      target: "sidepanel";
+      type: "session-history-entry";
+      entry: SessionHistoryEntry;
+      count: number;
     }
   | {
       target: "sidepanel";
@@ -348,6 +390,15 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         isBoundedString(message.did, 2_000, 1) &&
         (message.timings === undefined ||
           isExchangeTimings(message.timings))
+      );
+    case "session-history-entry":
+      return (
+        Object.keys(message).length === 4 &&
+        isSessionHistoryEntry(message.entry) &&
+        typeof message.count === "number" &&
+        Number.isSafeInteger(message.count) &&
+        message.count >= 1 &&
+        message.count <= SESSION_HISTORY_LIMIT
       );
     case "latency-statistics":
       return isLatencyStatistics(message.statistics);
@@ -664,6 +715,14 @@ const actionLog = requiredElement<HTMLOListElement>("#action-log");
 const actionLogAnnouncer =
   requiredElement<HTMLElement>("#action-log-announcer");
 const clearLog = requiredElement<HTMLButtonElement>("#clear-log");
+const sessionHistoryEnabled =
+  requiredElement<HTMLInputElement>("#session-history-enabled");
+const sessionHistoryPanel =
+  requiredElement<HTMLElement>("#session-history-panel");
+const sessionHistoryList =
+  requiredElement<HTMLOListElement>("#session-history-list");
+const clearSessionHistory =
+  requiredElement<HTMLButtonElement>("#clear-session-history");
 const latencyReadout =
   requiredElement<HTMLDetailsElement>("#latency-readout");
 const latencySummary =
@@ -800,6 +859,10 @@ let panelReminders: readonly PanelReminder[] = [];
 let pendingScreenshot: ClipboardWorkflow | undefined;
 let pendingScreenshotPermission: ScreenshotPermissionWorkflow | undefined;
 let newestLogEntry: LogEntry | undefined;
+let currentSessionHistory: SessionHistoryState = {
+  enabled: false,
+  entries: [],
+};
 let pointerIsDown = false;
 let earconContext: AudioContext | undefined;
 let setupDismissed = false;
@@ -2164,6 +2227,95 @@ function actionLogAnnouncement(heard: string, did: string): string {
   return t("actionLogAnnouncement", heardText, didText);
 }
 
+function createSessionHistoryItem(
+  entry: SessionHistoryEntry,
+): HTMLLIElement {
+  const item = document.createElement("li");
+  const time = document.createElement("time");
+  const copy = document.createElement("p");
+  const transcriptText = document.createElement("strong");
+  const actionText = document.createElement("span");
+  const resultText = document.createElement("span");
+
+  updateLogTime(time, new Date(entry.timestamp));
+  transcriptText.textContent = entry.transcript;
+  actionText.className = "history-action";
+  actionText.textContent = t("historyAction", entry.actionId);
+  resultText.textContent = entry.resultLine;
+  copy.append(
+    transcriptText,
+    document.createTextNode(" "),
+    actionText,
+    document.createTextNode(" "),
+    resultText,
+  );
+  item.append(time, copy);
+  return item;
+}
+
+function renderSessionHistory(): void {
+  if (currentSessionHistory.entries.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "empty-log";
+    empty.textContent = t("noSessionHistory");
+    sessionHistoryList.replaceChildren(empty);
+    return;
+  }
+  sessionHistoryList.replaceChildren(
+    ...currentSessionHistory.entries
+      .slice()
+      .reverse()
+      .map(createSessionHistoryItem),
+  );
+}
+
+function showSessionHistory(state: SessionHistoryState): void {
+  currentSessionHistory = {
+    enabled: state.enabled,
+    entries: state.entries.map((entry) => ({ ...entry })),
+  };
+  sessionHistoryEnabled.checked = state.enabled;
+  sessionHistoryPanel.hidden = !state.enabled;
+  renderSessionHistory();
+}
+
+async function loadSessionHistory(): Promise<void> {
+  try {
+    const state = await requestWorker<unknown>({
+      type: "get-session-history",
+    });
+    if (!isSessionHistoryState(state)) {
+      throw new TypeError("Session history returned an invalid state.");
+    }
+    showSessionHistory(state);
+  } catch {
+    showSessionHistory({ enabled: false, entries: [] });
+    appendLog(t("history"), t("sessionHistoryUnavailable"));
+  }
+}
+
+function appendSessionHistory(
+  entry: SessionHistoryEntry,
+  count: number,
+): void {
+  if (!currentSessionHistory.enabled) return;
+  const expectedCount = Math.min(
+    currentSessionHistory.entries.length + 1,
+    SESSION_HISTORY_LIMIT,
+  );
+  if (count !== expectedCount) {
+    void loadSessionHistory();
+    return;
+  }
+  currentSessionHistory = {
+    enabled: true,
+    entries: [...currentSessionHistory.entries, entry].slice(
+      -SESSION_HISTORY_LIMIT,
+    ),
+  };
+  renderSessionHistory();
+}
+
 function appendLog(
   heard: string,
   did: string,
@@ -2375,6 +2527,48 @@ clearLog.addEventListener("click", () => {
   empty.className = "empty-log";
   empty.textContent = t("noCommandsYet");
   actionLog.append(empty);
+});
+
+sessionHistoryEnabled.addEventListener("change", async () => {
+  const previous = currentSessionHistory;
+  const requested = sessionHistoryEnabled.checked;
+  sessionHistoryEnabled.disabled = true;
+  showSessionHistory({
+    enabled: requested,
+    entries: requested && previous.enabled ? previous.entries : [],
+  });
+  try {
+    const state = await requestWorker<unknown>({
+      type: "set-session-history-enabled",
+      enabled: requested,
+    });
+    if (!isSessionHistoryState(state)) {
+      throw new TypeError("Session history returned an invalid state.");
+    }
+    showSessionHistory(state);
+  } catch {
+    showSessionHistory(previous);
+    appendLog(t("history"), t("sessionHistoryUnavailable"));
+  } finally {
+    sessionHistoryEnabled.disabled = false;
+  }
+});
+
+clearSessionHistory.addEventListener("click", async () => {
+  clearSessionHistory.disabled = true;
+  try {
+    const state = await requestWorker<unknown>({
+      type: "clear-session-history",
+    });
+    if (!isSessionHistoryState(state) || !state.enabled) {
+      throw new TypeError("Session history returned an invalid state.");
+    }
+    showSessionHistory(state);
+  } catch {
+    appendLog(t("history"), t("sessionHistoryUnavailable"));
+  } finally {
+    clearSessionHistory.disabled = false;
+  }
 });
 
 closePageText.addEventListener("click", () => {
@@ -3042,6 +3236,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
     case "action-log":
       appendLog(message.heard, message.did, message.timings);
       break;
+    case "session-history-entry":
+      appendSessionHistory(message.entry, message.count);
+      break;
     case "latency-statistics":
       renderLatencyStatistics(message.statistics);
       break;
@@ -3194,3 +3391,4 @@ void loadLatencyStatistics().catch(() => undefined);
 void loadSpeechSettings();
 void loadQuietMode();
 void loadBlockedSites();
+void loadSessionHistory();

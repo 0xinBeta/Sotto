@@ -161,6 +161,12 @@
   "responseBrief": {
     "message": "Brief"
   },
+  "keepSessionHistory": {
+    "message": "Keep session history"
+  },
+  "sessionHistoryPrivacy": {
+    "message": "History stays on this device and clears when Chrome closes."
+  },
   "blockedSitesHeading": {
     "message": "Sites where Sotto is off"
   },
@@ -331,6 +337,21 @@
   },
   "noCommandsYet": {
     "message": "No commands yet."
+  },
+  "history": {
+    "message": "HISTORY"
+  },
+  "clearAll": {
+    "message": "Clear all"
+  },
+  "noSessionHistory": {
+    "message": "No session history."
+  },
+  "historyAction": {
+    "message": "Action: $1."
+  },
+  "sessionHistoryUnavailable": {
+    "message": "Session history is unavailable."
   },
   "commandsIndex": {
     "message": "04 /"

@@ -55,6 +55,8 @@ export interface DiagnosticReportInput extends DiagnosticOffscreenState {
   readonly rate: number;
   readonly volume: number;
   readonly blockedSiteCount: number;
+  readonly sessionHistoryEnabled: boolean;
+  readonly sessionHistoryCount: number;
   readonly storageBytes: number;
   readonly pipelineErrors: readonly DiagnosticPipelineError[];
   readonly latency: LatencyStatistics;
@@ -210,6 +212,8 @@ export function buildDiagnosticReport(
     `Rate: ${input.rate.toFixed(1)}`,
     `Volume: ${Math.round(input.volume * 100)}%`,
     `Blocked sites: ${input.blockedSiteCount}`,
+    `Session history: ${input.sessionHistoryEnabled ? "enabled" : "disabled"}`,
+    `Session history entries: ${input.sessionHistoryCount}`,
     "",
     "## Chrome AI",
     `Gemini Nano: ${input.nanoAvailability}`,

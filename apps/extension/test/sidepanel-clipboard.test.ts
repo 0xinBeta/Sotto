@@ -187,6 +187,10 @@ const elementIds = [
   "action-log",
   "action-log-announcer",
   "clear-log",
+  "session-history-enabled",
+  "session-history-panel",
+  "session-history-list",
+  "clear-session-history",
   "latency-readout",
   "latency-summary",
   "latency-details",
@@ -308,6 +312,15 @@ async function installSidepanel(options: {
     readonly hostnames: readonly string[];
     readonly currentHostname?: string;
   };
+  readonly sessionHistory?: {
+    readonly enabled: boolean;
+    readonly entries: readonly {
+      readonly timestamp: string;
+      readonly transcript: string;
+      readonly actionId: string;
+      readonly resultLine: string;
+    }[];
+  };
   readonly commands?: readonly {
     readonly name: string;
     readonly shortcut: string;
@@ -322,6 +335,7 @@ async function installSidepanel(options: {
   elements["reading-controls"].hidden = true;
   elements["latency-readout"].hidden = true;
   elements["settings-backup-confirm"].hidden = true;
+  elements["session-history-panel"].hidden = true;
   const emptyLog = new FakeElement("li");
   emptyLog.className = "empty-log";
   emptyLog.textContent = "No commands yet.";
@@ -334,6 +348,10 @@ async function installSidepanel(options: {
   let blockedSites = options.blockedSites ?? {
     hostnames: [] as readonly string[],
     currentHostname: "example.com",
+  };
+  let sessionHistory = options.sessionHistory ?? {
+    enabled: false,
+    entries: [],
   };
   const sendMessage = vi.fn().mockImplementation(
     async (message: {
@@ -358,6 +376,22 @@ async function installSidepanel(options: {
           ok: true,
           value: options.quietMode ?? false,
         };
+      }
+      if (message.type === "get-session-history") {
+        return { ok: true, value: sessionHistory };
+      }
+      if (message.type === "set-session-history-enabled") {
+        sessionHistory = message.enabled === true
+          ? { enabled: true, entries: sessionHistory.entries }
+          : { enabled: false, entries: [] };
+        return { ok: true, value: sessionHistory };
+      }
+      if (message.type === "clear-session-history") {
+        sessionHistory = {
+          enabled: sessionHistory.enabled,
+          entries: [],
+        };
+        return { ok: true, value: sessionHistory };
       }
       if (message.type === "get-blocked-sites") {
         return { ok: true, value: blockedSites };
@@ -781,6 +815,68 @@ describe("side-panel screenshot clipboard fallback", () => {
     });
     expect(elements["quiet-mode-label"].textContent).toBe("Quiet mode off");
     expect(elements["quiet-mode-control"].dataset.state).toBe("off");
+  });
+
+  it("shows, appends, clears, and disables session history", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel({
+      sessionHistory: {
+        enabled: true,
+        entries: [
+          {
+            timestamp: "2026-07-29T10:20:30.000Z",
+            transcript: "open a new tab",
+            actionId: "tabs",
+            resultLine: "Opened a new tab.",
+          },
+          {
+            timestamp: "2026-07-29T10:21:30.000Z",
+            transcript: "close this tab",
+            actionId: "tabs",
+            resultLine: "Closed the tab.",
+          },
+        ],
+      },
+    });
+    await vi.waitFor(() =>
+      expect(elements["session-history-panel"].hidden).toBe(false)
+    );
+    expect(elements["session-history-enabled"].checked).toBe(true);
+    expect(
+      elements["session-history-list"].children[0]?.textContent,
+    ).toContain("close this tab");
+
+    onMessage({
+      target: "sidepanel",
+      type: "session-history-entry",
+      entry: {
+        timestamp: "2026-07-29T10:22:30.000Z",
+        transcript: "switch to the GitHub tab",
+        actionId: "tabs",
+        resultLine: "Switched to GitHub.",
+      },
+      count: 3,
+    });
+    expect(
+      elements["session-history-list"].children[0]?.textContent,
+    ).toContain("switch to the GitHub tab");
+
+    await elements["clear-session-history"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "clear-session-history",
+    });
+    expect(elements["session-history-list"].textContent).toBe(
+      "No session history.",
+    );
+
+    elements["session-history-enabled"].checked = false;
+    await elements["session-history-enabled"].emit("change");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "set-session-history-enabled",
+      enabled: false,
+    });
+    expect(elements["session-history-panel"].hidden).toBe(true);
   });
 
   it("shows OS fallback while absent and enables the default-on premium toggle when ready", async () => {

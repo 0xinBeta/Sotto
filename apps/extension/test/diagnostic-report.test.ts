@@ -38,6 +38,8 @@ type ReportField =
   | "rate"
   | "volume"
   | "blockedSiteCount"
+  | "sessionHistoryEnabled"
+  | "sessionHistoryCount"
   | "storageBytes"
   | "pipelineErrors"
   | "latency";
@@ -90,6 +92,8 @@ function reportInput(): DiagnosticReportInput {
     rate: 1.2,
     volume: 0.8,
     blockedSiteCount: 2,
+    sessionHistoryEnabled: true,
+    sessionHistoryCount: 3,
     storageBytes: 1_024,
     pipelineErrors: [
       {
@@ -149,6 +153,8 @@ describe("diagnostic report", () => {
         "Rate: 1.2",
         "Volume: 80%",
         "Blocked sites: 2",
+        "Session history: enabled",
+        "Session history entries: 3",
         "",
         "## Chrome AI",
         "Gemini Nano: available",
@@ -180,6 +186,22 @@ describe("diagnostic report", () => {
     expect(report).toContain("Blocked sites: 2");
     expect(report).not.toContain("example.com");
     expect(report).not.toContain("hostname");
+  });
+
+  it("shows only the session history state and count", () => {
+    const sensitiveEntry = "private history entry";
+    const input = {
+      ...reportInput(),
+      historyEntries: [sensitiveEntry],
+    } as unknown as DiagnosticReportInput;
+
+    const report = buildDiagnosticReport(input);
+
+    expect(report).toContain("Session history: enabled");
+    expect(report).toContain("Session history entries: 3");
+    expect(report).not.toContain(sensitiveEntry);
+    expect(report).not.toContain("transcript");
+    expect(report).not.toContain("resultLine");
   });
 
   it("renders missing latency stages in the report", () => {
