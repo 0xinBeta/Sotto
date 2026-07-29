@@ -4,6 +4,7 @@ import { normalizeTtsText } from "./chunker.js";
 import type {
   LongFormTtsEngine,
   TtsLongSpeakOptions,
+  TtsPlaybackState,
   TtsProgress,
   TtsSpeakOptions,
 } from "./types.js";
@@ -133,13 +134,22 @@ export interface KokoroTtsEngineOptions {
 interface ScheduledAudio {
   readonly source: AudioBufferSourceNode;
   readonly done: Promise<void>;
+  start(): void;
   finish(): void;
 }
 
 interface ActiveOperation {
   readonly generation: number;
   readonly controller: AbortController;
+  readonly longForm: boolean;
+  readonly prepared: Map<number, ScheduledAudio>;
   splitter: Splitter | undefined;
+  current: ScheduledAudio | undefined;
+  paused: boolean;
+  pendingSkips: number;
+  producerDone: boolean;
+  producerError: unknown;
+  notify: (() => void) | undefined;
 }
 
 const defaultRuntime: KokoroRuntime = {
@@ -297,12 +307,12 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
   #audioContext: AudioContext | undefined;
   #activeOperation: ActiveOperation | undefined;
   #sources = new Set<ScheduledAudio>();
-  #nextStartTime = 0;
   #generation = 0;
   #inferenceTail: Promise<unknown> = Promise.resolve();
   #backend: KokoroBackend | undefined;
   #dtype: KokoroDtype | undefined;
   #voice: KokoroVoiceId;
+  #playbackState: TtsPlaybackState = "idle";
 
   constructor(options: KokoroTtsEngineOptions = {}) {
     this.#runtime = options.runtime ?? defaultRuntime;
@@ -333,6 +343,10 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     return this.#voice;
   }
 
+  get playbackState(): TtsPlaybackState {
+    return this.#playbackState;
+  }
+
   setVoice(voice: KokoroVoiceId): void {
     this.#voice = voice;
   }
@@ -354,14 +368,14 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     text: string,
     options: KokoroSpeakOptions = {},
   ): Promise<void> {
-    await this.#speakChunks(text, options);
+    await this.#speakChunks(text, options, false);
   }
 
   async speakLong(
     text: string,
     options: KokoroLongSpeakOptions = {},
   ): Promise<void> {
-    await this.#speakChunks(text, options);
+    await this.#speakChunks(text, options, true);
   }
 
   async prewarm(options: KokoroPrewarmOptions = {}): Promise<void> {
@@ -386,9 +400,14 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
 
   stop(): void {
     this.#generation += 1;
+    this.#playbackState = "idle";
     const operation = this.#activeOperation;
     this.#activeOperation = undefined;
     operation?.controller.abort();
+    if (operation) {
+      operation.notify?.();
+      operation.notify = undefined;
+    }
     if (operation?.splitter) {
       try {
         operation.splitter.close();
@@ -407,7 +426,68 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
       }
     }
     this.#sources.clear();
-    this.#nextStartTime = 0;
+  }
+
+  pause(): boolean {
+    const operation = this.#activeOperation;
+    if (
+      !operation?.longForm ||
+      this.#playbackState !== "playing"
+    ) {
+      return false;
+    }
+    operation.paused = true;
+    this.#playbackState = "paused";
+    const current = operation.current;
+    if (current) {
+      try {
+        current.source.stop();
+      } catch {
+        // A source that ended at the pause boundary needs no stop.
+      } finally {
+        current.finish();
+        operation.current = undefined;
+      }
+    }
+    return true;
+  }
+
+  resume(): boolean {
+    const operation = this.#activeOperation;
+    if (
+      !operation?.longForm ||
+      this.#playbackState !== "paused"
+    ) {
+      return false;
+    }
+    operation.paused = false;
+    this.#playbackState = "playing";
+    operation.notify?.();
+    operation.notify = undefined;
+    return true;
+  }
+
+  skip(): boolean {
+    const operation = this.#activeOperation;
+    if (!operation?.longForm || this.#playbackState === "idle") {
+      return false;
+    }
+    const current = operation.current;
+    if (current) {
+      try {
+        current.source.stop();
+      } catch {
+        // A source that ended at the skip boundary needs no stop.
+      } finally {
+        current.finish();
+        operation.current = undefined;
+      }
+    } else {
+      operation.pendingSkips += 1;
+      operation.notify?.();
+      operation.notify = undefined;
+    }
+    return true;
   }
 
   async dispose(): Promise<void> {
@@ -524,6 +604,7 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
   async #speakChunks(
     text: string,
     options: KokoroLongSpeakOptions,
+    longForm: boolean,
   ): Promise<void> {
     if (!this.#tts) throw new Error("KokoroTtsEngine is not initialized");
     const normalized = normalizeTtsText(text);
@@ -533,9 +614,18 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     const operation: ActiveOperation = {
       generation: this.#generation,
       controller: new AbortController(),
+      longForm,
+      prepared: new Map(),
       splitter: undefined,
+      current: undefined,
+      paused: false,
+      pendingSkips: 0,
+      producerDone: false,
+      producerError: undefined,
+      notify: undefined,
     };
     this.#activeOperation = operation;
+    if (longForm) this.#playbackState = "playing";
     const splitter = this.#runtime.createSplitter();
     operation.splitter = splitter;
     const chunks = splitTextForKokoro(normalized, () => splitter);
@@ -561,14 +651,86 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
       });
     }
 
-    const playback: Array<{
-      readonly chunk: string;
-      readonly chunkIndex: number;
-      readonly offset: number;
-      readonly done: Promise<void>;
-    }> = [];
     let firstAudioEmitted = false;
 
+    try {
+      const producer = this.#produceAudio(
+        operation,
+        chunks,
+        options,
+      );
+      void producer.catch(() => undefined);
+
+      for (const [chunkIndex, chunk] of chunks.entries()) {
+        const scheduled = await this.#waitForPrepared(
+          operation,
+          chunkIndex,
+        );
+        operation.prepared.delete(chunkIndex);
+        await this.#waitUntilPlaying(operation);
+        if (operation.pendingSkips > 0) {
+          operation.pendingSkips -= 1;
+          scheduled.finish();
+          this.#emitChunkEnd(
+            options,
+            normalized.length,
+            chunks.length,
+            chunk,
+            chunkIndex,
+            offsets[chunkIndex] ?? 0,
+          );
+          continue;
+        }
+        throwIfAborted(operation.controller.signal);
+        operation.current = scheduled;
+        scheduled.start();
+        if (!firstAudioEmitted) {
+          firstAudioEmitted = true;
+          options.onFirstAudio?.();
+        }
+        const offset = offsets[chunkIndex] ?? 0;
+        this.#emitProgress(options, {
+          charIndex: offset,
+          totalChars: normalized.length,
+          chunkIndex,
+          chunkCount: chunks.length,
+          chunkCharIndex: 0,
+          eventType: "sentence",
+        });
+        await abortable(scheduled.done, operation.controller.signal);
+        operation.current = undefined;
+        this.#emitChunkEnd(
+          options,
+          normalized.length,
+          chunks.length,
+          chunk,
+          chunkIndex,
+          offset,
+        );
+      }
+      await producer;
+    } catch (error) {
+      if (
+        operation.controller.signal.aborted &&
+        error instanceof DOMException &&
+        error.name === "AbortError"
+      ) {
+        return;
+      }
+      throw error;
+    } finally {
+      if (this.#activeOperation === operation) {
+        this.#activeOperation = undefined;
+        if (longForm) this.#playbackState = "idle";
+      }
+    }
+  }
+
+  async #produceAudio(
+    operation: ActiveOperation,
+    chunks: readonly string[],
+    options: KokoroLongSpeakOptions,
+  ): Promise<void> {
     try {
       for (const [chunkIndex, chunk] of chunks.entries()) {
         throwIfAborted(operation.controller.signal);
@@ -592,56 +754,72 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
         ) {
           throw new Error("Kokoro returned invalid 24 kHz mono PCM");
         }
-
-        const scheduled = await this.#scheduleAudio(
+        const scheduled = await this.#prepareAudio(
           audio.data,
           options.volume,
           operation.controller.signal,
         );
-        if (!firstAudioEmitted) {
-          firstAudioEmitted = true;
-          options.onFirstAudio?.();
-        }
-        const offset = offsets[chunkIndex] ?? 0;
-        playback.push({ chunk, chunkIndex, offset, done: scheduled.done });
-        this.#emitProgress(options, {
-          charIndex: offset,
-          totalChars: normalized.length,
-          chunkIndex,
-          chunkCount: chunks.length,
-          chunkCharIndex: 0,
-          eventType: "sentence",
-        });
-      }
-
-      for (const item of playback) {
-        await abortable(item.done, operation.controller.signal);
-        this.#emitProgress(options, {
-          charIndex: Math.min(
-            normalized.length,
-            item.offset + item.chunk.length,
-          ),
-          totalChars: normalized.length,
-          chunkIndex: item.chunkIndex,
-          chunkCount: chunks.length,
-          chunkCharIndex: item.chunk.length,
-          eventType: "end",
-        });
+        operation.prepared.set(chunkIndex, scheduled);
+        operation.notify?.();
+        operation.notify = undefined;
       }
     } catch (error) {
-      if (
-        operation.controller.signal.aborted &&
-        error instanceof DOMException &&
-        error.name === "AbortError"
-      ) {
-        return;
-      }
+      operation.producerError = error;
       throw error;
     } finally {
-      if (this.#activeOperation === operation) {
-        this.#activeOperation = undefined;
-      }
+      operation.producerDone = true;
+      operation.notify?.();
+      operation.notify = undefined;
     }
+  }
+
+  async #waitForPrepared(
+    operation: ActiveOperation,
+    chunkIndex: number,
+  ): Promise<ScheduledAudio> {
+    while (!operation.prepared.has(chunkIndex)) {
+      throwIfAborted(operation.controller.signal);
+      if (operation.producerDone) {
+        throw operation.producerError ??
+          new Error("Kokoro did not prepare the next speech chunk");
+      }
+      await abortable(
+        new Promise<void>((resolve) => {
+          operation.notify = resolve;
+        }),
+        operation.controller.signal,
+      );
+    }
+    return operation.prepared.get(chunkIndex)!;
+  }
+
+  async #waitUntilPlaying(operation: ActiveOperation): Promise<void> {
+    while (operation.paused && operation.pendingSkips === 0) {
+      await abortable(
+        new Promise<void>((resolve) => {
+          operation.notify = resolve;
+        }),
+        operation.controller.signal,
+      );
+    }
+  }
+
+  #emitChunkEnd(
+    options: KokoroLongSpeakOptions,
+    totalChars: number,
+    chunkCount: number,
+    chunk: string,
+    chunkIndex: number,
+    offset: number,
+  ): void {
+    this.#emitProgress(options, {
+      charIndex: Math.min(totalChars, offset + chunk.length),
+      totalChars,
+      chunkIndex,
+      chunkCount,
+      chunkCharIndex: chunk.length,
+      eventType: "end",
+    });
   }
 
   #queueInference<T>(
@@ -681,7 +859,7 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
     }
   }
 
-  async #scheduleAudio(
+  async #prepareAudio(
     pcm: Float32Array,
     volume: number | undefined,
     signal: AbortSignal,
@@ -705,9 +883,20 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
       resolveDone = resolve;
     });
     let finished = false;
+    let started = false;
     const scheduled: ScheduledAudio = {
       source,
       done,
+      start: () => {
+        if (started) return;
+        started = true;
+        try {
+          source.start();
+        } catch (error) {
+          scheduled.finish();
+          throw error;
+        }
+      },
       finish: () => {
         if (finished) return;
         finished = true;
@@ -721,17 +910,6 @@ export class KokoroTtsEngine implements LongFormTtsEngine {
       scheduled.finish();
     };
     this.#sources.add(scheduled);
-
-    const previousNextStartTime = this.#nextStartTime;
-    const startAt = Math.max(context.currentTime, this.#nextStartTime);
-    this.#nextStartTime = startAt + buffer.duration;
-    try {
-      source.start(startAt);
-    } catch (error) {
-      this.#nextStartTime = previousNextStartTime;
-      scheduled.finish();
-      throw error;
-    }
     return scheduled;
   }
 

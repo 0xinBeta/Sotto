@@ -194,6 +194,9 @@ const elementIds = [
   "page-text-output",
   "close-page-text",
   "reading-progress",
+  "reading-controls",
+  "pause-reading",
+  "skip-reading",
   "notes-list",
   "export-notes",
   "reminder-banner",
@@ -241,6 +244,7 @@ async function installSidepanel(options: {
   ) as Record<(typeof elementIds)[number], FakeElement>;
   elements["capture-setup"].hidden = true;
   elements["clipboard-card"].hidden = true;
+  elements["reading-controls"].hidden = true;
   const emptyLog = new FakeElement("li");
   emptyLog.className = "empty-log";
   emptyLog.textContent = "No commands yet.";
@@ -691,6 +695,63 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["listen-button"].getAttribute("aria-pressed")).toBe(
       "false",
     );
+    expect(elements["reading-progress"].hidden).toBe(true);
+    expect(elements["reading-controls"].hidden).toBe(true);
+  });
+
+  it("shows playback controls only during a read", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    expect(elements["reading-controls"].hidden).toBe(true);
+
+    onMessage({
+      target: "sidepanel",
+      type: "reading-state",
+      active: true,
+      paused: false,
+    });
+    expect(elements["reading-controls"].hidden).toBe(false);
+    expect(elements["pause-reading"].textContent).toBe("Pause");
+    expect(elements["action-log-announcer"].textContent).toBe(
+      "Reading active.",
+    );
+
+    await elements["pause-reading"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "playback-control",
+      operation: "pause",
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "reading-state",
+      active: true,
+      paused: true,
+    });
+    expect(elements["pause-reading"].textContent).toBe("Resume");
+    expect(elements["action-log-announcer"].textContent).toBe(
+      "Reading paused.",
+    );
+    await elements["pause-reading"].emit("click");
+    await elements["skip-reading"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "playback-control",
+      operation: "resume",
+    });
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "playback-control",
+      operation: "skip",
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "reading-state",
+      active: false,
+      paused: false,
+    });
+    expect(elements["reading-controls"].hidden).toBe(true);
     expect(elements["reading-progress"].hidden).toBe(true);
   });
 

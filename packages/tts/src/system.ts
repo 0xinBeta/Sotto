@@ -6,6 +6,7 @@ import {
 import type {
   LongFormTtsEngine,
   TtsLongSpeakOptions,
+  TtsPlaybackState,
   TtsProgress,
   TtsProgressEventType,
   TtsSpeakOptions,
@@ -63,6 +64,14 @@ function isProgressEvent(
 export class SystemTtsEngine implements LongFormTtsEngine {
   private generation = 0;
   private activeUtterance: ActiveUtterance | undefined;
+  private longState: TtsPlaybackState = "idle";
+  private resumeLong: (() => void) | undefined;
+  private skipActiveChunk = false;
+  private pendingSkips = 0;
+
+  get playbackState(): TtsPlaybackState {
+    return this.longState;
+  }
 
   async speak(
     text: string,
@@ -107,95 +116,169 @@ export class SystemTtsEngine implements LongFormTtsEngine {
     if (chunks.length === 0) {
       return;
     }
+    this.longState = "playing";
 
-    let voice: VoiceSelection;
     try {
-      voice = await this.selectVoice(options.lang ?? DEFAULT_LANGUAGE);
-    } catch (error) {
+      const voice = await this.selectVoice(options.lang ?? DEFAULT_LANGUAGE);
       if (generation !== this.generation) {
         return;
       }
-      throw error;
-    }
-    if (generation !== this.generation) {
-      return;
-    }
 
-    let searchStart = 0;
-    let lastProgress = -1;
-    let firstAudioEmitted = false;
+      let searchStart = 0;
+      let lastProgress = -1;
+      let firstAudioEmitted = false;
 
-    for (const [chunkIndex, chunk] of chunks.entries()) {
-      if (generation !== this.generation) {
-        return;
-      }
-      assertUtteranceLength(chunk);
-
-      const foundOffset = normalized.indexOf(chunk, searchStart);
-      const chunkOffset = foundOffset < 0 ? searchStart : foundOffset;
-      searchStart = chunkOffset + chunk.length;
-
-      const reportProgress = (
-        chunkCharIndex: number,
-        eventType: TtsProgressEventType,
-      ): void => {
-        const boundedChunkIndex = Math.max(
-          0,
-          Math.min(chunk.length, chunkCharIndex),
-        );
-        const charIndex = Math.max(
-          lastProgress,
-          Math.min(normalized.length, chunkOffset + boundedChunkIndex),
-        );
-        if (charIndex === lastProgress && eventType !== "end") {
+      for (const [chunkIndex, chunk] of chunks.entries()) {
+        await this.waitUntilResumed(generation);
+        if (generation !== this.generation) {
           return;
         }
-        lastProgress = charIndex;
+        assertUtteranceLength(chunk);
 
-        const progress: TtsProgress = {
-          charIndex,
-          totalChars: normalized.length,
-          chunkIndex,
-          chunkCount: chunks.length,
-          chunkCharIndex: boundedChunkIndex,
-          eventType,
-        };
-        try {
-          options.onProgress?.(progress);
-        } catch (error) {
-          console.warn("System TTS progress callback failed", error);
-        }
-      };
+        const foundOffset = normalized.indexOf(chunk, searchStart);
+        const chunkOffset = foundOffset < 0 ? searchStart : foundOffset;
+        searchStart = chunkOffset + chunk.length;
 
-      if (lastProgress < chunkOffset) {
-        reportProgress(0, "start");
-      }
-
-      const finalEvent = await this.speakUntilFinalEvent(
-        chunk,
-        voice,
-        options,
-        (event) => {
-          if (
-            generation === this.generation &&
-            isProgressEvent(event.type) &&
-            typeof event.charIndex === "number" &&
-            Number.isFinite(event.charIndex)
-          ) {
-            reportProgress(event.charIndex, event.type);
+        const reportProgress = (
+          chunkCharIndex: number,
+          eventType: TtsProgressEventType,
+        ): void => {
+          const boundedChunkIndex = Math.max(
+            0,
+            Math.min(chunk.length, chunkCharIndex),
+          );
+          const charIndex = Math.max(
+            lastProgress,
+            Math.min(normalized.length, chunkOffset + boundedChunkIndex),
+          );
+          if (charIndex === lastProgress && eventType !== "end") {
+            return;
           }
-        },
-        () => {
-          if (firstAudioEmitted) return;
-          firstAudioEmitted = true;
-          options.onFirstAudio?.();
-        },
-      );
+          lastProgress = charIndex;
 
-      if (generation !== this.generation || finalEvent !== "end") {
-        return;
+          const progress: TtsProgress = {
+            charIndex,
+            totalChars: normalized.length,
+            chunkIndex,
+            chunkCount: chunks.length,
+            chunkCharIndex: boundedChunkIndex,
+            eventType,
+          };
+          try {
+            options.onProgress?.(progress);
+          } catch (error) {
+            console.warn("System TTS progress callback failed", error);
+          }
+        };
+
+        if (this.pendingSkips > 0) {
+          this.pendingSkips -= 1;
+          reportProgress(chunk.length, "end");
+          continue;
+        }
+
+        if (lastProgress < chunkOffset) {
+          reportProgress(0, "start");
+        }
+
+        const finalEvent = await this.speakUntilFinalEvent(
+          chunk,
+          voice,
+          options,
+          (event) => {
+            if (
+              generation === this.generation &&
+              isProgressEvent(event.type) &&
+              typeof event.charIndex === "number" &&
+              Number.isFinite(event.charIndex)
+            ) {
+              reportProgress(event.charIndex, event.type);
+            }
+          },
+          () => {
+            if (firstAudioEmitted) return;
+            firstAudioEmitted = true;
+            options.onFirstAudio?.();
+          },
+        );
+
+        if (generation !== this.generation) {
+          return;
+        }
+        if (this.skipActiveChunk) {
+          this.skipActiveChunk = false;
+          reportProgress(chunk.length, "end");
+          continue;
+        }
+        if (finalEvent !== "end") {
+          return;
+        }
+        reportProgress(chunk.length, "end");
       }
-      reportProgress(chunk.length, "end");
+    } finally {
+      if (generation === this.generation) {
+        this.longState = "idle";
+        this.resumeLong?.();
+        this.resumeLong = undefined;
+        this.skipActiveChunk = false;
+        this.pendingSkips = 0;
+      }
+    }
+  }
+
+  pause(): boolean {
+    if (this.longState !== "playing") return false;
+    try {
+      chrome.tts.pause();
+    } catch (error) {
+      console.warn("Unable to pause system TTS playback", error);
+      return false;
+    }
+    this.longState = "paused";
+    return true;
+  }
+
+  resume(): boolean {
+    if (this.longState !== "paused") return false;
+    try {
+      chrome.tts.resume();
+    } catch (error) {
+      console.warn("Unable to resume system TTS playback", error);
+      return false;
+    }
+    this.longState = "playing";
+    this.resumeLong?.();
+    this.resumeLong = undefined;
+    return true;
+  }
+
+  skip(): boolean {
+    if (this.longState === "idle") return false;
+    const active = this.activeUtterance;
+    if (active) {
+      this.skipActiveChunk = true;
+      try {
+        chrome.tts.stop();
+      } catch (error) {
+        console.warn("Unable to skip system TTS output", error);
+      }
+      active.cancel();
+    } else {
+      this.pendingSkips += 1;
+      this.resumeLong?.();
+      this.resumeLong = undefined;
+    }
+    return true;
+  }
+
+  private async waitUntilResumed(generation: number): Promise<void> {
+    while (
+      generation === this.generation &&
+      this.longState === "paused"
+    ) {
+      await new Promise<void>((resolve) => {
+        this.resumeLong = resolve;
+      });
     }
   }
 
@@ -210,6 +293,11 @@ export class SystemTtsEngine implements LongFormTtsEngine {
 
   private invalidateAndStop(): void {
     this.generation += 1;
+    this.longState = "idle";
+    this.resumeLong?.();
+    this.resumeLong = undefined;
+    this.skipActiveChunk = false;
+    this.pendingSkips = 0;
     const active = this.activeUtterance;
 
     try {
@@ -281,7 +369,13 @@ export class SystemTtsEngine implements LongFormTtsEngine {
       const resetWatchdog = (): void => {
         clearTimeout(timeout);
         timeout = setTimeout(
-          () => finish(new Error("System TTS playback timed out")),
+          () => {
+            if (this.longState === "paused") {
+              resetWatchdog();
+              return;
+            }
+            finish(new Error("System TTS playback timed out"));
+          },
           timeoutDelay,
         );
       };

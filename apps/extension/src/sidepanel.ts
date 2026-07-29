@@ -145,6 +145,12 @@ type PanelMessage =
     }
   | {
       target: "sidepanel";
+      type: "reading-state";
+      active: boolean;
+      paused: boolean;
+    }
+  | {
+      target: "sidepanel";
       type: "notes-updated";
       notes: readonly PanelNote[];
     }
@@ -236,6 +242,12 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         Number.isFinite(message.total) &&
         message.total > 0 &&
         message.current <= message.total
+      );
+    case "reading-state":
+      return (
+        typeof message.active === "boolean" &&
+        typeof message.paused === "boolean" &&
+        (!message.paused || message.active)
       );
     case "notes-updated":
       return (
@@ -437,6 +449,9 @@ const pageTextTitle = requiredElement<HTMLElement>("#page-text-title");
 const pageTextOutput = requiredElement<HTMLElement>("#page-text-output");
 const closePageText = requiredElement<HTMLButtonElement>("#close-page-text");
 const readingProgress = requiredElement<HTMLProgressElement>("#reading-progress");
+const readingControls = requiredElement<HTMLElement>("#reading-controls");
+const pauseReading = requiredElement<HTMLButtonElement>("#pause-reading");
+const skipReading = requiredElement<HTMLButtonElement>("#skip-reading");
 const notesList = requiredElement<HTMLUListElement>("#notes-list");
 const exportNotes = requiredElement<HTMLButtonElement>("#export-notes");
 const reminderBanner = requiredElement<HTMLElement>("#reminder-banner");
@@ -446,6 +461,8 @@ const commandReferenceList =
   requiredElement<HTMLElement>("#command-reference-list");
 
 let isListening = false;
+let isReading = false;
+let isReadingPaused = false;
 let pendingScreenshot: ClipboardWorkflow | undefined;
 let pendingScreenshotPermission: ScreenshotPermissionWorkflow | undefined;
 let newestLogEntry: LogEntry | undefined;
@@ -658,6 +675,23 @@ function showMicLevel(level: number): void {
 function showTranscript(text: string): void {
   transcript.textContent = text || "Your words will appear here.";
   transcript.dataset.placeholder = String(!text);
+}
+
+function showReadingState(active: boolean, paused: boolean): void {
+  isReading = active;
+  isReadingPaused = paused;
+  readingControls.hidden = !active;
+  pauseReading.textContent = paused ? "Resume" : "Pause";
+  pauseReading.setAttribute(
+    "aria-label",
+    paused ? "Resume reading" : "Pause reading",
+  );
+  if (!active) readingProgress.hidden = true;
+  actionLogAnnouncer.textContent = !active
+    ? "Reading stopped."
+    : paused
+      ? "Reading paused."
+      : "Reading active.";
 }
 
 function showNanoState(availability: NanoAvailability): void {
@@ -1223,8 +1257,19 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || !document.hasFocus()) return;
   event.preventDefault();
   if (isListening) void stopListening();
-  readingProgress.hidden = true;
+  showReadingState(false, false);
   void send({ type: "stop-reading" });
+});
+
+pauseReading.addEventListener("click", () => {
+  void send({
+    type: "playback-control",
+    operation: isReadingPaused ? "resume" : "pause",
+  });
+});
+
+skipReading.addEventListener("click", () => {
+  void send({ type: "playback-control", operation: "skip" });
 });
 
 for (const button of [grantMic, setupGrantMic]) {
@@ -1252,8 +1297,12 @@ clearLog.addEventListener("click", () => {
 });
 
 closePageText.addEventListener("click", () => {
+  const stopReading = isReading;
   pageTextCard.hidden = true;
-  readingProgress.hidden = true;
+  showReadingState(false, false);
+  if (stopReading) {
+    void send({ type: "playback-control", operation: "stop" });
+  }
 });
 
 exportNotes.addEventListener("click", async () => {
@@ -1589,6 +1638,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
         0,
         Math.min(readingProgress.max, message.current),
       );
+      break;
+    case "reading-state":
+      showReadingState(message.active, message.paused);
       break;
     case "notes-updated":
       renderNotes(message.notes);

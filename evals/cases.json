@@ -110,6 +110,46 @@
     "transcript": "say the selected text out loud",
     "expected": { "action": "summarize", "mode": "read", "scope": "selection" }
   },
+  {
+    "id": "playback-pause-01",
+    "transcript": "pause",
+    "expected": { "action": "playback", "operation": "pause" }
+  },
+  {
+    "id": "playback-pause-02",
+    "transcript": "pause reading",
+    "expected": { "action": "playback", "operation": "pause" }
+  },
+  {
+    "id": "playback-resume-01",
+    "transcript": "resume",
+    "expected": { "action": "playback", "operation": "resume" }
+  },
+  {
+    "id": "playback-resume-02",
+    "transcript": "continue reading",
+    "expected": { "action": "playback", "operation": "resume" }
+  },
+  {
+    "id": "playback-stop-01",
+    "transcript": "stop reading",
+    "expected": { "action": "playback", "operation": "stop" }
+  },
+  {
+    "id": "playback-stop-02",
+    "transcript": "stop",
+    "expected": { "action": "playback", "operation": "stop" }
+  },
+  {
+    "id": "playback-skip-01",
+    "transcript": "skip",
+    "expected": { "action": "playback", "operation": "skip" }
+  },
+  {
+    "id": "playback-skip-02",
+    "transcript": "next sentence",
+    "expected": { "action": "playback", "operation": "skip" }
+  },
 
   {
     "id": "ask-page-01",

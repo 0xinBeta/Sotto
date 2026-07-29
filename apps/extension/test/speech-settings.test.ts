@@ -85,11 +85,15 @@ describe("speech settings", () => {
       finishFirst = resolve;
     });
     const delegate = {
+      playbackState: "idle" as const,
       speak: vi.fn()
         .mockImplementationOnce(async () => await firstGate)
         .mockResolvedValue(undefined),
       speakLong: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
+      pause: vi.fn(() => true),
+      resume: vi.fn(() => true),
+      skip: vi.fn(() => true),
     };
     const engine = new SpeechSettingsTtsEngine(delegate, store);
 

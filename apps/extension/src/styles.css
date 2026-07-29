@@ -879,6 +879,20 @@ progress::-webkit-progress-value {
   white-space: pre-wrap;
 }
 
+.reading-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.reading-controls[hidden] {
+  display: none;
+}
+
+.reading-controls .button {
+  flex: 1;
+}
+
 .notes-panel {
   margin-bottom: 30px;
 }

@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const worker = vi.hoisted(() => ({
   route: vi.fn(),
   followUp: vi.fn(),
+  pause: vi.fn(() => true),
+  resume: vi.fn(() => true),
+  skip: vi.fn(() => true),
   speak: vi.fn(),
+  stop: vi.fn(),
 }));
 
 vi.mock("@sotto/actions", () => ({ default: [] }));
@@ -27,9 +31,13 @@ vi.mock("@sotto/destinations", () => ({
 }));
 vi.mock("@sotto/tts", () => ({
   SystemTtsEngine: class SystemTtsEngine {
+    playbackState = "idle";
     speak = worker.speak;
     speakLong = worker.speak;
-    stop = vi.fn();
+    stop = worker.stop;
+    pause = worker.pause;
+    resume = worker.resume;
+    skip = worker.skip;
   },
 }));
 
@@ -196,7 +204,11 @@ async function installBackground(
 afterEach(() => {
   worker.route.mockReset();
   worker.followUp.mockReset();
+  worker.pause.mockClear();
+  worker.resume.mockClear();
+  worker.skip.mockClear();
   worker.speak.mockReset();
+  worker.stop.mockReset();
   vi.resetModules();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -461,6 +473,106 @@ describe("background screenshot clipboard injection", () => {
         type: "page-text",
       }),
     );
+    expect(worker.speak).not.toHaveBeenCalled();
+  });
+
+  it("keeps a read for playback controls and stops it for another command", async () => {
+    let finishRead!: () => void;
+    worker.speak.mockImplementation(
+      async () =>
+        await new Promise<void>((resolve) => {
+          finishRead = resolve;
+        }),
+    );
+    worker.stop.mockImplementation(() => {
+      finishRead?.();
+    });
+    const readResult = {
+      spoken: "Reading the page.",
+      pageText: {
+        text: "One. Two. Three.",
+        title: "Article",
+        speech: "long" as const,
+      },
+    };
+    worker.route
+      .mockResolvedValueOnce(readResult)
+      .mockResolvedValueOnce({ spoken: "Sorry, say that again?" });
+    const harness = await installBackground({
+      id: 14,
+      url: "https://example.com/article",
+    });
+
+    const reading = harness.workerMessage({
+      type: "execute-command",
+      transcript: "read this page",
+      command: {
+        action: "summarize",
+        mode: "read",
+        scope: "page",
+      },
+    });
+    await vi.waitFor(() => expect(worker.speak).toHaveBeenCalledOnce());
+    worker.stop.mockClear();
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "pause",
+      command: { action: "playback", operation: "pause" },
+    });
+    expect(worker.pause).toHaveBeenCalledOnce();
+    expect(worker.stop).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reading-state",
+      active: true,
+      paused: true,
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "open another command",
+      command: { action: "unknown" },
+    });
+    expect(worker.stop).toHaveBeenCalled();
+    await reading;
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "reading-state",
+      active: false,
+      paused: false,
+    });
+  });
+
+  it("uses unknown for inactive controls but keeps stop idempotent", async () => {
+    worker.speak.mockResolvedValue(undefined);
+    const harness = await installBackground({
+      id: 15,
+      url: "https://example.com/article",
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "pause",
+      command: { action: "playback", operation: "pause" },
+    });
+    expect(worker.speak).toHaveBeenCalledWith(
+      "Sorry, say that again?",
+      expect.objectContaining({ lang: "en-US" }),
+    );
+
+    worker.speak.mockClear();
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "stop",
+      command: { action: "playback", operation: "stop" },
+    });
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "stop",
+      command: { action: "playback", operation: "stop" },
+    });
+    expect(worker.stop).toHaveBeenCalled();
     expect(worker.speak).not.toHaveBeenCalled();
   });
 

@@ -43,6 +43,13 @@ describe("intent eval schema drift", () => {
     ).toBe(true);
   });
 
+  it("keeps at least eight playback-control cases", () => {
+    expect(
+      cases.filter((testCase) => testCase.expected.action === "playback")
+        .length,
+    ).toBeGreaterThanOrEqual(8);
+  });
+
   it("keeps security near-misses on the unknown path", () => {
     const nearMisses = cases.filter((testCase) =>
       testCase.id.startsWith("unknown-") &&

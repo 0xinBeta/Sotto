@@ -435,6 +435,50 @@ describe("KokoroTtsEngine", () => {
     expect(context.close).toHaveBeenCalledOnce();
   });
 
+  it("keeps prepared chunks when a long read pauses, skips, and resumes", async () => {
+    const harness = runtimeHarness();
+    const context = new FakeAudioContext();
+    const engine = new KokoroTtsEngine({
+      runtime: harness.runtime,
+      audioContextFactory: () => context as unknown as AudioContext,
+      runtimeUrl: (path) => path,
+      backend: "wasm",
+    });
+    await engine.init();
+    harness.generate.mockClear();
+
+    const reading = engine.speakLong("One. Two. Three.");
+    await vi.waitFor(() => expect(context.sources).toHaveLength(3));
+    expect(context.sources[0]?.start).toHaveBeenCalledOnce();
+
+    expect(engine.pause()).toBe(true);
+    expect(engine.playbackState).toBe("paused");
+    expect(context.sources[0]?.stop).toHaveBeenCalledOnce();
+    await vi.waitFor(() =>
+      expect(context.sources[0]?.buffer).toBeNull()
+    );
+    await Promise.resolve();
+    expect(engine.skip()).toBe(true);
+    await vi.waitFor(() =>
+      expect(context.sources[1]?.buffer).toBeNull()
+    );
+    expect(context.sources[1]?.start).not.toHaveBeenCalled();
+
+    expect(engine.resume()).toBe(true);
+    await vi.waitFor(() =>
+      expect(context.sources[2]?.start).toHaveBeenCalledOnce()
+    );
+    context.sources[2]?.finish();
+    await expect(reading).resolves.toBeUndefined();
+
+    expect(harness.generate.mock.calls.map(([text]) => text)).toEqual([
+      "One.",
+      "Two.",
+      "Three.",
+    ]);
+    expect(engine.playbackState).toBe("idle");
+  });
+
   it("waits for queued synthesis before taking the shared mutex to dispose", async () => {
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>((resolve) => {

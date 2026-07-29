@@ -41,6 +41,10 @@
     "./notes/markdown": {
       "types": "./dist/notes/markdown.d.ts",
       "import": "./dist/notes/markdown.js"
+    },
+    "./playback": {
+      "types": "./dist/playback/index.d.ts",
+      "import": "./dist/playback/index.js"
     }
   },
   "files": [

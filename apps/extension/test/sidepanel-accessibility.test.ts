@@ -38,6 +38,8 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("mic-meter")).toContain(
       'aria-label="Microphone input level"',
     );
+    expect(openingTag("pause-reading")).toContain('type="button"');
+    expect(openingTag("skip-reading")).toContain('type="button"');
   });
 
   it("uses labels and ordered headings", () => {

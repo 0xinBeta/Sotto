@@ -13,9 +13,13 @@ import {
 
 function systemHarness() {
   return {
+    playbackState: "idle" as const,
     speak: vi.fn().mockResolvedValue(undefined),
     speakLong: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn(),
+    pause: vi.fn(() => true),
+    resume: vi.fn(() => true),
+    skip: vi.fn(() => true),
   };
 }
 
@@ -85,7 +89,7 @@ describe("PremiumTtsRouter", () => {
 
     await router.speakLong("First. Second.");
 
-    expect(system.speak.mock.calls.map(([text]) => text)).toEqual([
+    expect(system.speakLong.mock.calls.map(([text]) => text)).toEqual([
       "First.",
       "Second.",
     ]);
@@ -261,7 +265,7 @@ describe("PremiumTtsRouter", () => {
 
     await router.speakLong("First sentence. Second sentence.");
 
-    expect(system.speak).toHaveBeenCalledWith(
+    expect(system.speakLong).toHaveBeenCalledWith(
       "First sentence.",
       expect.objectContaining({ onFirstAudio: expect.any(Function) }),
     );
@@ -279,7 +283,7 @@ describe("PremiumTtsRouter", () => {
   it("adopts a newly ready engine during a download transition", async () => {
     const system = systemHarness();
     let router!: PremiumTtsRouter;
-    system.speak.mockImplementationOnce(async () => {
+    system.speakLong.mockImplementationOnce(async () => {
       router.updateStatus({ state: "ready", enabled: true });
     });
     const request = vi.fn(async (message: PremiumTtsRequest) => {
@@ -294,7 +298,7 @@ describe("PremiumTtsRouter", () => {
 
     await router.speakLong("System first. Premium second.");
 
-    expect(system.speak).toHaveBeenCalledWith(
+    expect(system.speakLong).toHaveBeenCalledWith(
       "System first.",
       expect.objectContaining({ onFirstAudio: expect.any(Function) }),
     );
@@ -304,6 +308,79 @@ describe("PremiumTtsRouter", () => {
         text: "Premium second.",
       }),
     );
+  });
+
+  it("delegates system pause, resume, and skip during a long read", async () => {
+    const system = systemHarness();
+    let finish!: () => void;
+    system.speakLong.mockImplementation(
+      async () =>
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const router = new PremiumTtsRouter({
+      system,
+      request: vi.fn().mockResolvedValue(undefined),
+    });
+    router.updateStatus({ state: "ready", enabled: false });
+
+    const reading = router.speakLong("One sentence.");
+    await vi.waitFor(() => expect(system.speakLong).toHaveBeenCalledOnce());
+    expect(router.pause()).toBe(true);
+    expect(router.playbackState).toBe("paused");
+    expect(system.pause).toHaveBeenCalledOnce();
+    expect(router.skip()).toBe(true);
+    expect(system.skip).toHaveBeenCalledOnce();
+    expect(router.resume()).toBe(true);
+    expect(system.resume).toHaveBeenCalledOnce();
+
+    finish();
+    await reading;
+    expect(router.playbackState).toBe("idle");
+  });
+
+  it("keeps the premium queue position across pause, skip, and resume", async () => {
+    const system = systemHarness();
+    const finishes: Array<() => void> = [];
+    let router!: PremiumTtsRouter;
+    const request = vi.fn((message: PremiumTtsRequest) => {
+      if (message.type !== "premium-speak") {
+        return Promise.resolve(undefined);
+      }
+      queueMicrotask(() =>
+        router.notifyFirstAudio(message.utteranceId ?? "")
+      );
+      return new Promise<void>((resolve) => {
+        finishes.push(resolve);
+      });
+    });
+    router = new PremiumTtsRouter({ system, request });
+    router.updateStatus({ state: "ready", enabled: true });
+
+    const reading = router.speakLong("One. Two. Three.");
+    await vi.waitFor(() => expect(finishes).toHaveLength(1));
+    expect(router.pause()).toBe(true);
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "premium-stop" }),
+      )
+    );
+    await vi.waitFor(() => expect(router.playbackState).toBe("paused"));
+    expect(router.skip()).toBe(true);
+    expect(router.resume()).toBe(true);
+
+    await vi.waitFor(() => expect(finishes).toHaveLength(2));
+    finishes[1]?.();
+    await reading;
+
+    expect(
+      request.mock.calls
+        .map(([message]) => message as PremiumTtsRequest)
+        .filter((message) => message.type === "premium-speak")
+        .map((message) => message.text),
+    ).toEqual(["One.", "Three."]);
+    expect(system.speak).not.toHaveBeenCalled();
   });
 
   it("keeps abbreviations and decimals intact and skips punctuation-only input", () => {

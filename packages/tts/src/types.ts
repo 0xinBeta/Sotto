@@ -27,11 +27,17 @@ export interface TtsLongSpeakOptions extends TtsSpeakOptions {
   readonly onProgress?: (progress: TtsProgress) => void;
 }
 
+export type TtsPlaybackState = "idle" | "playing" | "paused";
+
 export interface TtsEngine {
   speak(text: string, options?: TtsSpeakOptions): Promise<void>;
   stop(): void;
 }
 
 export interface LongFormTtsEngine extends TtsEngine {
+  readonly playbackState: TtsPlaybackState;
   speakLong(text: string, options?: TtsLongSpeakOptions): Promise<void>;
+  pause(): boolean;
+  resume(): boolean;
+  skip(): boolean;
 }

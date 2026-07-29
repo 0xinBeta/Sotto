@@ -1,6 +1,7 @@
 import type {
   LongFormTtsEngine,
   TtsLongSpeakOptions,
+  TtsPlaybackState,
   TtsSpeakOptions,
 } from "@sotto/tts";
 import {
@@ -220,6 +221,13 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
   #waiters = new Map<string, FirstAudioWaiter>();
   #retryTimer: ReturnType<typeof setTimeout> | undefined;
   #voice: KokoroVoiceId = KOKORO_VOICE;
+  #playbackState: TtsPlaybackState = "idle";
+  #activeLongGeneration: number | undefined;
+  #activeLongEngine: "premium" | "system" | undefined;
+  #activePremiumUtteranceId: string | undefined;
+  #pendingSkips = 0;
+  #resumeLong: (() => void) | undefined;
+  #controlStops = new Map<string, () => void>();
 
   constructor(options: PremiumTtsRouterOptions) {
     this.#system = options.system;
@@ -248,6 +256,10 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
 
   get voice(): KokoroVoiceId {
     return this.#voice;
+  }
+
+  get playbackState(): TtsPlaybackState {
+    return this.#playbackState;
   }
 
   updateStatus(status: PremiumTtsStatus): void {
@@ -293,6 +305,8 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     const normalized = chunks.join(" ");
     const generation = this.#begin();
     this.#active = true;
+    this.#activeLongGeneration = generation;
+    this.#playbackState = "playing";
     let charIndex = 0;
     let firstAudioEmitted = false;
     const sentenceOptions: TtsLongSpeakOptions = {
@@ -306,8 +320,20 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
 
     try {
       for (const [chunkIndex, chunk] of chunks.entries()) {
+        await this.#waitUntilResumed(generation);
         if (generation !== this.#generation) return;
-        await this.#speakSentence(chunk, sentenceOptions, generation);
+        if (this.#pendingSkips > 0) {
+          this.#pendingSkips -= 1;
+        } else {
+          await this.#speakSentence(
+            chunk,
+            sentenceOptions,
+            generation,
+            undefined,
+            false,
+            true,
+          );
+        }
         if (generation !== this.#generation) return;
         charIndex = Math.min(
           normalized.length,
@@ -327,7 +353,16 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
         }
       }
     } finally {
-      if (generation === this.#generation) this.#active = false;
+      if (generation === this.#generation) {
+        this.#active = false;
+        this.#activeLongGeneration = undefined;
+        this.#activeLongEngine = undefined;
+        this.#activePremiumUtteranceId = undefined;
+        this.#pendingSkips = 0;
+        this.#playbackState = "idle";
+        this.#resumeLong?.();
+        this.#resumeLong = undefined;
+      }
     }
   }
 
@@ -356,14 +391,77 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
   stop(): void {
     this.#generation += 1;
     this.#active = false;
+    this.#activeLongGeneration = undefined;
+    this.#activeLongEngine = undefined;
+    this.#activePremiumUtteranceId = undefined;
+    this.#pendingSkips = 0;
+    this.#playbackState = "idle";
+    this.#resumeLong?.();
+    this.#resumeLong = undefined;
     this.#system.stop();
     const utteranceIds = [...this.#waiters.keys()];
     for (const waiter of this.#waiters.values()) waiter.cancel();
     this.#waiters.clear();
+    for (const stop of this.#controlStops.values()) stop();
+    this.#controlStops.clear();
     for (const utteranceId of utteranceIds) {
       void this.#request({ type: "premium-stop", utteranceId })
         .catch(() => undefined);
     }
+  }
+
+  pause(): boolean {
+    if (
+      this.#activeLongGeneration !== this.#generation ||
+      this.#playbackState !== "playing"
+    ) {
+      return false;
+    }
+    this.#playbackState = "paused";
+    if (this.#activeLongEngine === "system") {
+      this.#system.pause();
+    } else if (this.#activeLongEngine === "premium") {
+      this.#stopActivePremium();
+    }
+    return true;
+  }
+
+  resume(): boolean {
+    if (
+      this.#activeLongGeneration !== this.#generation ||
+      this.#playbackState !== "paused"
+    ) {
+      return false;
+    }
+    if (this.#activeLongEngine === "system") {
+      this.#system.resume();
+    }
+    this.#playbackState = "playing";
+    this.#resumeLong?.();
+    this.#resumeLong = undefined;
+    return true;
+  }
+
+  skip(): boolean {
+    if (
+      this.#activeLongGeneration !== this.#generation ||
+      this.#playbackState === "idle"
+    ) {
+      return false;
+    }
+    if (this.#activeLongEngine === "system") {
+      this.#system.skip();
+    } else if (this.#activeLongEngine === "premium") {
+      if (this.#playbackState === "paused") {
+        this.#pendingSkips += 1;
+      }
+      this.#stopActivePremium();
+    } else {
+      this.#pendingSkips += 1;
+      this.#resumeLong?.();
+      this.#resumeLong = undefined;
+    }
+    return true;
   }
 
   #begin(): number {
@@ -377,6 +475,7 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
     generation: number,
     voice = this.#voice,
     premiumOnly = false,
+    longForm = false,
   ): Promise<void> {
     const language = options.lang?.toLowerCase();
     if (
@@ -390,7 +489,7 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
       if (premiumOnly) {
         throw new Error("Premium voice is not ready");
       }
-      await this.#system.speak(text, options);
+      await this.#speakSystem(text, options, longForm);
       return;
     }
 
@@ -434,6 +533,15 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
       voice,
       ...(premiumOnly ? { preview: true } : {}),
     });
+    let resolveControlStop!: () => void;
+    const controlStop = new Promise<"controlled">((resolve) => {
+      resolveControlStop = () => resolve("controlled");
+    });
+    this.#controlStops.set(utteranceId, resolveControlStop);
+    if (longForm) {
+      this.#activeLongEngine = "premium";
+      this.#activePremiumUtteranceId = utteranceId;
+    }
 
     let firstHeard = false;
     try {
@@ -442,13 +550,19 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
         timedOut,
         premium.then(() => "complete" as const),
         premium.catch(() => "failed" as const),
+        controlStop,
       ]);
       if (generation !== this.#generation) return;
+      if (firstOutcome === "controlled") return;
 
       if (firstOutcome === "audio") {
         firstHeard = true;
-        await premium;
+        const completion = await Promise.race([
+          premium.then(() => "complete" as const),
+          controlStop,
+        ]);
         if (generation !== this.#generation) return;
+        if (completion === "controlled") return;
         this.#premiumSucceeded();
         return;
       }
@@ -462,17 +576,62 @@ export class PremiumTtsRouter implements LongFormTtsEngine {
       }
       this.#premiumFailed();
       void premium.catch(() => undefined);
-      await this.#system.speak(text, options);
+      await this.#speakSystem(text, options, longForm);
     } catch (error) {
       if (generation !== this.#generation) return;
       if (premiumOnly) throw error;
       this.#premiumFailed();
       if (!firstHeard) {
-        await this.#system.speak(text, options);
+        await this.#speakSystem(text, options, longForm);
       }
     } finally {
       this.#clearTimer(timeout);
       this.#waiters.delete(utteranceId);
+      this.#controlStops.delete(utteranceId);
+      if (
+        longForm &&
+        this.#activePremiumUtteranceId === utteranceId
+      ) {
+        this.#activePremiumUtteranceId = undefined;
+        this.#activeLongEngine = undefined;
+      }
+    }
+  }
+
+  async #waitUntilResumed(generation: number): Promise<void> {
+    while (
+      generation === this.#generation &&
+      this.#playbackState === "paused"
+    ) {
+      await new Promise<void>((resolve) => {
+        this.#resumeLong = resolve;
+      });
+    }
+  }
+
+  #stopActivePremium(): void {
+    const utteranceId = this.#activePremiumUtteranceId;
+    if (!utteranceId) return;
+    this.#controlStops.get(utteranceId)?.();
+    this.#waiters.get(utteranceId)?.cancel();
+    void this.#request({ type: "premium-stop", utteranceId })
+      .catch(() => undefined);
+  }
+
+  async #speakSystem(
+    text: string,
+    options: TtsSpeakOptions,
+    longForm: boolean,
+  ): Promise<void> {
+    this.#activeLongEngine = longForm ? "system" : undefined;
+    try {
+      if (longForm) {
+        await this.#system.speakLong(text, options);
+      } else {
+        await this.#system.speak(text, options);
+      }
+    } finally {
+      if (longForm) this.#activeLongEngine = undefined;
     }
   }
 

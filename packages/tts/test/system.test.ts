@@ -17,6 +17,8 @@ function installTts(
   vi.stubGlobal("chrome", {
     tts: {
       getVoices: vi.fn().mockResolvedValue(voices),
+      pause: vi.fn(),
+      resume: vi.fn(),
       speak,
       stop,
     },
@@ -332,6 +334,42 @@ describe("SystemTtsEngine", () => {
     expect(stop).toHaveBeenCalledTimes(1);
     await expect(reading).resolves.toBeUndefined();
     expect(speak).toHaveBeenCalledTimes(1);
+  });
+
+  it("pauses, resumes, and skips a long read without repeating a chunk", async () => {
+    const callbacks: chrome.tts.TtsOptions[] = [];
+    const speak = vi.fn(
+      (_text: string, options: chrome.tts.TtsOptions) => {
+        callbacks.push(options);
+      },
+    );
+    installTts(
+      [{ voiceName: "Local", lang: "en-US", remote: false }],
+      speak,
+    );
+    const engine = new SystemTtsEngine();
+    const reading = engine.speakLong(
+      `${"First sentence. ".repeat(220)}\n\n${"Second sentence. ".repeat(220)}`,
+    );
+    await vi.waitFor(() => expect(speak).toHaveBeenCalledTimes(1));
+
+    expect(engine.playbackState).toBe("playing");
+    expect(engine.pause()).toBe(true);
+    expect(engine.playbackState).toBe("paused");
+    expect(chrome.tts.pause).toHaveBeenCalledOnce();
+    expect(engine.resume()).toBe(true);
+    expect(chrome.tts.resume).toHaveBeenCalledOnce();
+    expect(engine.skip()).toBe(true);
+
+    await vi.waitFor(() => expect(speak).toHaveBeenCalledTimes(2));
+    expect(speak.mock.calls[1]?.[0]).not.toBe(speak.mock.calls[0]?.[0]);
+    callbacks[1]?.onEvent?.({ type: "end" } as chrome.tts.TtsEvent);
+
+    await expect(reading).resolves.toBeUndefined();
+    expect(engine.playbackState).toBe("idle");
+    expect(engine.pause()).toBe(false);
+    expect(engine.resume()).toBe(false);
+    expect(engine.skip()).toBe(false);
   });
 
   it("a regular speak cancels the active long read before it starts", async () => {

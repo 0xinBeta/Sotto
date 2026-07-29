@@ -1,5 +1,9 @@
 import actions from "@sotto/actions";
 import { createNotesMarkdownExport } from "@sotto/actions/notes/markdown";
+import type {
+  PlaybackCommand,
+  PlaybackOperation,
+} from "@sotto/actions/playback";
 import {
   isReminderRecord,
   notesReminderStore,
@@ -64,6 +68,7 @@ interface WorkerMessage {
   readonly heard?: unknown;
   readonly did?: unknown;
   readonly timings?: unknown;
+  readonly operation?: unknown;
 }
 
 const actionRegistry = new ActionRegistry(actions);
@@ -82,10 +87,22 @@ const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
 
 let creatingOffscreen: Promise<void> | undefined;
 let commandGeneration = 0;
+let readingActive = false;
+let readingPaused = false;
 
 function beginCommandGeneration(): number {
   commandGeneration += 1;
+  const stoppedReading = readingActive;
+  readingActive = false;
+  readingPaused = false;
   tts.stop();
+  if (stoppedReading) {
+    void sendPanel({
+      type: "reading-state",
+      active: false,
+      paused: false,
+    });
+  }
   return commandGeneration;
 }
 
@@ -919,24 +936,43 @@ async function publishActionResult(
     if (!commandIsCurrent(generation)) return;
     const speechLanguage = safeTtsLanguage(lang);
     if (speech === "long") {
-      await speakAndPublishActionLog(
-        transcript,
-        result.spoken,
-        timings,
-        (onFirstAudio) =>
-          tts.speakLong(text, {
-            lang: speechLanguage,
-            onFirstAudio,
-            onProgress(progress) {
-              if (!commandIsCurrent(generation)) return;
-              void sendPanel({
-                type: "reading-progress",
-                current: progress.charIndex,
-                total: progress.totalChars,
-              });
-            },
-          }),
-      );
+      readingActive = true;
+      readingPaused = false;
+      await sendPanel({
+        type: "reading-state",
+        active: true,
+        paused: false,
+      });
+      try {
+        await speakAndPublishActionLog(
+          transcript,
+          result.spoken,
+          timings,
+          (onFirstAudio) =>
+            tts.speakLong(text, {
+              lang: speechLanguage,
+              onFirstAudio,
+              onProgress(progress) {
+                if (!commandIsCurrent(generation)) return;
+                void sendPanel({
+                  type: "reading-progress",
+                  current: progress.charIndex,
+                  total: progress.totalChars,
+                });
+              },
+            }),
+        );
+      } finally {
+        if (commandIsCurrent(generation)) {
+          readingActive = false;
+          readingPaused = false;
+          await sendPanel({
+            type: "reading-state",
+            active: false,
+            paused: false,
+          });
+        }
+      }
     } else {
       await speakAndPublishActionLog(
         transcript,
@@ -981,15 +1017,103 @@ async function publishActionResult(
   });
 }
 
+function isPlaybackOperation(value: unknown): value is PlaybackOperation {
+  return (
+    value === "pause" ||
+    value === "resume" ||
+    value === "stop" ||
+    value === "skip"
+  );
+}
+
+async function publishPlaybackResult(
+  transcript: string,
+  did: string,
+  timings: ExchangeTimings,
+): Promise<void> {
+  await sendPanel({
+    type: "action-log",
+    heard: transcript,
+    did,
+    timings,
+  });
+}
+
+async function executePlaybackCommand(
+  command: PlaybackCommand,
+  transcript: string,
+  timings: ExchangeTimings,
+): Promise<ActionResult> {
+  const operation = command.operation;
+  if (operation !== "stop" && !readingActive) {
+    const spoken = "Sorry, say that again?";
+    await speakAndPublishActionLog(
+      transcript,
+      spoken,
+      timings,
+      (onFirstAudio) =>
+        tts.speak(spoken, {
+          lang: "en-US",
+          onFirstAudio,
+        }),
+    );
+    return { spoken };
+  }
+
+  if (operation === "stop") {
+    readingActive = false;
+    readingPaused = false;
+    tts.stop();
+  } else if (operation === "pause") {
+    if (!readingPaused) tts.pause();
+    readingPaused = true;
+  } else if (operation === "resume") {
+    if (readingPaused) tts.resume();
+    readingPaused = false;
+  } else {
+    tts.skip();
+  }
+
+  const spoken = operation === "pause"
+    ? "Reading paused."
+    : operation === "resume"
+      ? "Reading resumed."
+      : operation === "skip"
+        ? "Skipped one sentence."
+        : "Reading stopped.";
+  await sendPanel({
+    type: "reading-state",
+    active: readingActive,
+    paused: readingPaused,
+  });
+  await publishPlaybackResult(transcript, spoken, timings);
+  return { spoken };
+}
+
 async function executeCommand(
   command: unknown,
   transcript: string,
-  generation: number,
   timings: ExchangeTimings,
 ): Promise<ActionResult | undefined> {
   let completedTimings = timings;
+  let generation = commandGeneration;
+  let generationStarted = false;
   try {
     const validated = commandRouter.parse(command);
+    if (validated.action === "playback") {
+      const operation = (validated as { readonly operation?: unknown })
+        .operation;
+      if (!isPlaybackOperation(operation)) {
+        throw new CommandValidationError("Invalid playback operation");
+      }
+      return await executePlaybackCommand(
+        validated as PlaybackCommand,
+        transcript,
+        timings,
+      );
+    }
+    generation = beginCommandGeneration();
+    generationStarted = true;
     const actionStartedAt = performance.now();
     let result: ActionResult;
     try {
@@ -1016,6 +1140,9 @@ async function executeCommand(
     );
     return result;
   } catch (error) {
+    if (!generationStarted) {
+      generation = beginCommandGeneration();
+    }
     if (!commandIsCurrent(generation)) return undefined;
     const rejected = error instanceof CommandValidationError;
     const actionId =
@@ -1114,18 +1241,30 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         await notesReminderStore.listNotes(),
       );
     case "start-listening":
-      beginCommandGeneration();
+      if (!readingActive) beginCommandGeneration();
       return sendOffscreen({ type: "start-listening" });
     case "stop-listening":
       return sendOffscreen({ type: "stop-listening" });
     case "stop-reading":
       beginCommandGeneration();
       return undefined;
+    case "playback-control": {
+      if (!isPlaybackOperation(message.operation)) {
+        throw new TypeError("A valid playback operation is required");
+      }
+      return executePlaybackCommand(
+        { action: "playback", operation: message.operation },
+        message.operation === "skip"
+          ? "skip"
+          : `${message.operation} reading`,
+        { input: "typed" },
+      );
+    }
     case "toggle-listening":
-      beginCommandGeneration();
+      if (!readingActive) beginCommandGeneration();
       return sendOffscreen({ type: "toggle-listening" });
     case "text-command": {
-      beginCommandGeneration();
+      if (!readingActive) beginCommandGeneration();
       const text = safeTranscript(message.text);
       if (!text) throw new TypeError("A non-empty text command is required");
       return sendOffscreen({
@@ -1135,7 +1274,6 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       });
     }
     case "execute-command": {
-      const generation = beginCommandGeneration();
       const transcript = safeTranscript(message.transcript);
       const timings = isExchangeTimings(message.timings)
         ? message.timings
@@ -1143,7 +1281,6 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return executeCommand(
         message.command,
         transcript,
-        generation,
         timings,
       );
     }

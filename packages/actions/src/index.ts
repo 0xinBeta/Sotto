@@ -1,6 +1,7 @@
 import askPageAction from "./ask-page/index.js";
 import helpAction from "./help/index.js";
 import notesAction from "./notes/index.js";
+import playbackAction from "./playback/index.js";
 import screenshotAction from "./screenshot/index.js";
 import summarizeAction from "./summarize/index.js";
 import tabsAction from "./tabs/index.js";
@@ -24,6 +25,14 @@ export {
   notesSchema,
 } from "./notes/index.js";
 export type { NotesCommand } from "./notes/index.js";
+export {
+  default as playbackAction,
+  playbackSchema,
+} from "./playback/index.js";
+export type {
+  PlaybackCommand,
+  PlaybackOperation,
+} from "./playback/index.js";
 export { default as screenshotAction } from "./screenshot/index.js";
 export type {
   ScreenshotCommand,
@@ -57,6 +66,7 @@ export const actions = [
   summarizeAction,
   askPageAction,
   notesAction,
+  playbackAction,
   typeAction,
   helpAction,
 ] as const;

@@ -14,5 +14,6 @@ export type {
   TtsLongSpeakOptions,
   TtsProgress,
   TtsProgressEventType,
+  TtsPlaybackState,
   TtsSpeakOptions,
 } from "./types.js";

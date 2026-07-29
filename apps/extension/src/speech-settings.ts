@@ -1,6 +1,7 @@
 import type {
   LongFormTtsEngine,
   TtsLongSpeakOptions,
+  TtsPlaybackState,
   TtsSpeakOptions,
 } from "@sotto/tts";
 
@@ -131,6 +132,10 @@ export class SpeechSettingsTtsEngine implements LongFormTtsEngine {
     this.#settings = settings;
   }
 
+  get playbackState(): TtsPlaybackState {
+    return this.#engine.playbackState;
+  }
+
   async speak(
     text: string,
     options: TtsSpeakOptions = {},
@@ -154,5 +159,17 @@ export class SpeechSettingsTtsEngine implements LongFormTtsEngine {
   stop(): void {
     this.#generation += 1;
     this.#engine.stop();
+  }
+
+  pause(): boolean {
+    return this.#engine.pause();
+  }
+
+  resume(): boolean {
+    return this.#engine.resume();
+  }
+
+  skip(): boolean {
+    return this.#engine.skip();
   }
 }
