@@ -29,7 +29,11 @@ import destinations, {
   executeDestinationFollowUp,
   type ClipboardWorkflowCompletion,
 } from "@sotto/destinations";
-import { SystemTtsEngine } from "@sotto/tts";
+import {
+  SystemTtsEngine,
+  type TtsLongSpeakOptions,
+  type TtsSpeakOptions,
+} from "@sotto/tts";
 import {
   isKokoroVoiceId,
   type KokoroVoiceId,
@@ -89,6 +93,24 @@ let creatingOffscreen: Promise<void> | undefined;
 let commandGeneration = 0;
 let readingActive = false;
 let readingPaused = false;
+let lastSpokenResponse: string | undefined;
+
+async function speakResponse(
+  text: string,
+  options: TtsSpeakOptions = {},
+  remember = true,
+): Promise<void> {
+  await tts.speak(text, options);
+  if (remember) lastSpokenResponse = text;
+}
+
+async function speakLongResponse(
+  text: string,
+  options: TtsLongSpeakOptions = {},
+): Promise<void> {
+  await tts.speakLong(text, options);
+  lastSpokenResponse = text;
+}
 
 function beginCommandGeneration(): number {
   commandGeneration += 1;
@@ -231,7 +253,7 @@ async function reportBackgroundFailure(
   await sendPanel({ type: "pipeline-error", message: `${context}: ${detail}` });
   if (spoken) {
     try {
-      await tts.speak(spoken, { lang: "en-US" });
+      await speakResponse(spoken, { lang: "en-US" });
     } catch (ttsError) {
       console.warn("Sotto could not speak an error response", ttsError);
     }
@@ -294,7 +316,7 @@ async function deliverReminder(reminder: ReminderRecord): Promise<void> {
   });
   let speechDelivered = false;
   try {
-    await tts.speak(`Reminder: ${reminder.text}`, { lang: "en-US" });
+    await speakResponse(`Reminder: ${reminder.text}`, { lang: "en-US" });
     speechDelivered = true;
   } catch (error) {
     console.warn("Sotto could not speak the reminder", error);
@@ -921,6 +943,30 @@ async function publishActionResult(
     });
     return;
   }
+  if (result.replayLastSpoken === true) {
+    if (command.action !== "repeat") {
+      throw new TypeError("Only repeat can replay worker speech");
+    }
+    const spoken = lastSpokenResponse ?? result.spoken;
+    await sendPanel({ type: "earcon", kind: "complete" });
+    await speakAndPublishActionLog(
+      transcript,
+      lastSpokenResponse === undefined
+        ? result.spoken
+        : "Repeated the last response.",
+      timings,
+      (onFirstAudio) =>
+        speakResponse(
+          spoken,
+          {
+            lang: "en-US",
+            onFirstAudio,
+          },
+          false,
+        ),
+    );
+    return;
+  }
   if (result.pageText) {
     const { text, title, lang, speech } = result.pageText;
     if (
@@ -958,7 +1004,7 @@ async function publishActionResult(
           result.spoken,
           timings,
           (onFirstAudio) =>
-            tts.speakLong(text, {
+            speakLongResponse(text, {
               lang: speechLanguage,
               onFirstAudio,
               onProgress(progress) {
@@ -988,7 +1034,7 @@ async function publishActionResult(
         result.spoken,
         timings,
         (onFirstAudio) =>
-          tts.speak(text, {
+          speakResponse(text, {
             lang: speechLanguage,
             onFirstAudio,
           }),
@@ -1061,7 +1107,7 @@ async function executePlaybackCommand(
       spoken,
       timings,
       (onFirstAudio) =>
-        tts.speak(spoken, {
+        speakResponse(spoken, {
           lang: "en-US",
           onFirstAudio,
         }),
@@ -1307,13 +1353,16 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
               did,
               message.timings,
               (onFirstAudio) =>
-                tts.speak(text, {
-                  lang: "en-US",
-                  onFirstAudio,
-                }),
+                speakResponse(
+                  text,
+                  {
+                    lang: "en-US",
+                    onFirstAudio,
+                  },
+                ),
             );
           } else {
-            await tts.speak(text, { lang: "en-US" });
+            await speakResponse(text, { lang: "en-US" });
           }
         } catch (error) {
           const detail = errorMessage(error);

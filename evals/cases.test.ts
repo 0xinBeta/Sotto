@@ -50,6 +50,13 @@ describe("intent eval schema drift", () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it("keeps at least five repeat cases", () => {
+    expect(
+      cases.filter((testCase) => testCase.expected.action === "repeat")
+        .length,
+    ).toBeGreaterThanOrEqual(5);
+  });
+
   it("keeps at least eight page-control cases", () => {
     expect(
       cases.filter((testCase) =>

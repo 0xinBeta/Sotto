@@ -82,6 +82,16 @@ const result = {
   workflow,
 } as const;
 
+function repeatResult(): Promise<{
+  readonly spoken: string;
+  readonly replayLastSpoken: true;
+}> {
+  return Promise.resolve({
+    spoken: "I have not said anything yet.",
+    replayLastSpoken: true,
+  });
+}
+
 async function installBackground(
   activeTab: { readonly id: number; readonly url: string },
   initialStorage: Record<string, unknown> = {},
@@ -311,6 +321,158 @@ describe("background screenshot clipboard injection", () => {
         rate: 2,
         volume: 0,
       },
+    );
+  });
+
+  it("stores only the last successful final speech in worker memory", async () => {
+    worker.route.mockImplementation(repeatResult);
+    const harness = await installBackground({
+      id: 61,
+      url: "https://example.com/current",
+    });
+    const truncated = "x".repeat(2_000);
+
+    await harness.workerMessage({
+      type: "speak",
+      text: "First response.",
+    });
+    await harness.workerMessage({
+      type: "speak",
+      text: ` ${"x".repeat(2_100)} `,
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "repeat that",
+        command: { action: "repeat" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        spoken: "I have not said anything yet.",
+        replayLastSpoken: true,
+      },
+    });
+    expect(worker.speak).toHaveBeenLastCalledWith(
+      truncated,
+      expect.objectContaining({ rate: 1, volume: 1 }),
+    );
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-result",
+      }),
+    );
+    expect(harness.storageSet).not.toHaveBeenCalled();
+  });
+
+  it("does not replace speech memory with repeated output", async () => {
+    worker.route.mockImplementation(repeatResult);
+    const harness = await installBackground({
+      id: 62,
+      url: "https://example.com/current",
+    });
+
+    await harness.workerMessage({
+      type: "speak",
+      text: "Keep this response.",
+    });
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "repeat that",
+      command: { action: "repeat" },
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "say that again",
+        command: { action: "repeat" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        spoken: "I have not said anything yet.",
+        replayLastSpoken: true,
+      },
+    });
+    expect(
+      worker.speak.mock.calls.filter(
+        ([spoken]) => spoken === "Keep this response.",
+      ),
+    ).toHaveLength(3);
+  });
+
+  it("uses the empty-state line before any successful speech", async () => {
+    worker.route.mockImplementation(repeatResult);
+    const harness = await installBackground({
+      id: 63,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "what did you say",
+        command: { action: "repeat" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        spoken: "I have not said anything yet.",
+        replayLastSpoken: true,
+      },
+    });
+    expect(worker.speak).toHaveBeenCalledWith(
+      "I have not said anything yet.",
+      expect.objectContaining({ rate: 1, volume: 1 }),
+    );
+  });
+
+  it("stores an error line after the error speech succeeds", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    worker.route.mockRejectedValueOnce(new Error("test action failure"));
+    const harness = await installBackground({
+      id: 64,
+      url: "https://example.com/current",
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "run the failing action",
+      command: { action: "tabs", operation: "new" },
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-error",
+        spoken: "That action could not be completed.",
+      }),
+    );
+
+    await harness.workerMessage({
+      type: "speak",
+      text: "That action could not be completed.",
+    });
+    worker.route.mockImplementation(repeatResult);
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "repeat that",
+        command: { action: "repeat" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        spoken: "I have not said anything yet.",
+        replayLastSpoken: true,
+      },
+    });
+    expect(worker.speak).toHaveBeenLastCalledWith(
+      "That action could not be completed.",
+      expect.objectContaining({ rate: 1, volume: 1 }),
     );
   });
 

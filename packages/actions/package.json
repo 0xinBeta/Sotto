@@ -49,6 +49,10 @@
     "./playback": {
       "types": "./dist/playback/index.d.ts",
       "import": "./dist/playback/index.js"
+    },
+    "./repeat": {
+      "types": "./dist/repeat/index.d.ts",
+      "import": "./dist/repeat/index.js"
     }
   },
   "files": [

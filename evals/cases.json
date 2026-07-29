@@ -937,6 +937,33 @@
     "transcript": "read all commands aloud",
     "expected": { "action": "help", "mode": "read" }
   },
+
+  {
+    "id": "repeat-01",
+    "transcript": "say that again",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "repeat-02",
+    "transcript": "repeat that",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "repeat-03",
+    "transcript": "what did you say",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "repeat-04",
+    "transcript": "please say it again",
+    "expected": { "action": "repeat" }
+  },
+  {
+    "id": "repeat-05",
+    "transcript": "can you repeat your last response",
+    "expected": { "action": "repeat" }
+  },
+
   {
     "id": "unknown-help-near-01",
     "transcript": "help me send an email",

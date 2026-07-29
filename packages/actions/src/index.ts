@@ -4,6 +4,7 @@ import navigateAction from "./navigate/index.js";
 import notesAction from "./notes/index.js";
 import pageControlAction from "./page-control/index.js";
 import playbackAction from "./playback/index.js";
+import repeatAction from "./repeat/index.js";
 import screenshotAction from "./screenshot/index.js";
 import summarizeAction from "./summarize/index.js";
 import tabsAction from "./tabs/index.js";
@@ -55,6 +56,12 @@ export type {
   PlaybackCommand,
   PlaybackOperation,
 } from "./playback/index.js";
+export {
+  default as repeatAction,
+  EMPTY_REPEAT_RESPONSE,
+  repeatSchema,
+} from "./repeat/index.js";
+export type { RepeatCommand } from "./repeat/index.js";
 export { default as screenshotAction } from "./screenshot/index.js";
 export type {
   ScreenshotCommand,
@@ -91,6 +98,7 @@ export const actions = [
   notesAction,
   pageControlAction,
   playbackAction,
+  repeatAction,
   typeAction,
   helpAction,
 ] as const;

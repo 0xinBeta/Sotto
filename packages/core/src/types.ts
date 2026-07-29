@@ -103,6 +103,8 @@ export interface ActionResult {
   readonly spoken: string;
   /** Logs a successful result without speech or an earcon. */
   readonly silent?: true;
+  /** Tells the worker to replay its speech-only session value. */
+  readonly replayLastSpoken?: true;
   readonly workflow?: ClientWorkflow;
   readonly data?: Readonly<Record<string, JsonValue>>;
   /**
