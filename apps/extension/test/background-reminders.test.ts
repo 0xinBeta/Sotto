@@ -472,6 +472,61 @@ describe("background reminder recovery", () => {
     });
   });
 
+  it("replays an alias snooze delay from the saved command", async () => {
+    const future = reminder("alias", "2099-01-01T00:00:00.000Z");
+    const harness = await installBackground({
+      values: {
+        schemaVersion: 1,
+        commandAliases: [
+          {
+            phrase: "later",
+            command: {
+              action: "notes",
+              operation: "snooze",
+              delayMinutes: 30,
+            },
+          },
+        ],
+        "reminder:alias": future,
+      },
+      existingAlarms: ["reminder:alias"],
+    });
+    harness.values["reminder:alias"] = reminder(
+      "alias",
+      "2000-01-01T00:00:00.000Z",
+    );
+    worker.speak.mockResolvedValue(undefined);
+    harness.alarmListener({ name: "reminder:alias" });
+    await vi.waitFor(() =>
+      expect(harness.values["reminder:alias"]).toMatchObject({
+        status: "delivered",
+      }),
+    );
+
+    const resolution = await harness.workerMessage({
+      type: "resolve-command-alias",
+      transcript: "later",
+    }) as {
+      readonly ok: boolean;
+      readonly value: {
+        readonly kind: string;
+        readonly aliasExecutionId: string;
+      };
+    };
+    expect(resolution.value.kind).toBe("alias");
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command-alias",
+        transcript: "later",
+        aliasExecutionId: resolution.value.aliasExecutionId,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Snoozed the reminder for 30 minutes." },
+    });
+  });
+
   it("uses the unknown path after the fresh reminder window", async () => {
     const future = reminder("expired", "2099-01-01T00:00:00.000Z");
     const harness = await installBackground({

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONFIRMATION_TIMEOUT_MS,
   ConfirmationSession,
+  isConfirmationPhrase,
 } from "../src/confirmation.js";
 
 const command = {
@@ -11,6 +12,23 @@ const command = {
 } as const;
 
 describe("confirmation session", () => {
+  it("reports pending state", () => {
+    let now = 1_000;
+    const session = new ConfirmationSession(() => now);
+
+    expect(session.hasPending).toBe(false);
+    session.request(command);
+    expect(session.hasPending).toBe(true);
+    now += CONFIRMATION_TIMEOUT_MS + 1;
+    expect(session.hasPending).toBe(false);
+    expect(session.resolve("yes")).toEqual({ kind: "none" });
+  });
+
+  it("exports the accepted phrase matcher", () => {
+    expect(isConfirmationPhrase("Yes, please!")).toBe(true);
+    expect(isConfirmationPhrase("no")).toBe(false);
+  });
+
   it.each([
     "yes",
     "yes, please",

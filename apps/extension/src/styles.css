@@ -979,6 +979,119 @@ h2 {
   line-height: 1.5;
 }
 
+.command-aliases {
+  margin-top: 20px;
+  border-top: 1px solid var(--rule);
+  padding-top: 18px;
+}
+
+.command-aliases-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.command-aliases h3,
+.command-aliases p {
+  margin: 0;
+}
+
+.command-aliases h3 {
+  font-size: 14px;
+}
+
+.command-aliases-heading output {
+  color: var(--paper-dim);
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 9px;
+}
+
+.command-aliases > p,
+#command-alias-phrase-form > p,
+#command-alias-target > p,
+#command-alias-confirm > p {
+  margin-top: 7px;
+  color: var(--paper-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+#add-command-alias,
+#command-alias-phrase-form,
+#command-alias-target,
+#command-alias-confirm {
+  margin-top: 12px;
+}
+
+#command-alias-phrase-form label {
+  display: block;
+  color: var(--paper-dim);
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.command-alias-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.command-alias-actions input {
+  flex: 1 1 100%;
+  min-width: 0;
+  border: 1px solid var(--switch-border);
+  border-radius: 0;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: var(--surface-card);
+  font: inherit;
+}
+
+#command-alias-confirm pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 7px 0 0;
+  border-left: 2px solid var(--acid);
+  padding: 8px 0 8px 12px;
+  color: var(--paper-dim);
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.command-alias-list {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.command-alias-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--paper-dim);
+  font-family: "SFMono-Regular", "Cascadia Mono", monospace;
+  font-size: 10px;
+}
+
+.command-alias-row .button {
+  min-width: auto;
+  padding: 6px 8px;
+  font-size: 8px;
+}
+
+.command-alias-status:empty {
+  display: none;
+}
+
 .speech-setting input[type="range"]::-webkit-slider-runnable-track {
   height: 2px;
   background: var(--switch-border);

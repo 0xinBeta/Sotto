@@ -144,6 +144,7 @@ interface OffscreenMessage {
   readonly preview?: unknown;
   readonly timings?: unknown;
   readonly playbackId?: unknown;
+  readonly aliasExecutionId?: unknown;
 }
 
 interface MessageEnvelope<T> {
@@ -2026,6 +2027,38 @@ async function processCommandTranscript(
   transcript: string,
   timings: ExchangeTimings,
 ): Promise<void> {
+  const aliasStartedAt = performance.now();
+  const aliasResolution = await askWorker<unknown>({
+    type: "resolve-command-alias",
+    transcript,
+  });
+  if (
+    typeof aliasResolution === "object" &&
+    aliasResolution !== null &&
+    !Array.isArray(aliasResolution)
+  ) {
+    const resolution = aliasResolution as {
+      readonly kind?: unknown;
+      readonly aliasExecutionId?: unknown;
+    };
+    if (resolution.kind === "phrase") return;
+    if (
+      resolution.kind === "alias" &&
+      typeof resolution.aliasExecutionId === "string"
+    ) {
+      await askWorker<ActionResult>({
+        type: "execute-command-alias",
+        transcript,
+        aliasExecutionId: resolution.aliasExecutionId,
+        timings: {
+          ...timings,
+          parseMs: Math.max(0, performance.now() - aliasStartedAt),
+        },
+      });
+      return;
+    }
+  }
+
   const memory = followUpMemory.recent();
   let parseMs = 0;
   const command = await inferenceMutex.run(async () => {

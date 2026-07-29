@@ -409,6 +409,83 @@
           </label>
           <p id="session-history-note" data-i18n="sessionHistoryPrivacy"></p>
         </div>
+        <div class="command-aliases" aria-labelledby="command-aliases-heading">
+          <div class="command-aliases-heading">
+            <h3 id="command-aliases-heading" data-i18n="commandAliases"></h3>
+            <output id="command-alias-count" aria-live="polite"></output>
+          </div>
+          <p data-i18n="commandAliasesExactCopy"></p>
+          <p data-i18n="commandAliasesReplayCopy"></p>
+          <button class="button" id="add-command-alias" type="button">
+            <span data-i18n="addAlias"></span>
+          </button>
+          <form id="command-alias-phrase-form" hidden>
+            <label for="command-alias-phrase" data-i18n="aliasPhrase"></label>
+            <p
+              id="command-alias-phrase-instruction"
+              data-i18n="enterOrSpeakAlias"
+            ></p>
+            <div class="command-alias-actions">
+              <input
+                id="command-alias-phrase"
+                type="text"
+                minlength="2"
+                maxlength="50"
+                autocomplete="off"
+                required
+                aria-describedby="command-alias-phrase-instruction"
+              />
+              <button class="button primary" id="use-command-alias-phrase" type="submit">
+                <span data-i18n="continue"></span>
+              </button>
+              <button class="button" id="speak-command-alias-phrase" type="button">
+                <span data-i18n="speakPhrase"></span>
+              </button>
+              <button class="button" id="cancel-command-alias-phrase" type="button">
+                <span data-i18n="cancel"></span>
+              </button>
+            </div>
+          </form>
+          <div id="command-alias-target" hidden>
+            <p data-i18n="runAliasTarget"></p>
+            <p>
+              <span data-i18n="aliasPhrase"></span>:
+              <strong id="command-alias-target-phrase"></strong>
+            </p>
+            <button class="button" id="cancel-command-alias-target" type="button">
+              <span data-i18n="cancel"></span>
+            </button>
+          </div>
+          <div id="command-alias-confirm" hidden>
+            <p>
+              <span data-i18n="aliasPhrase"></span>:
+              <strong id="command-alias-confirm-phrase"></strong>
+            </p>
+            <p data-i18n="savedCommand"></p>
+            <pre id="command-alias-confirm-command"></pre>
+            <div class="command-alias-actions">
+              <button class="button primary" id="save-command-alias" type="button">
+                <span data-i18n="saveAlias"></span>
+              </button>
+              <button class="button" id="cancel-command-alias-confirm" type="button">
+                <span data-i18n="cancel"></span>
+              </button>
+            </div>
+          </div>
+          <ul
+            class="command-alias-list"
+            id="command-alias-list"
+            aria-live="polite"
+          >
+            <li data-i18n="noCommandAliases"></li>
+          </ul>
+          <p
+            class="command-alias-status"
+            id="command-alias-status"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </div>
         <div class="blocked-sites" aria-labelledby="blocked-sites-heading">
           <h3 id="blocked-sites-heading" data-i18n="blockedSitesHeading"></h3>
           <p data-i18n="blockedSitesCopy"></p>

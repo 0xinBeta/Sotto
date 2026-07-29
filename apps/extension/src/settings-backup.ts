@@ -44,10 +44,17 @@ import {
   type ResponseVerbosity,
 } from "./speech-settings.js";
 import { WAKE_WORD_ENABLED_KEY } from "./wake-word-settings.js";
+import {
+  COMMAND_ALIASES_KEY,
+  type CommandAlias,
+  type CommandAliasValidator,
+  normalizeCommandAliases,
+} from "./command-aliases.js";
 
 export const SETTINGS_BACKUP_SCHEMA_VERSION = 1;
 export const MAX_SETTINGS_BACKUP_BYTES = 20 * 1024 * 1024;
 export const MAX_SETTINGS_BACKUP_NOTE_ITEMS = 5_000;
+export const MAX_SETTINGS_BACKUP_ALIAS_ITEMS = 5_000;
 
 const NOTE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$";
 const ISO_DATE_MAX_LENGTH = 35;
@@ -76,6 +83,7 @@ export interface SettingsBackup {
   readonly schemaVersion: typeof SETTINGS_BACKUP_SCHEMA_VERSION;
   readonly settings: SettingsBackupSettings;
   readonly notes: readonly NoteRecord[];
+  readonly aliases: readonly CommandAlias[];
 }
 
 export interface SettingsBackupExport {
@@ -85,11 +93,15 @@ export interface SettingsBackupExport {
 
 export interface SettingsBackupImportPreview {
   readonly noteCount: number;
+  readonly aliasCount: number;
+  readonly droppedAliasCount: number;
 }
 
 export interface SettingsBackupImportResult {
   readonly noteCount: number;
   readonly addedNoteCount: number;
+  readonly aliasCount: number;
+  readonly droppedAliasCount: number;
   readonly settings: SettingsBackupSettings;
 }
 
@@ -141,6 +153,27 @@ const noteSchema: JsonSchema = {
     source: sourceSchema,
   },
   required: ["id", "body", "createdAt", "updatedAt"],
+  additionalProperties: false,
+};
+
+const commandAliasSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    phrase: {
+      type: "string",
+      minLength: 2,
+      maxLength: 50,
+    },
+    command: {
+      type: "object",
+      properties: {
+        action: { type: "string" },
+      },
+      required: ["action"],
+      additionalProperties: true,
+    },
+  },
+  required: ["phrase", "command"],
   additionalProperties: false,
 };
 
@@ -201,6 +234,11 @@ export const SETTINGS_BACKUP_SCHEMA: JsonSchema = {
       type: "array",
       items: noteSchema,
       maxItems: MAX_SETTINGS_BACKUP_NOTE_ITEMS,
+    },
+    aliases: {
+      type: "array",
+      items: commandAliasSchema,
+      maxItems: MAX_SETTINGS_BACKUP_ALIAS_ITEMS,
     },
   },
   required: ["schemaVersion", "settings", "notes"],
@@ -283,11 +321,17 @@ function storedNotes(values: Record<string, unknown>): NoteRecord[] {
 
 export function createSettingsBackup(
   values: Record<string, unknown>,
+  aliasValidator: CommandAliasValidator,
 ): SettingsBackup {
+  const { aliases } = normalizeCommandAliases(
+    values[COMMAND_ALIASES_KEY],
+    aliasValidator,
+  );
   return {
     schemaVersion: SETTINGS_BACKUP_SCHEMA_VERSION,
     settings: backupSettings(values),
     notes: storedNotes(values),
+    aliases,
   };
 }
 
@@ -310,10 +354,13 @@ export function serializeSettingsBackup(
 
 export function createSettingsBackupExport(
   values: Record<string, unknown>,
+  aliasValidator: CommandAliasValidator,
   date: Date = new Date(),
 ): SettingsBackupExport {
   validDate(date);
-  const json = serializeSettingsBackup(createSettingsBackup(values));
+  const json = serializeSettingsBackup(
+    createSettingsBackup(values, aliasValidator),
+  );
   return {
     filename: `sotto-backup-${date.toISOString().slice(0, 10)}.json`,
     dataUrl: `${SETTINGS_BACKUP_DATA_URL_PREFIX}${encodeURIComponent(json)}`,
@@ -339,7 +386,9 @@ export function parseSettingsBackup(text: string): SettingsBackup {
   if (!validation.valid) {
     throw new TypeError("Backup data is invalid");
   }
-  const backup = value as SettingsBackup;
+  const backup = value as SettingsBackup & {
+    readonly aliases?: readonly CommandAlias[];
+  };
   if (!backup.notes.every((note) => isNoteRecord(note))) {
     throw new TypeError("Backup data is invalid");
   }
@@ -362,14 +411,20 @@ export function parseSettingsBackup(text: string): SettingsBackup {
     schemaVersion: SETTINGS_BACKUP_SCHEMA_VERSION,
     settings: normalizedSettings,
     notes: backup.notes,
+    aliases: backup.aliases ?? [],
   };
 }
 
 function importPlan(
   text: string,
   stored: Record<string, unknown>,
+  aliasValidator: CommandAliasValidator,
 ): SettingsBackupImportPlan {
   const backup = parseSettingsBackup(text);
+  const { aliases, droppedAliasCount } = normalizeCommandAliases(
+    backup.aliases,
+    aliasValidator,
+  );
   const existing = storedNotes(stored);
   const ids = new Set(existing.map((note) => note.id));
   const bodies = new Set(existing.map((note) => note.body));
@@ -403,6 +458,7 @@ function importPlan(
     [PREMIUM_STT_ENABLED_KEY]: settings.premiumStt.enabled,
     [PREMIUM_STT_TIER_KEY]: settings.premiumStt.tier,
     [NOTES_SCHEMA_VERSION_KEY]: NOTES_SCHEMA_VERSION,
+    [COMMAND_ALIASES_KEY]: aliases,
   };
   for (const note of additions) {
     values[`${NOTE_KEY_PREFIX}${note.id}`] = note;
@@ -412,25 +468,31 @@ function importPlan(
     values,
     noteCount: Math.min(backup.notes.length, MAX_NOTES),
     addedNoteCount: additions.length,
+    aliasCount: aliases.length,
+    droppedAliasCount,
     settings,
   };
 }
 
 export class SettingsBackupStore {
   readonly #storage: SettingsBackupStorage;
+  readonly #aliasValidator: CommandAliasValidator;
   readonly #now: () => Date;
 
   constructor(
     storage: SettingsBackupStorage,
+    aliasValidator: CommandAliasValidator,
     now: () => Date = () => new Date(),
   ) {
     this.#storage = storage;
+    this.#aliasValidator = aliasValidator;
     this.#now = now;
   }
 
   async export(): Promise<SettingsBackupExport> {
     return createSettingsBackupExport(
       await this.#storage.get(null),
+      this.#aliasValidator,
       this.#now(),
     );
   }
@@ -438,16 +500,30 @@ export class SettingsBackupStore {
   async previewImport(
     text: string,
   ): Promise<SettingsBackupImportPreview> {
-    const plan = importPlan(text, await this.#storage.get(null));
-    return { noteCount: plan.noteCount };
+    const plan = importPlan(
+      text,
+      await this.#storage.get(null),
+      this.#aliasValidator,
+    );
+    return {
+      noteCount: plan.noteCount,
+      aliasCount: plan.aliasCount,
+      droppedAliasCount: plan.droppedAliasCount,
+    };
   }
 
   async import(text: string): Promise<SettingsBackupImportResult> {
-    const plan = importPlan(text, await this.#storage.get(null));
+    const plan = importPlan(
+      text,
+      await this.#storage.get(null),
+      this.#aliasValidator,
+    );
     await this.#storage.set(plan.values);
     return {
       noteCount: plan.noteCount,
       addedNoteCount: plan.addedNoteCount,
+      aliasCount: plan.aliasCount,
+      droppedAliasCount: plan.droppedAliasCount,
       settings: plan.settings,
     };
   }

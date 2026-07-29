@@ -217,6 +217,24 @@ const elementIds = [
   "session-history-panel",
   "session-history-list",
   "clear-session-history",
+  "command-alias-count",
+  "add-command-alias",
+  "command-alias-phrase-form",
+  "command-alias-phrase",
+  "command-alias-phrase-instruction",
+  "use-command-alias-phrase",
+  "speak-command-alias-phrase",
+  "cancel-command-alias-phrase",
+  "command-alias-target",
+  "command-alias-target-phrase",
+  "cancel-command-alias-target",
+  "command-alias-confirm",
+  "command-alias-confirm-phrase",
+  "command-alias-confirm-command",
+  "save-command-alias",
+  "cancel-command-alias-confirm",
+  "command-alias-list",
+  "command-alias-status",
   "latency-readout",
   "latency-summary",
   "latency-details",
@@ -324,10 +342,29 @@ async function installSidepanel(options: {
   readonly backupPreview?: {
     readonly valid: boolean;
     readonly noteCount?: number;
+    readonly aliasCount?: number;
+    readonly droppedAliasCount?: number;
   };
   readonly backupImport?: {
     readonly valid: boolean;
     readonly addedNoteCount?: number;
+    readonly aliasCount?: number;
+    readonly droppedAliasCount?: number;
+  };
+  readonly aliasState?: {
+    readonly aliases: readonly {
+      readonly phrase: string;
+      readonly command: Record<string, unknown>;
+    }[];
+    readonly capture:
+      | { readonly stage: "idle" | "phrase" }
+      | { readonly stage: "target"; readonly phrase: string }
+      | {
+          readonly stage: "confirm";
+          readonly phrase: string;
+          readonly command: Record<string, unknown>;
+        };
+    readonly message?: string;
   };
   readonly speechSettings?: {
     readonly rate: number;
@@ -363,6 +400,9 @@ async function installSidepanel(options: {
   elements["reading-controls"].hidden = true;
   elements["latency-readout"].hidden = true;
   elements["settings-backup-confirm"].hidden = true;
+  elements["command-alias-phrase-form"].hidden = true;
+  elements["command-alias-target"].hidden = true;
+  elements["command-alias-confirm"].hidden = true;
   elements["live-transcript-preview-setting"].hidden = true;
   elements["session-history-panel"].hidden = true;
   const emptyLog = new FakeElement("li");
@@ -395,11 +435,16 @@ async function installSidepanel(options: {
     enabled: false,
     entries: [],
   };
+  let aliasState = options.aliasState ?? {
+    aliases: [],
+    capture: { stage: "idle" as const },
+  };
   const sendMessage = vi.fn().mockImplementation(
     async (message: {
       readonly type?: string;
       readonly enabled?: unknown;
       readonly hostname?: unknown;
+      readonly phrase?: unknown;
     }) => {
       if (message.type === "get-diagnostic-report") {
         return {
@@ -437,6 +482,49 @@ async function installSidepanel(options: {
       }
       if (message.type === "get-blocked-sites") {
         return { ok: true, value: blockedSites };
+      }
+      if (message.type === "get-command-alias-state") {
+        return { ok: true, value: aliasState };
+      }
+      if (message.type === "start-command-alias-phrase-capture") {
+        aliasState = {
+          aliases: aliasState.aliases,
+          capture: { stage: "phrase" },
+        };
+        return { ok: true, value: aliasState };
+      }
+      if (message.type === "start-command-alias-target-capture") {
+        aliasState = {
+          aliases: aliasState.aliases,
+          capture: {
+            stage: "target",
+            phrase: message.phrase as string,
+          },
+        };
+        return { ok: true, value: aliasState };
+      }
+      if (message.type === "cancel-command-alias-capture") {
+        aliasState = {
+          aliases: aliasState.aliases,
+          capture: { stage: "idle" },
+        };
+        return { ok: true, value: aliasState };
+      }
+      if (message.type === "save-command-alias") {
+        aliasState = {
+          aliases: aliasState.aliases,
+          capture: { stage: "idle" },
+        };
+        return { ok: true, value: aliasState };
+      }
+      if (message.type === "delete-command-alias") {
+        aliasState = {
+          aliases: aliasState.aliases.filter(
+            (alias) => alias.phrase !== message.phrase,
+          ),
+          capture: aliasState.capture,
+        };
+        return { ok: true, value: aliasState };
       }
       if (message.type === "add-blocked-site") {
         blockedSites = {
@@ -479,7 +567,11 @@ async function installSidepanel(options: {
           value: preview.valid
             ? {
                 valid: true,
-                preview: { noteCount: preview.noteCount ?? 0 },
+                preview: {
+                  noteCount: preview.noteCount ?? 0,
+                  aliasCount: preview.aliasCount ?? 0,
+                  droppedAliasCount: preview.droppedAliasCount ?? 0,
+                },
               }
             : { valid: false },
         };
@@ -496,6 +588,8 @@ async function installSidepanel(options: {
                 valid: true,
                 result: {
                   addedNoteCount: result.addedNoteCount ?? 0,
+                  aliasCount: result.aliasCount ?? 0,
+                  droppedAliasCount: result.droppedAliasCount ?? 0,
                 },
               }
             : { valid: false },
@@ -2205,8 +2299,17 @@ describe("side-panel screenshot clipboard fallback", () => {
 
   it("shows one backup confirmation before it applies the import", async () => {
     const { elements, sendMessage } = await installSidepanel({
-      backupPreview: { valid: true, noteCount: 12 },
-      backupImport: { valid: true, addedNoteCount: 10 },
+      backupPreview: {
+        valid: true,
+        noteCount: 12,
+        aliasCount: 3,
+      },
+      backupImport: {
+        valid: true,
+        addedNoteCount: 10,
+        aliasCount: 3,
+        droppedAliasCount: 2,
+      },
     });
     const backup = '{"schemaVersion":1}';
     elements["settings-backup-file"].files = [{
@@ -2238,8 +2341,136 @@ describe("side-panel screenshot clipboard fallback", () => {
     });
     expect(elements["settings-backup-confirm"].hidden).toBe(true);
     expect(elements["settings-backup-status"].textContent).toBe(
-      "Import complete. Settings replaced. Added 10 notes.",
+      "Import complete. Settings replaced. Added 10 notes. " +
+        "Imported 3 aliases. Dropped 2 invalid aliases.",
     );
+  });
+
+  it("captures a typed alias phrase and waits for its command", async () => {
+    const { elements, sendMessage } = await installSidepanel();
+
+    await elements["add-command-alias"].emit("click");
+    expect(elements["command-alias-phrase-form"].hidden).toBe(false);
+
+    elements["command-alias-phrase"].value = "focus work";
+    await elements["command-alias-phrase-form"].emit("submit");
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "start-command-alias-target-capture",
+      phrase: "focus work",
+    });
+    expect(elements["command-alias-target"].hidden).toBe(false);
+    expect(elements["command-alias-target-phrase"].textContent).toBe(
+      "focus work",
+    );
+  });
+
+  it("starts listening after it starts phrase capture", async () => {
+    const { elements, sendMessage } = await installSidepanel();
+
+    await elements["add-command-alias"].emit("click");
+    await elements["speak-command-alias-phrase"].emit("click");
+
+    expect(sendMessage).toHaveBeenNthCalledWith(1, {
+      target: "worker",
+      type: "start-command-alias-phrase-capture",
+    });
+    expect(sendMessage).toHaveBeenNthCalledWith(2, {
+      target: "worker",
+      type: "toggle-listening",
+    });
+    expect(
+      elements["command-alias-phrase-instruction"].textContent,
+    ).toBe("Speak the alias phrase now.");
+  });
+
+  it("shows the exact captured command and sends save", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "command-alias-state",
+      state: {
+        aliases: [],
+        capture: {
+          stage: "confirm",
+          phrase: "focus work",
+          command: {
+            action: "tabs",
+            operation: "switch",
+            query: "project board",
+          },
+        },
+      },
+    });
+
+    expect(elements["command-alias-confirm"].hidden).toBe(false);
+    expect(elements["command-alias-confirm-phrase"].textContent).toBe(
+      "focus work",
+    );
+    expect(elements["command-alias-confirm-command"].textContent).toBe(
+      '{\n  "action": "tabs",\n  "operation": "switch",\n' +
+        '  "query": "project board"\n}',
+    );
+
+    await elements["save-command-alias"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "save-command-alias",
+    });
+  });
+
+  it("lists aliases, reports messages, and sends delete", async () => {
+    const { elements, onMessage, sendMessage } = await installSidepanel();
+    onMessage({
+      target: "sidepanel",
+      type: "command-alias-state",
+      state: {
+        aliases: [{
+          phrase: "focus work",
+          command: { action: "tabs", operation: "switch", query: "work" },
+        }],
+        capture: { stage: "idle" },
+        message: "Alias saved.",
+      },
+    });
+
+    expect(elements["command-alias-count"].textContent).toBe("1 of 50");
+    expect(elements["command-alias-list"].textContent).toContain(
+      "focus work",
+    );
+    expect(elements["command-alias-status"].textContent).toBe(
+      "Alias saved.",
+    );
+
+    const remove =
+      elements["command-alias-list"].firstElementChild?.querySelector(
+        ".button",
+      );
+    await remove?.emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "delete-command-alias",
+      phrase: "focus work",
+    });
+  });
+
+  it("stops new alias setup at 50 aliases", async () => {
+    const aliases = Array.from({ length: 50 }, (_, index) => ({
+      phrase: `alias ${index}`,
+      command: { action: "tabs", operation: "switch", index },
+    }));
+    const { elements } = await installSidepanel({
+      aliasState: {
+        aliases,
+        capture: { stage: "idle" },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(elements["command-alias-count"].textContent).toBe("50 of 50");
+    });
+    expect(elements["add-command-alias"].disabled).toBe(true);
   });
 
   it("shows one clear line for an invalid backup", async () => {

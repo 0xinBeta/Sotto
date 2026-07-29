@@ -304,6 +304,88 @@ describe("offscreen fail-soft status", () => {
     expect(harness.values.liveTranscriptPreview).toBe(false);
   });
 
+  it("runs an exact alias before Nano and uses its one-time execution id", async () => {
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockImplementation(
+      async (message: {
+        readonly target?: string;
+        readonly type?: string;
+      }) => {
+        if (
+          message.target === "worker" &&
+          message.type === "resolve-command-alias"
+        ) {
+          return {
+            ok: true,
+            value: {
+              kind: "alias",
+              aliasExecutionId: "alias-execution-1",
+            },
+          };
+        }
+        if (
+          message.target === "worker" &&
+          message.type === "execute-command-alias"
+        ) {
+          return { ok: true, value: { spoken: "Opened the saved page." } };
+        }
+        return message.target === "worker" ? { ok: true } : undefined;
+      },
+    );
+
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "daily page!!!",
+      timings: { input: "typed" },
+    });
+
+    expect(nano.parseCommand).not.toHaveBeenCalled();
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "resolve-command-alias",
+      transcript: "daily page!!!",
+    });
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "execute-command-alias",
+      transcript: "daily page!!!",
+      aliasExecutionId: "alias-execution-1",
+      timings: {
+        input: "typed",
+        parseMs: expect.any(Number),
+      },
+    });
+  });
+
+  it("uses a spoken alias phrase for capture without calling Nano", async () => {
+    const harness = await installPremiumOffscreen();
+    harness.sendMessage.mockImplementation(
+      async (message: {
+        readonly target?: string;
+        readonly type?: string;
+      }) =>
+        message.target === "worker" &&
+          message.type === "resolve-command-alias"
+          ? { ok: true, value: { kind: "phrase" } }
+          : message.target === "worker"
+            ? { ok: true }
+            : undefined,
+    );
+
+    await harness.message({
+      type: "parse-transcript",
+      transcript: "My daily page",
+    });
+
+    expect(nano.parseCommand).not.toHaveBeenCalled();
+    expect(harness.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "worker",
+        type: "execute-command",
+      }),
+    );
+  });
+
   it("publishes partial speech only to the transcript display", async () => {
     nano.parseCommand.mockResolvedValue({ action: "unknown" });
     speech.moonshineTranscribe

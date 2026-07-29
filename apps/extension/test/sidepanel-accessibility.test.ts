@@ -166,6 +166,15 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("add-blocked-site")).toContain('type="submit"');
     expect(openingTag("block-current-site")).toContain('type="button"');
     expect(panelMarkup).toContain(
+      'for="command-alias-phrase"',
+    );
+    expect(openingTag("command-alias-phrase")).toContain('minlength="2"');
+    expect(openingTag("command-alias-phrase")).toContain('maxlength="50"');
+    expect(openingTag("command-alias-status")).toContain('role="status"');
+    expect(openingTag("command-alias-list")).toContain(
+      'aria-live="polite"',
+    );
+    expect(panelMarkup).toContain(
       '<option value="normal" data-i18n="responseNormal"></option>',
     );
     expect(panelMarkup).toContain(

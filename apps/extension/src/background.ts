@@ -86,6 +86,13 @@ import {
 } from "./diagnostic-report.js";
 import { SettingsBackupStore } from "./settings-backup.js";
 import {
+  CommandAliasError,
+  CommandAliasStore,
+  MAX_COMMAND_ALIASES,
+  validateAliasPhrase,
+} from "./command-aliases.js";
+import { CommandAliasCaptureSession } from "./command-alias-capture.js";
+import {
   BlockedSitesStore,
   hostnameFromUrl,
   hostnameMatchesBlocked,
@@ -120,11 +127,20 @@ interface WorkerMessage {
   readonly backup?: unknown;
   readonly hostname?: unknown;
   readonly playbackId?: unknown;
+  readonly phrase?: unknown;
+  readonly aliasExecutionId?: unknown;
 }
 
 const actionRegistry = new ActionRegistry(actions);
 const destinationRegistry = new DestinationRegistry(destinations);
 const commandRouter = new CommandRouter(actionRegistry);
+const commandAliases = new CommandAliasStore(
+  {
+    get: async (key) => await chrome.storage.local.get(key),
+    set: async (values) => await chrome.storage.local.set(values),
+  },
+  (command) => commandRouter.parse(command),
+);
 const systemTts = new SystemTtsEngine();
 const ttsRouter = new PremiumTtsRouter({
   system: systemTts,
@@ -144,7 +160,7 @@ const settingsBackup = new SettingsBackupStore({
       keys as string | string[] | null | undefined,
     ),
   set: async (values) => await chrome.storage.local.set(values),
-});
+}, (command) => commandRouter.parse(command));
 const blockedSites = new BlockedSitesStore({
   get: async (key) => await chrome.storage.local.get(key),
   set: async (values) => await chrome.storage.local.set(values),
@@ -166,6 +182,7 @@ const sessionHistory = new SessionHistoryStore({
 });
 const tts = new SpeechSettingsTtsEngine(ttsRouter, speechSettings);
 const confirmationSession = new ConfirmationSession();
+const commandAliasCapture = new CommandAliasCaptureSession();
 const reminderSelectionSession =
   new ReminderSelectionSession<ReminderRecord>();
 const freshReminderSession = new FreshReminderSession();
@@ -178,6 +195,15 @@ let lastSpokenResponse: string | undefined;
 let pendingReminderConfirmationId: string | undefined;
 let wakePlaybackSequence = 0;
 const activeWakePlaybackIds = new Set<string>();
+const pendingAliasExecutions = new Map<
+  string,
+  {
+    readonly command: ActionCommand;
+    readonly expiresAt: number;
+  }
+>();
+const ALIAS_EXECUTION_TIMEOUT_MS = 30_000;
+const MAX_PENDING_ALIAS_EXECUTIONS = 8;
 const dictationSession = new DictationTargetSession();
 const pipelineErrors = new PipelineErrorBuffer();
 const exchangeTimings = new ExchangeTimingBuffer();
@@ -465,6 +491,129 @@ async function sendEarcon(
 ): Promise<boolean> {
   if (await quietMode.get()) return true;
   return sendPanel({ type: "earcon", kind });
+}
+
+function commandAliasErrorMessage(error: unknown): string {
+  if (error instanceof CommandAliasError) {
+    switch (error.code) {
+      case "length":
+        return "Use 2 to 50 characters.";
+      case "collision":
+        return "This phrase is reserved. Use a different phrase.";
+      case "duplicate":
+        return "This alias phrase already exists.";
+      case "limit":
+        return "You can save up to 50 aliases.";
+    }
+  }
+  return error instanceof Error
+    ? error.message.slice(0, 200)
+    : "Sotto could not change the aliases.";
+}
+
+async function commandAliasPanelState(
+  message?: string,
+): Promise<Record<string, unknown>> {
+  return {
+    aliases: await commandAliases.list(),
+    capture: commandAliasCapture.state,
+    ...(message === undefined ? {} : { message }),
+  };
+}
+
+async function publishCommandAliasState(message?: string): Promise<void> {
+  await sendPanel({
+    type: "command-alias-state",
+    state: await commandAliasPanelState(message),
+  });
+}
+
+function assertCommandAliasCaptureAvailable(): void {
+  if (dictationSession.state !== "inactive") {
+    throw new TypeError("End dictation before you add an alias.");
+  }
+  if (confirmationSession.hasPending) {
+    throw new TypeError("Answer the confirmation before you add an alias.");
+  }
+}
+
+async function prepareCommandAliasPhrase(
+  phrase: string,
+): Promise<string> {
+  assertCommandAliasCaptureAvailable();
+  const normalized = validateAliasPhrase(phrase);
+  const aliases = await commandAliases.list();
+  if (aliases.some((alias) => alias.phrase === normalized)) {
+    throw new TypeError("This alias phrase already exists.");
+  }
+  if (aliases.length >= MAX_COMMAND_ALIASES) {
+    throw new TypeError("You can save up to 50 aliases.");
+  }
+  return normalized;
+}
+
+async function captureSuccessfulCommandAliasTarget(
+  command: ActionCommand,
+): Promise<void> {
+  if (commandAliasCapture.state.stage !== "target") return;
+  try {
+    const validated = commandRouter.parse(command);
+    if (!commandAliasCapture.capture(validated)) return;
+    await publishCommandAliasState(
+      "Check the exact command. Then save the alias.",
+    );
+  } catch (error) {
+    console.warn("Sotto could not capture the alias target", error);
+  }
+}
+
+async function resolveCommandAliasTranscript(
+  transcript: string,
+): Promise<Record<string, unknown>> {
+  if (commandAliasCapture.state.stage === "phrase") {
+    try {
+      const phrase = await prepareCommandAliasPhrase(transcript);
+      commandAliasCapture.startTarget(phrase);
+      await publishCommandAliasState(
+        "Now run the command it should trigger.",
+      );
+    } catch (error) {
+      commandAliasCapture.cancel();
+      await publishCommandAliasState(commandAliasErrorMessage(error));
+    }
+    return { kind: "phrase" };
+  }
+
+  if (
+    dictationSession.state !== "inactive" ||
+    confirmationSession.hasPending
+  ) {
+    return { kind: "none" };
+  }
+
+  try {
+    const command = await commandAliases.resolve(transcript);
+    if (!command) return { kind: "none" };
+    const now = Date.now();
+    for (const [pendingId, pending] of pendingAliasExecutions) {
+      if (pending.expiresAt < now) pendingAliasExecutions.delete(pendingId);
+    }
+    if (pendingAliasExecutions.size >= MAX_PENDING_ALIAS_EXECUTIONS) {
+      const oldestId = pendingAliasExecutions.keys().next().value;
+      if (typeof oldestId === "string") {
+        pendingAliasExecutions.delete(oldestId);
+      }
+    }
+    const id = crypto.randomUUID();
+    pendingAliasExecutions.set(id, {
+      command,
+      expiresAt: now + ALIAS_EXECUTION_TIMEOUT_MS,
+    });
+    return { kind: "alias", aliasExecutionId: id };
+  } catch (error) {
+    console.warn("Sotto could not read command aliases", error);
+    return { kind: "none" };
+  }
 }
 
 async function publishQuietMode(enabled?: boolean): Promise<void> {
@@ -2457,6 +2606,7 @@ async function executeCommand(
   command: unknown,
   transcript: string,
   timings: ExchangeTimings,
+  fromAlias = false,
 ): Promise<ActionResult | undefined> {
   let completedTimings = timings;
   let generation = commandGeneration;
@@ -2494,6 +2644,7 @@ async function executeCommand(
         result = reminderId === undefined
           ? await routeAction(confirmation.command, true)
           : await cancelReminderResult(reminderId);
+        await captureSuccessfulCommandAliasTarget(confirmation.command);
       } finally {
         completedTimings = {
           ...timings,
@@ -2522,12 +2673,16 @@ async function executeCommand(
           spoken:
             "I could not match a reminder. Say the reminder text again.",
         };
+      const publishedCommand = {
+        action: "notes",
+        operation: "cancel-reminder",
+      } as ActionCommand;
+      if (reminderSelection.kind === "matched") {
+        await captureSuccessfulCommandAliasTarget(publishedCommand);
+      }
       await publishActionResult(
         transcript,
-        {
-          action: "notes",
-          operation: "cancel-reminder",
-        } as ActionCommand,
+        publishedCommand,
         result,
         generation,
         timings,
@@ -2540,7 +2695,18 @@ async function executeCommand(
       generation = beginCommandGeneration();
       generationStarted = true;
       const actionStartedAt = performance.now();
-      const delayMinutes = parseSnoozeDelayMinutes(transcript);
+      const storedDelay = (
+        validated as { readonly delayMinutes?: unknown }
+      ).delayMinutes;
+      const delayMinutes = fromAlias &&
+          (
+            storedDelay === 5 ||
+            storedDelay === 10 ||
+            storedDelay === 30 ||
+            storedDelay === 60
+          )
+        ? storedDelay
+        : parseSnoozeDelayMinutes(transcript);
       const reminderId = freshReminderSession.current();
       let publishedCommand: ActionCommand = { action: "unknown" };
       let result: ActionResult | undefined;
@@ -2552,6 +2718,7 @@ async function executeCommand(
             operation: "snooze",
             delayMinutes,
           } as ActionCommand;
+          await captureSuccessfulCommandAliasTarget(publishedCommand);
         }
       }
       result ??= await routeAction({ action: "unknown" });
@@ -2575,11 +2742,13 @@ async function executeCommand(
       if (!isPlaybackOperation(operation)) {
         throw new CommandValidationError("Invalid playback operation");
       }
-      return await executePlaybackCommand(
+      const result = await executePlaybackCommand(
         validated as PlaybackCommand,
         transcript,
         timings,
       );
+      await captureSuccessfulCommandAliasTarget(validated);
+      return result;
     }
     if (validated.action === "quiet-mode") {
       const operation = (validated as { readonly operation?: unknown })
@@ -2606,6 +2775,7 @@ async function executeCommand(
         validated.action,
         result.spoken,
       );
+      await captureSuccessfulCommandAliasTarget(validated);
       return result;
     }
     generation = beginCommandGeneration();
@@ -2623,6 +2793,7 @@ async function executeCommand(
         result = request.result;
       } else {
         result = await routeAction(validated);
+        await captureSuccessfulCommandAliasTarget(validated);
       }
     } finally {
       completedTimings = {
@@ -2740,6 +2911,59 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
       return createDiagnosticReport();
     case "get-latency-statistics":
       return exchangeTimings.statistics();
+    case "get-command-alias-state":
+      return commandAliasPanelState();
+    case "start-command-alias-phrase-capture":
+      try {
+        assertCommandAliasCaptureAvailable();
+        if ((await commandAliases.list()).length >= MAX_COMMAND_ALIASES) {
+          throw new TypeError("You can save up to 50 aliases.");
+        }
+        commandAliasCapture.startPhrase();
+        return commandAliasPanelState("Say the alias phrase.");
+      } catch (error) {
+        return commandAliasPanelState(commandAliasErrorMessage(error));
+      }
+    case "start-command-alias-target-capture":
+      try {
+        if (typeof message.phrase !== "string") {
+          throw new TypeError("Enter an alias phrase.");
+        }
+        const phrase = await prepareCommandAliasPhrase(message.phrase);
+        commandAliasCapture.startTarget(phrase);
+        return commandAliasPanelState(
+          "Now run the command it should trigger.",
+        );
+      } catch (error) {
+        return commandAliasPanelState(commandAliasErrorMessage(error));
+      }
+    case "cancel-command-alias-capture":
+      commandAliasCapture.cancel();
+      return commandAliasPanelState("Alias setup canceled.");
+    case "save-command-alias": {
+      const capture = commandAliasCapture.state;
+      if (capture.stage !== "confirm") {
+        return commandAliasPanelState("Run a command before you save.");
+      }
+      try {
+        await commandAliases.add(capture.phrase, capture.command);
+        commandAliasCapture.complete();
+        return commandAliasPanelState("Alias saved.");
+      } catch (error) {
+        return commandAliasPanelState(commandAliasErrorMessage(error));
+      }
+    }
+    case "delete-command-alias":
+      if (typeof message.phrase !== "string") {
+        return commandAliasPanelState("Select an alias to delete.");
+      }
+      await commandAliases.remove(message.phrase);
+      return commandAliasPanelState("Alias deleted.");
+    case "resolve-command-alias": {
+      const transcript = safeTranscript(message.transcript);
+      if (!transcript) return { kind: "none" };
+      return resolveCommandAliasTranscript(transcript);
+    }
     case "get-speech-settings":
       return speechSettings.get();
     case "get-blocked-sites":
@@ -2872,6 +3096,9 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
           publishNotes().catch((error: unknown) => {
             console.warn("Imported notes panel update is pending", error);
           }),
+          publishCommandAliasState().catch((error: unknown) => {
+            console.warn("Imported aliases panel update is pending", error);
+          }),
           sendOffscreen({
             type: "adopt-settings-backup",
             premiumTtsEnabled: result.settings.premiumTts.enabled,
@@ -2977,6 +3204,28 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
         message.command,
         transcript,
         timings,
+      );
+    }
+    case "execute-command-alias": {
+      const transcript = safeTranscript(message.transcript);
+      if (
+        typeof message.aliasExecutionId !== "string"
+      ) {
+        throw new TypeError("The command alias is not ready.");
+      }
+      const pending = pendingAliasExecutions.get(message.aliasExecutionId);
+      pendingAliasExecutions.delete(message.aliasExecutionId);
+      if (!pending || pending.expiresAt < Date.now()) {
+        throw new TypeError("The command alias is not ready.");
+      }
+      const timings = isExchangeTimings(message.timings)
+        ? message.timings
+        : { input: "voice" as const };
+      return executeCommand(
+        pending.command,
+        transcript,
+        timings,
+        true,
       );
     }
     case "retry-screenshot":

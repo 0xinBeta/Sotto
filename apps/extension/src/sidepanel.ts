@@ -1,4 +1,5 @@
 import type {
+  ActionCommand,
   ActionResult,
   ClipboardWorkflow,
   ScreenshotPermissionWorkflow,
@@ -141,6 +142,27 @@ interface BlockedSitesState {
   readonly currentHostname?: string;
 }
 
+interface CommandAlias {
+  readonly phrase: string;
+  readonly command: ActionCommand;
+}
+
+type CommandAliasCaptureState =
+  | { readonly stage: "idle" }
+  | { readonly stage: "phrase" }
+  | { readonly stage: "target"; readonly phrase: string }
+  | {
+      readonly stage: "confirm";
+      readonly phrase: string;
+      readonly command: ActionCommand;
+    };
+
+interface CommandAliasState {
+  readonly aliases: readonly CommandAlias[];
+  readonly capture: CommandAliasCaptureState;
+  readonly message?: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -155,6 +177,75 @@ function isBoundedString(
     value.length >= minimum &&
     value.length <= maximum
   );
+}
+
+function isAliasPhrase(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const length = [...value].length;
+  return length >= 2 && length <= 50;
+}
+
+function isActionCommandShape(value: unknown): value is ActionCommand {
+  return (
+    isRecord(value) &&
+    isBoundedString(value.action, 100, 1)
+  );
+}
+
+function isCommandAliasCaptureState(
+  value: unknown,
+): value is CommandAliasCaptureState {
+  if (!isRecord(value) || typeof value.stage !== "string") return false;
+  switch (value.stage) {
+    case "idle":
+    case "phrase":
+      return Object.keys(value).length === 1;
+    case "target":
+      return (
+        Object.keys(value).length === 2 &&
+        isAliasPhrase(value.phrase)
+      );
+    case "confirm":
+      return (
+        Object.keys(value).length === 3 &&
+        isAliasPhrase(value.phrase) &&
+        isActionCommandShape(value.command)
+      );
+    default:
+      return false;
+  }
+}
+
+function isCommandAliasState(value: unknown): value is CommandAliasState {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.aliases) ||
+    value.aliases.length > 50 ||
+    !isCommandAliasCaptureState(value.capture) ||
+    (
+      value.message !== undefined &&
+      !isBoundedString(value.message, 200)
+    ) ||
+    !Object.keys(value).every((key) =>
+      key === "aliases" || key === "capture" || key === "message"
+    )
+  ) {
+    return false;
+  }
+  const phrases = new Set<string>();
+  for (const alias of value.aliases) {
+    if (
+      !isRecord(alias) ||
+      Object.keys(alias).length !== 2 ||
+      !isAliasPhrase(alias.phrase) ||
+      !isActionCommandShape(alias.command) ||
+      phrases.has(alias.phrase)
+    ) {
+      return false;
+    }
+    phrases.add(alias.phrase);
+  }
+  return true;
 }
 
 function isSessionHistoryEntry(
@@ -352,6 +443,11 @@ type PanelMessage =
     }
   | {
       target: "sidepanel";
+      type: "command-alias-state";
+      state: CommandAliasState;
+    }
+  | {
+      target: "sidepanel";
       type: "notes-updated";
       notes: readonly PanelNote[];
     }
@@ -544,6 +640,8 @@ function validatesV02PanelPayload(message: Record<string, unknown>): boolean {
         typeof message.paused === "boolean" &&
         (!message.paused || message.active)
       );
+    case "command-alias-state":
+      return isCommandAliasState(message.state);
     case "notes-updated":
       return (
         Array.isArray(message.notes) &&
@@ -799,6 +897,42 @@ const sessionHistoryList =
   requiredElement<HTMLOListElement>("#session-history-list");
 const clearSessionHistory =
   requiredElement<HTMLButtonElement>("#clear-session-history");
+const commandAliasCount =
+  requiredElement<HTMLOutputElement>("#command-alias-count");
+const addCommandAlias =
+  requiredElement<HTMLButtonElement>("#add-command-alias");
+const commandAliasPhraseForm =
+  requiredElement<HTMLFormElement>("#command-alias-phrase-form");
+const commandAliasPhrase =
+  requiredElement<HTMLInputElement>("#command-alias-phrase");
+const commandAliasPhraseInstruction =
+  requiredElement<HTMLElement>("#command-alias-phrase-instruction");
+const useCommandAliasPhrase =
+  requiredElement<HTMLButtonElement>("#use-command-alias-phrase");
+const speakCommandAliasPhrase =
+  requiredElement<HTMLButtonElement>("#speak-command-alias-phrase");
+const cancelCommandAliasPhrase =
+  requiredElement<HTMLButtonElement>("#cancel-command-alias-phrase");
+const commandAliasTarget =
+  requiredElement<HTMLElement>("#command-alias-target");
+const commandAliasTargetPhrase =
+  requiredElement<HTMLElement>("#command-alias-target-phrase");
+const cancelCommandAliasTarget =
+  requiredElement<HTMLButtonElement>("#cancel-command-alias-target");
+const commandAliasConfirm =
+  requiredElement<HTMLElement>("#command-alias-confirm");
+const commandAliasConfirmPhrase =
+  requiredElement<HTMLElement>("#command-alias-confirm-phrase");
+const commandAliasConfirmCommand =
+  requiredElement<HTMLElement>("#command-alias-confirm-command");
+const saveCommandAlias =
+  requiredElement<HTMLButtonElement>("#save-command-alias");
+const cancelCommandAliasConfirm =
+  requiredElement<HTMLButtonElement>("#cancel-command-alias-confirm");
+const commandAliasList =
+  requiredElement<HTMLUListElement>("#command-alias-list");
+const commandAliasStatus =
+  requiredElement<HTMLElement>("#command-alias-status");
 const latencyReadout =
   requiredElement<HTMLDetailsElement>("#latency-readout");
 const latencySummary =
@@ -948,6 +1082,11 @@ let currentSessionHistory: SessionHistoryState = {
   enabled: false,
   entries: [],
 };
+let currentCommandAliasState: CommandAliasState = {
+  aliases: [],
+  capture: { stage: "idle" },
+};
+let commandAliasEditorOpen = false;
 let pointerIsDown = false;
 let earconContext: AudioContext | undefined;
 let setupDismissed = false;
@@ -1082,6 +1221,220 @@ async function loadBlockedSites(): Promise<void> {
     blockCurrentSite.disabled = true;
   }
 }
+
+function showCommandAliasStatus(message: string): void {
+  commandAliasStatus.textContent = message;
+}
+
+function renderCommandAliasList(
+  aliases: readonly CommandAlias[],
+): void {
+  commandAliasCount.value = t(
+    "aliasCount",
+    String(aliases.length),
+    "50",
+  );
+  commandAliasCount.textContent = commandAliasCount.value;
+  commandAliasList.replaceChildren();
+  if (aliases.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = t("noCommandAliases");
+    commandAliasList.append(empty);
+    return;
+  }
+
+  for (const alias of aliases) {
+    const row = document.createElement("li");
+    const phrase = document.createElement("span");
+    const remove = document.createElement("button");
+    row.className = "command-alias-row";
+    phrase.textContent = alias.phrase;
+    remove.className = "button";
+    remove.type = "button";
+    remove.textContent = t("delete");
+    remove.setAttribute("aria-label", t("deleteAlias", alias.phrase));
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      showCommandAliasStatus("");
+      try {
+        const state = await requestWorker<unknown>({
+          type: "delete-command-alias",
+          phrase: alias.phrase,
+        });
+        if (!isCommandAliasState(state)) {
+          throw new TypeError("Command aliases returned an invalid state.");
+        }
+        showCommandAliasState(state);
+      } catch {
+        showCommandAliasStatus(t("commandAliasesUnavailable"));
+        remove.disabled = false;
+      }
+    });
+    row.append(phrase, remove);
+    commandAliasList.append(row);
+  }
+}
+
+function renderCommandAliasEditor(): void {
+  const capture = currentCommandAliasState.capture;
+  const showPhrase =
+    commandAliasEditorOpen &&
+    (capture.stage === "idle" || capture.stage === "phrase");
+  commandAliasPhraseForm.hidden = !showPhrase;
+  commandAliasTarget.hidden = capture.stage !== "target";
+  commandAliasConfirm.hidden = capture.stage !== "confirm";
+  addCommandAlias.hidden =
+    commandAliasEditorOpen || capture.stage !== "idle";
+  addCommandAlias.disabled =
+    currentCommandAliasState.aliases.length >= 50;
+
+  const listeningForPhrase = capture.stage === "phrase";
+  commandAliasPhrase.disabled = listeningForPhrase;
+  useCommandAliasPhrase.disabled = listeningForPhrase;
+  speakCommandAliasPhrase.disabled = listeningForPhrase;
+  commandAliasPhraseInstruction.textContent = listeningForPhrase
+    ? t("speakAliasNow")
+    : t("enterOrSpeakAlias");
+
+  if (capture.stage === "target") {
+    commandAliasTargetPhrase.textContent = capture.phrase;
+  }
+  if (capture.stage === "confirm") {
+    saveCommandAlias.disabled = false;
+    commandAliasConfirmPhrase.textContent = capture.phrase;
+    commandAliasConfirmCommand.textContent = JSON.stringify(
+      capture.command,
+      null,
+      2,
+    );
+  } else {
+    commandAliasConfirmCommand.textContent = "";
+  }
+}
+
+function showCommandAliasState(state: CommandAliasState): void {
+  currentCommandAliasState = state;
+  commandAliasEditorOpen = state.capture.stage !== "idle";
+  renderCommandAliasList(state.aliases);
+  renderCommandAliasEditor();
+  showCommandAliasStatus(state.message ?? "");
+}
+
+async function loadCommandAliases(): Promise<void> {
+  try {
+    const state = await requestWorker<unknown>({
+      type: "get-command-alias-state",
+    });
+    if (!isCommandAliasState(state)) {
+      throw new TypeError("Command aliases returned an invalid state.");
+    }
+    showCommandAliasState(state);
+  } catch {
+    showCommandAliasStatus(t("commandAliasesUnavailable"));
+    addCommandAlias.disabled = true;
+  }
+}
+
+async function cancelCommandAliasCapture(): Promise<void> {
+  try {
+    const state = await requestWorker<unknown>({
+      type: "cancel-command-alias-capture",
+    });
+    if (!isCommandAliasState(state)) {
+      throw new TypeError("Command aliases returned an invalid state.");
+    }
+    showCommandAliasState(state);
+    addCommandAlias.focus();
+  } catch {
+    showCommandAliasStatus(t("commandAliasesUnavailable"));
+  }
+}
+
+addCommandAlias.addEventListener("click", () => {
+  commandAliasEditorOpen = true;
+  showCommandAliasStatus("");
+  renderCommandAliasEditor();
+  commandAliasPhrase.focus();
+});
+
+commandAliasPhraseForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const phrase = commandAliasPhrase.value.trim();
+  const length = [...phrase].length;
+  if (length < 2 || length > 50) {
+    showCommandAliasStatus(t("aliasPhraseLength"));
+    commandAliasPhrase.focus();
+    return;
+  }
+  useCommandAliasPhrase.disabled = true;
+  speakCommandAliasPhrase.disabled = true;
+  showCommandAliasStatus("");
+  try {
+    const state = await requestWorker<unknown>({
+      type: "start-command-alias-target-capture",
+      phrase,
+    });
+    if (!isCommandAliasState(state)) {
+      throw new TypeError("Command aliases returned an invalid state.");
+    }
+    commandAliasPhrase.value = "";
+    showCommandAliasState(state);
+  } catch {
+    showCommandAliasStatus(t("commandAliasesUnavailable"));
+    useCommandAliasPhrase.disabled = false;
+    speakCommandAliasPhrase.disabled = false;
+  }
+});
+
+speakCommandAliasPhrase.addEventListener("click", async () => {
+  speakCommandAliasPhrase.disabled = true;
+  useCommandAliasPhrase.disabled = true;
+  showCommandAliasStatus("");
+  try {
+    const state = await requestWorker<unknown>({
+      type: "start-command-alias-phrase-capture",
+    });
+    if (!isCommandAliasState(state)) {
+      throw new TypeError("Command aliases returned an invalid state.");
+    }
+    showCommandAliasState(state);
+    if (state.capture.stage !== "phrase") return;
+    if (!(await send({ type: "toggle-listening" }))) {
+      showCommandAliasStatus(t("commandAliasesUnavailable"));
+    }
+  } catch {
+    showCommandAliasStatus(t("commandAliasesUnavailable"));
+    speakCommandAliasPhrase.disabled = false;
+    useCommandAliasPhrase.disabled = false;
+  }
+});
+
+cancelCommandAliasPhrase.addEventListener("click", () => {
+  void cancelCommandAliasCapture();
+});
+cancelCommandAliasTarget.addEventListener("click", () => {
+  void cancelCommandAliasCapture();
+});
+cancelCommandAliasConfirm.addEventListener("click", () => {
+  void cancelCommandAliasCapture();
+});
+
+saveCommandAlias.addEventListener("click", async () => {
+  saveCommandAlias.disabled = true;
+  showCommandAliasStatus("");
+  try {
+    const state = await requestWorker<unknown>({
+      type: "save-command-alias",
+    });
+    if (!isCommandAliasState(state)) {
+      throw new TypeError("Command aliases returned an invalid state.");
+    }
+    showCommandAliasState(state);
+  } catch {
+    showCommandAliasStatus(t("commandAliasesUnavailable"));
+    saveCommandAlias.disabled = false;
+  }
+});
 
 function currentSpeechSettings(): SpeechSettings {
   const rate = Number(speechRate.value);
@@ -2908,7 +3261,25 @@ settingsBackupFile.addEventListener("change", async () => {
       typeof response.preview.noteCount !== "number" ||
       !Number.isSafeInteger(response.preview.noteCount) ||
       response.preview.noteCount < 0 ||
-      response.preview.noteCount > MAX_NOTES
+      response.preview.noteCount > MAX_NOTES ||
+      (
+        response.preview.aliasCount !== undefined &&
+        (
+          typeof response.preview.aliasCount !== "number" ||
+          !Number.isSafeInteger(response.preview.aliasCount) ||
+          response.preview.aliasCount < 0 ||
+          response.preview.aliasCount > 50
+        )
+      ) ||
+      (
+        response.preview.droppedAliasCount !== undefined &&
+        (
+          typeof response.preview.droppedAliasCount !== "number" ||
+          !Number.isSafeInteger(response.preview.droppedAliasCount) ||
+          response.preview.droppedAliasCount < 0 ||
+          response.preview.droppedAliasCount > 10_000
+        )
+      )
     ) {
       throw new TypeError("Backup file is invalid");
     }
@@ -2949,21 +3320,47 @@ confirmSettingsImport.addEventListener("click", async () => {
       typeof response.result.addedNoteCount !== "number" ||
       !Number.isSafeInteger(response.result.addedNoteCount) ||
       response.result.addedNoteCount < 0 ||
-      response.result.addedNoteCount > MAX_NOTES
+      response.result.addedNoteCount > MAX_NOTES ||
+      (
+        response.result.aliasCount !== undefined &&
+        (
+          typeof response.result.aliasCount !== "number" ||
+          !Number.isSafeInteger(response.result.aliasCount) ||
+          response.result.aliasCount < 0 ||
+          response.result.aliasCount > 50
+        )
+      ) ||
+      (
+        response.result.droppedAliasCount !== undefined &&
+        (
+          typeof response.result.droppedAliasCount !== "number" ||
+          !Number.isSafeInteger(response.result.droppedAliasCount) ||
+          response.result.droppedAliasCount < 0 ||
+          response.result.droppedAliasCount > 10_000
+        )
+      )
     ) {
       throw new TypeError("Backup file is invalid");
     }
     const added = response.result.addedNoteCount;
+    const aliasCount = response.result.aliasCount ?? 0;
+    const droppedAliasCount = response.result.droppedAliasCount ?? 0;
+    const notesSummary = added === 0
+      ? t("importCompleteNoNotes")
+      : t("importCompleteWithNotes", String(added));
+    const aliasSummary = t("importAliasSummary", String(aliasCount));
+    const droppedSummary = droppedAliasCount === 0
+      ? ""
+      : ` ${t("importAliasDropSummary", String(droppedAliasCount))}`;
     clearSettingsImport();
     showSettingsBackupStatus(
-      added === 0
-        ? t("importCompleteNoNotes")
-        : t("importCompleteWithNotes", String(added)),
+      `${notesSummary} ${aliasSummary}${droppedSummary}`,
     );
     await Promise.all([
       loadSpeechSettings(),
       loadQuietMode(),
       loadBlockedSites(),
+      loadCommandAliases(),
     ]);
   } catch (error) {
     clearSettingsImport();
@@ -3487,6 +3884,9 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
     case "dictation-state":
       showDictationState(message.active, message.paused);
       break;
+    case "command-alias-state":
+      showCommandAliasState(message.state);
+      break;
     case "notes-updated":
       renderNotes(message.notes);
       break;
@@ -3630,6 +4030,8 @@ async function loadLatencyStatistics(): Promise<void> {
 
 showTranscript("");
 showWakeWordState(false, "disarmed");
+renderCommandAliasList([]);
+renderCommandAliasEditor();
 modelsTotal.value = t("modelsTotal", "0 B");
 modelsTotal.textContent = modelsTotal.value;
 micMeter.dataset.state = "idle";
@@ -3667,4 +4069,5 @@ void loadLatencyStatistics().catch(() => undefined);
 void loadSpeechSettings();
 void loadQuietMode();
 void loadBlockedSites();
+void loadCommandAliases();
 void loadSessionHistory();

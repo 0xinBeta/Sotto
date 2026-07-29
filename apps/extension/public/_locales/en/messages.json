@@ -194,6 +194,57 @@
   "sessionHistoryPrivacy": {
     "message": "History stays on this device and clears when Chrome closes."
   },
+  "commandAliases": {
+    "message": "Command aliases"
+  },
+  "commandAliasesExactCopy": {
+    "message": "Sotto ignores letter case, extra spaces, and final punctuation. It does not use similar phrases."
+  },
+  "commandAliasesReplayCopy": {
+    "message": "An alias runs the saved command with the same parameters."
+  },
+  "addAlias": {
+    "message": "Add alias"
+  },
+  "aliasPhrase": {
+    "message": "Alias phrase"
+  },
+  "enterOrSpeakAlias": {
+    "message": "Enter the alias phrase or speak it."
+  },
+  "speakAliasNow": {
+    "message": "Speak the alias phrase now."
+  },
+  "continue": {
+    "message": "Continue"
+  },
+  "speakPhrase": {
+    "message": "Speak phrase"
+  },
+  "runAliasTarget": {
+    "message": "Now run the command it should trigger."
+  },
+  "savedCommand": {
+    "message": "Saved command"
+  },
+  "saveAlias": {
+    "message": "Save alias"
+  },
+  "noCommandAliases": {
+    "message": "No aliases saved."
+  },
+  "deleteAlias": {
+    "message": "Delete alias $1"
+  },
+  "aliasCount": {
+    "message": "$1 of $2"
+  },
+  "aliasPhraseLength": {
+    "message": "Use 2 to 50 characters."
+  },
+  "commandAliasesUnavailable": {
+    "message": "Command aliases are unavailable."
+  },
   "blockedSitesHeading": {
     "message": "Sites where Sotto is off"
   },
@@ -237,7 +288,7 @@
     "message": "Settings and notes backup"
   },
   "settingsBackupCopy": {
-    "message": "The file includes your settings, blocked site names, and notes."
+    "message": "The file includes settings, blocked site names, aliases, and notes."
   },
   "exportBackup": {
     "message": "Export backup"
@@ -805,6 +856,12 @@
   },
   "importCompleteWithNotes": {
     "message": "Import complete. Settings replaced. Added $1 notes."
+  },
+  "importAliasSummary": {
+    "message": "Imported $1 aliases."
+  },
+  "importAliasDropSummary": {
+    "message": "Dropped $1 invalid aliases."
   },
   "importFailed": {
     "message": "Import failed. Nothing changed."

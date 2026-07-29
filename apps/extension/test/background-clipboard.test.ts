@@ -1016,6 +1016,164 @@ describe("background screenshot clipboard injection", () => {
     );
   });
 
+  it("captures, saves, resolves, and deletes an exact command alias", async () => {
+    const target = {
+      action: "navigate",
+      destination: "https://example.com/saved",
+    };
+    worker.route.mockResolvedValue({ spoken: "Opened the saved page." });
+    const harness = await installBackground({
+      id: 4,
+      url: "https://example.com/current",
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "start-command-alias-target-capture",
+        phrase: "  My   shortcut... ",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        aliases: [],
+        capture: { stage: "target", phrase: "my shortcut" },
+        message: "Now run the command it should trigger.",
+      },
+    });
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "open my saved page",
+      command: target,
+    });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "sidepanel",
+      type: "command-alias-state",
+      state: {
+        aliases: [],
+        capture: {
+          stage: "confirm",
+          phrase: "my shortcut",
+          command: target,
+        },
+        message: "Check the exact command. Then save the alias.",
+      },
+    });
+
+    await expect(
+      harness.workerMessage({ type: "save-command-alias" }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        aliases: [{ phrase: "my shortcut", command: target }],
+        capture: { stage: "idle" },
+        message: "Alias saved.",
+      },
+    });
+    expect(harness.storageValues.commandAliases).toEqual([
+      { phrase: "my shortcut", command: target },
+    ]);
+
+    const resolved = await harness.workerMessage({
+      type: "resolve-command-alias",
+      transcript: "MY SHORTCUT!!!",
+    }) as {
+      readonly ok: boolean;
+      readonly value: {
+        readonly kind: string;
+        readonly aliasExecutionId: string;
+      };
+    };
+    expect(resolved).toMatchObject({
+      ok: true,
+      value: {
+        kind: "alias",
+        aliasExecutionId: expect.any(String),
+      },
+    });
+    await expect(
+      harness.workerMessage({
+        type: "execute-command-alias",
+        transcript: "MY SHORTCUT!!!",
+        aliasExecutionId: resolved.value.aliasExecutionId,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { spoken: "Opened the saved page." },
+    });
+    await expect(
+      harness.workerMessage({
+        type: "execute-command-alias",
+        transcript: "MY SHORTCUT!!!",
+        aliasExecutionId: resolved.value.aliasExecutionId,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { message: "The command alias is not ready." },
+    });
+    await expect(
+      harness.workerMessage({
+        type: "resolve-command-alias",
+        transcript: "my shortcut please",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { kind: "none" },
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "delete-command-alias",
+        phrase: "my shortcut",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        aliases: [],
+        capture: { stage: "idle" },
+      },
+    });
+  });
+
+  it("does not resolve an alias during a pending confirmation", async () => {
+    worker.requiresConfirmation.mockImplementation(
+      (command) =>
+        (command as { readonly action?: unknown }).action === "bookmarks",
+    );
+    worker.findActiveTabBookmark.mockResolvedValue({
+      id: "bookmark-4",
+      title: "Local article",
+    });
+    const harness = await installBackground(
+      { id: 4, url: "https://example.com/current" },
+      {
+        commandAliases: [
+          {
+            phrase: "daily page",
+            command: { action: "tabs", operation: "new" },
+          },
+        ],
+      },
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "remove this bookmark",
+      command: { action: "bookmarks", operation: "remove" },
+    });
+
+    await expect(
+      harness.workerMessage({
+        type: "resolve-command-alias",
+        transcript: "daily page",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { kind: "none" },
+    });
+  });
+
   it("does not request confirmation when the page has no bookmark", async () => {
     worker.requiresConfirmation.mockImplementation(
       (command) =>

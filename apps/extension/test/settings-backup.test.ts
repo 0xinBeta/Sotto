@@ -6,6 +6,7 @@ import {
   NOTES_SCHEMA_VERSION,
   type NoteRecord,
 } from "@sotto/actions/notes/storage";
+import type { ActionCommand } from "@sotto/core";
 
 import {
   createSettingsBackup,
@@ -15,6 +16,12 @@ import {
   SettingsBackupStore,
   type SettingsBackupStorage,
 } from "../src/settings-backup.js";
+import {
+  COMMAND_ALIASES_KEY,
+  MAX_COMMAND_ALIASES,
+  type CommandAlias,
+  type CommandAliasValidator,
+} from "../src/command-aliases.js";
 
 const CREATED_AT = "2026-07-29T10:00:00.000Z";
 
@@ -31,7 +38,24 @@ function note(
   };
 }
 
-function validBackup(notes: readonly NoteRecord[] = [note("one")]) {
+const validateAliasCommand: CommandAliasValidator = (
+  value: unknown,
+): ActionCommand => {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    (value as { action?: unknown }).action !== "test"
+  ) {
+    throw new TypeError("The command is invalid");
+  }
+  return value as ActionCommand;
+};
+
+function validBackup(
+  notes: readonly NoteRecord[] = [note("one")],
+  aliases: readonly CommandAlias[] = [],
+) {
   return {
     schemaVersion: 1,
     settings: {
@@ -52,6 +76,7 @@ function validBackup(notes: readonly NoteRecord[] = [note("one")]) {
       },
     },
     notes,
+    aliases,
   };
 }
 
@@ -103,26 +128,42 @@ describe("settings and notes backup", () => {
       wakeWordEnabled: true,
       liveTranscriptPreview: false,
       blockedHostnames: ["example.com", "private.example"],
+      [COMMAND_ALIASES_KEY]: [
+        {
+          phrase: "Open docs.",
+          command: { action: "test", target: "docs" },
+        },
+      ],
       "note:first": firstNote,
       "note:second": note("second", "Second note"),
     });
     const exported = await new SettingsBackupStore(
       source,
+      validateAliasCommand,
       () => new Date("2026-07-29T12:00:00.000Z"),
     ).export();
     const target = new MemoryStorage();
-    const result = await new SettingsBackupStore(target).import(
-      decodeBackupDataUrl(exported.dataUrl),
-    );
+    const result = await new SettingsBackupStore(
+      target,
+      validateAliasCommand,
+    ).import(decodeBackupDataUrl(exported.dataUrl));
 
     expect(exported.filename).toBe("sotto-backup-2026-07-29.json");
     expect(result).toMatchObject({
       noteCount: 2,
       addedNoteCount: 2,
+      aliasCount: 1,
+      droppedAliasCount: 0,
     });
-    expect(createSettingsBackup(target.values)).toEqual(
-      createSettingsBackup(source.values),
+    expect(createSettingsBackup(target.values, validateAliasCommand)).toEqual(
+      createSettingsBackup(source.values, validateAliasCommand),
     );
+    expect(target.values[COMMAND_ALIASES_KEY]).toEqual([
+      {
+        phrase: "open docs",
+        command: { action: "test", target: "docs" },
+      },
+    ]);
     expect(target.set).toHaveBeenCalledOnce();
   });
 
@@ -155,6 +196,7 @@ describe("settings and notes backup", () => {
     };
     const result = createSettingsBackupExport(
       values,
+      validateAliasCommand,
       new Date("2026-07-29T12:00:00.000Z"),
     );
     const json = decodeBackupDataUrl(result.dataUrl);
@@ -191,6 +233,25 @@ describe("settings and notes backup", () => {
       });
   });
 
+  it("imports an old backup without aliases", async () => {
+    const backup = validBackup();
+    delete (backup as { aliases?: readonly CommandAlias[] }).aliases;
+    const storage = new MemoryStorage({
+      [COMMAND_ALIASES_KEY]: [
+        { phrase: "old alias", command: { action: "test" } },
+      ],
+    });
+
+    const result = await new SettingsBackupStore(
+      storage,
+      validateAliasCommand,
+    ).import(JSON.stringify(backup));
+
+    expect(result.aliasCount).toBe(0);
+    expect(result.droppedAliasCount).toBe(0);
+    expect(storage.values[COMMAND_ALIASES_KEY]).toEqual([]);
+  });
+
   it.each([
     ["root field", (backup: any) => {
       backup.unknown = true;
@@ -210,6 +271,15 @@ describe("settings and notes backup", () => {
         url: "https://example.test",
         unknown: true,
       };
+    }],
+    ["alias field", (backup: any) => {
+      backup.aliases = [
+        {
+          phrase: "open docs",
+          command: { action: "test" },
+          unknown: true,
+        },
+      ];
     }],
   ])("rejects an unknown %s", (_label, change) => {
     expect(() => parseSettingsBackup(changedBackup(change))).toThrow(
@@ -281,6 +351,16 @@ describe("settings and notes backup", () => {
         url: false,
       };
     }],
+    ["alias phrase", (backup: any) => {
+      backup.aliases = [
+        { phrase: 1, command: { action: "test" } },
+      ];
+    }],
+    ["alias command", (backup: any) => {
+      backup.aliases = [
+        { phrase: "open docs", command: { value: "docs" } },
+      ];
+    }],
   ])("rejects a bad %s type or value", (_label, change) => {
     expect(() => parseSettingsBackup(changedBackup(change))).toThrow(
       "Backup data is invalid",
@@ -318,9 +398,10 @@ describe("settings and notes backup", () => {
     backup.settings.rate = -100;
     backup.settings.volume = 100;
     const storage = new MemoryStorage();
-    const result = await new SettingsBackupStore(storage).import(
-      JSON.stringify(backup),
-    );
+    const result = await new SettingsBackupStore(
+      storage,
+      validateAliasCommand,
+    ).import(JSON.stringify(backup));
 
     expect(result.settings.rate).toBe(0.5);
     expect(result.settings.volume).toBe(1);
@@ -347,9 +428,10 @@ describe("settings and notes backup", () => {
       note("new-one", "New one"),
       note("new-two", "New two"),
     ];
-    const result = await new SettingsBackupStore(storage).import(
-      JSON.stringify(validBackup(imported)),
-    );
+    const result = await new SettingsBackupStore(
+      storage,
+      validateAliasCommand,
+    ).import(JSON.stringify(validBackup(imported)));
 
     expect(result.addedNoteCount).toBe(1);
     expect(storage.values["note:new-one"]).toEqual(imported[2]);
@@ -363,7 +445,7 @@ describe("settings and notes backup", () => {
       "note:safe": note("safe", "Safe note"),
     });
     const before = structuredClone(storage.values);
-    const store = new SettingsBackupStore(storage);
+    const store = new SettingsBackupStore(storage, validateAliasCommand);
     const invalid = changedBackup((backup) => {
       backup.notes[0].body = "x".repeat(MAX_NOTE_BODY_LENGTH + 1);
     });
@@ -377,7 +459,7 @@ describe("settings and notes backup", () => {
 
   it("previews without a write and applies in one storage call", async () => {
     const storage = new MemoryStorage();
-    const store = new SettingsBackupStore(storage);
+    const store = new SettingsBackupStore(storage, validateAliasCommand);
     const text = JSON.stringify(validBackup([
       note("one"),
       note("two"),
@@ -385,6 +467,8 @@ describe("settings and notes backup", () => {
 
     await expect(store.previewImport(text)).resolves.toEqual({
       noteCount: 2,
+      aliasCount: 0,
+      droppedAliasCount: 0,
     });
     expect(storage.set).not.toHaveBeenCalled();
 
@@ -406,6 +490,83 @@ describe("settings and notes backup", () => {
       schemaVersion: NOTES_SCHEMA_VERSION,
       "note:one": note("one"),
       "note:two": note("two"),
+      [COMMAND_ALIASES_KEY]: [],
     });
+  });
+
+  it("drops commands that fail the current registry validation", async () => {
+    const aliases = [
+      {
+        phrase: "valid alias",
+        command: { action: "test", target: "saved" },
+      },
+      {
+        phrase: "removed command",
+        command: { action: "removed" },
+      },
+    ];
+    const storage = new MemoryStorage();
+    const store = new SettingsBackupStore(storage, validateAliasCommand);
+    const text = JSON.stringify(validBackup([], aliases));
+
+    await expect(store.previewImport(text)).resolves.toMatchObject({
+      aliasCount: 1,
+      droppedAliasCount: 1,
+    });
+    const result = await store.import(text);
+
+    expect(result.aliasCount).toBe(1);
+    expect(result.droppedAliasCount).toBe(1);
+    expect(storage.values[COMMAND_ALIASES_KEY]).toEqual([aliases[0]]);
+  });
+
+  it("drops reserved and duplicate normalized alias phrases", async () => {
+    const aliases = [
+      { phrase: "YES", command: { action: "test" } },
+      {
+        phrase: "  Open   docs. ",
+        command: { action: "test", target: "first" },
+      },
+      {
+        phrase: "open docs",
+        command: { action: "test", target: "second" },
+      },
+    ];
+    const storage = new MemoryStorage();
+    const result = await new SettingsBackupStore(
+      storage,
+      validateAliasCommand,
+    ).import(JSON.stringify(validBackup([], aliases)));
+
+    expect(result.aliasCount).toBe(1);
+    expect(result.droppedAliasCount).toBe(2);
+    expect(storage.values[COMMAND_ALIASES_KEY]).toEqual([
+      {
+        phrase: "open docs",
+        command: { action: "test", target: "first" },
+      },
+    ]);
+  });
+
+  it("caps imported aliases at the storage limit", async () => {
+    const aliases = Array.from(
+      { length: MAX_COMMAND_ALIASES + 2 },
+      (_, index) => ({
+        phrase: `alias ${index}`,
+        command: { action: "test", index },
+      }),
+    );
+    const storage = new MemoryStorage();
+    const result = await new SettingsBackupStore(
+      storage,
+      validateAliasCommand,
+    ).import(JSON.stringify(validBackup([], aliases)));
+
+    expect(result.aliasCount).toBe(MAX_COMMAND_ALIASES);
+    expect(result.droppedAliasCount).toBe(2);
+    expect(storage.values[COMMAND_ALIASES_KEY]).toHaveLength(
+      MAX_COMMAND_ALIASES,
+    );
+    expect(storage.set).toHaveBeenCalledOnce();
   });
 });
