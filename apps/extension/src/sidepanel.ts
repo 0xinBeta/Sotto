@@ -57,6 +57,12 @@ import {
   type SetupRowState,
 } from "./setup-view.js";
 import {
+  GUIDED_DEMO_RETIRED_KEY,
+  GuidedDemoStore,
+  type GuidedDemoStarter,
+  shouldShowGuidedDemo,
+} from "./guided-demo.js";
+import {
   RECOVERY_ERROR_CLASSES,
   recoveryHint,
   type RecoveryErrorClass,
@@ -746,6 +752,12 @@ const transcript = requiredElement<HTMLElement>("#transcript");
 const listeningMark = requiredElement<HTMLElement>("#listening-mark");
 const listenButton = requiredElement<HTMLButtonElement>("#listen-button");
 const listenLabel = requiredElement<HTMLElement>("#listen-label");
+const guidedDemoChip = requiredElement<HTMLElement>("#guided-demo-chip");
+const guidedDemoText = requiredElement<HTMLElement>("#guided-demo-text");
+const dismissGuidedDemo =
+  requiredElement<HTMLButtonElement>("#dismiss-guided-demo");
+const guidedDemoAnnouncer =
+  requiredElement<HTMLElement>("#guided-demo-announcer");
 const micMeter = requiredElement<HTMLElement>("#mic-meter");
 const micMeterFill = requiredElement<HTMLElement>("#mic-meter-fill");
 const shortcutLabel = requiredElement<HTMLElement>("#shortcut-label");
@@ -905,6 +917,11 @@ const commandReference =
 const commandReferenceList =
   requiredElement<HTMLElement>("#command-reference-list");
 
+const guidedDemoStore = new GuidedDemoStore({
+  get: async (keys) => await chrome.storage.local.get([...keys]),
+  set: async (values) => await chrome.storage.local.set(values),
+});
+
 let isListening = false;
 let isQuietMode = false;
 let currentWakeWordState: WakeWordPanelState = {
@@ -934,6 +951,11 @@ let currentSessionHistory: SessionHistoryState = {
 let pointerIsDown = false;
 let earconContext: AudioContext | undefined;
 let setupDismissed = false;
+let guidedDemoLoaded = false;
+let guidedDemoSetupComplete = false;
+let guidedDemoRetired = false;
+let guidedDemoAnnounced = false;
+let guidedDemoStarter: GuidedDemoStarter = "guidedDemoScreenshot";
 let microphonePermission: PermissionState | "unknown" = "unknown";
 let capturePermissionGranted: boolean | undefined;
 let nanoAvailability: NanoAvailability | undefined;
@@ -1165,6 +1187,10 @@ async function loadSpeechSettings(): Promise<void> {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
+  if (changes[GUIDED_DEMO_RETIRED_KEY]?.newValue === true) {
+    guidedDemoRetired = true;
+    renderGuidedDemo();
+  }
   if (
     changes[SPEECH_RATE_KEY] === undefined &&
     changes[SPEECH_VOLUME_KEY] === undefined &&
@@ -1521,6 +1547,43 @@ const SETUP_STATE_LABELS: Record<SetupRowState, string> = {
   "needs-action": t("setupStateNeedsAction"),
 };
 
+function renderGuidedDemo(): void {
+  const visible = guidedDemoLoaded &&
+    shouldShowGuidedDemo(guidedDemoSetupComplete, guidedDemoRetired);
+  guidedDemoChip.hidden = !visible;
+  if (!visible) return;
+
+  const suggestion = t(guidedDemoStarter);
+  guidedDemoText.textContent = suggestion;
+  if (!guidedDemoAnnounced) {
+    guidedDemoAnnouncer.textContent = suggestion;
+    guidedDemoAnnounced = true;
+  }
+}
+
+async function loadGuidedDemo(): Promise<void> {
+  try {
+    const state = await guidedDemoStore.open();
+    guidedDemoLoaded = true;
+    guidedDemoRetired = guidedDemoRetired || state.retired;
+    guidedDemoStarter = state.starter;
+    renderGuidedDemo();
+  } catch (error) {
+    console.warn("Sotto could not load the guided suggestion", error);
+  }
+}
+
+async function retireGuidedDemo(): Promise<void> {
+  if (guidedDemoRetired) return;
+  guidedDemoRetired = true;
+  renderGuidedDemo();
+  try {
+    await guidedDemoStore.retire();
+  } catch (error) {
+    console.warn("Sotto could not retire the guided suggestion", error);
+  }
+}
+
 function renderSetupView(): void {
   const state = deriveSetupViewState({
     microphone: microphonePermission,
@@ -1602,6 +1665,8 @@ function renderSetupView(): void {
   setupView.dataset.state = state.complete ? "complete" : "expanded";
   setupList.hidden = state.complete;
   setupComplete.hidden = !state.complete;
+  guidedDemoSetupComplete = state.complete;
+  renderGuidedDemo();
 }
 
 function showNanoState(availability: NanoAvailability): void {
@@ -2655,6 +2720,17 @@ dismissSetup.addEventListener("click", () => {
   renderSetupView();
 });
 
+dismissGuidedDemo.addEventListener("click", () => {
+  void retireGuidedDemo();
+});
+
+guidedDemoChip.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  void retireGuidedDemo();
+  listenButton.focus();
+});
+
 commandForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const text = commandInput.value.trim();
@@ -3431,6 +3507,7 @@ chrome.runtime.onMessage.addListener((raw: unknown) => {
       void playEarcon(message.kind);
       break;
     case "action-log":
+      void retireGuidedDemo();
       appendLog(message.heard, message.did, message.timings);
       break;
     case "session-history-entry":
@@ -3558,6 +3635,7 @@ modelsTotal.textContent = modelsTotal.value;
 micMeter.dataset.state = "idle";
 micMeterFill.style.transform = "scaleX(0)";
 renderSetupView();
+void loadGuidedDemo();
 void send({ type: "get-status" });
 void requestWorker<readonly PanelNote[]>({ type: "get-notes" })
   .then((notes) => {

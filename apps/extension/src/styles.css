@@ -1268,6 +1268,44 @@ progress::-webkit-progress-value {
   animation: ring 1.5s 0.45s ease-out infinite;
 }
 
+.guided-demo-chip {
+  display: flex;
+  align-items: center;
+  width: min(100%, 280px);
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border-soft);
+  border-radius: 8px;
+  background: var(--accent-card-fill);
+}
+
+.guided-demo-chip p {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.guided-demo-dismiss {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px -4px 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--paper-dim);
+  cursor: pointer;
+}
+
+.guided-demo-dismiss:hover {
+  background: var(--accent-wash);
+  color: var(--paper);
+}
+
 .shortcut-help {
   margin: 14px 0 0;
   color: var(--paper-dim);

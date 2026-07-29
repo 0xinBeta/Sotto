@@ -186,6 +186,10 @@ const elementIds = [
   "listening-mark",
   "listen-button",
   "listen-label",
+  "guided-demo-chip",
+  "guided-demo-text",
+  "dismiss-guided-demo",
+  "guided-demo-announcer",
   "mic-meter",
   "mic-meter-fill",
   "shortcut-label",
@@ -347,11 +351,13 @@ async function installSidepanel(options: {
     readonly name: string;
     readonly shortcut: string;
   }[];
+  readonly storageValues?: Record<string, unknown>;
 } = {}) {
   const elements = Object.fromEntries(
     elementIds.map((id) => [id, new FakeElement()]),
   ) as Record<(typeof elementIds)[number], FakeElement>;
   elements["setup-complete"].hidden = true;
+  elements["guided-demo-chip"].hidden = true;
   elements["clipboard-card"].hidden = true;
   elements["reading-text-output"].hidden = true;
   elements["reading-controls"].hidden = true;
@@ -377,6 +383,10 @@ async function installSidepanel(options: {
   const documentListeners = new Map<string, Listener[]>();
   const requestPermission = vi.fn().mockResolvedValue(true);
   const clipboardWriteText = vi.fn().mockResolvedValue(undefined);
+  const storageValues = options.storageValues ?? {};
+  const storageSet = vi.fn(async (updates: Record<string, unknown>) => {
+    Object.assign(storageValues, updates);
+  });
   let blockedSites = options.blockedSites ?? {
     hostnames: [] as readonly string[],
     currentHostname: "example.com",
@@ -566,6 +576,17 @@ async function installSidepanel(options: {
       ),
     },
     storage: {
+      local: {
+        get: vi.fn(async (keys: string | readonly string[]) => {
+          const selected = Array.isArray(keys) ? keys : [keys];
+          return Object.fromEntries(
+            selected
+              .filter((key) => key in storageValues)
+              .map((key) => [key, storageValues[key]]),
+          );
+        }),
+        set: storageSet,
+      },
       onChanged: {
         addListener: vi.fn((listener) => {
           onStorageChanged = listener;
@@ -603,6 +624,8 @@ async function installSidepanel(options: {
     onMessage,
     requestPermission,
     sendMessage,
+    storageSet,
+    storageValues,
     storageChanged: (
       changes: Record<
         string,
@@ -1632,6 +1655,109 @@ describe("side-panel screenshot clipboard fallback", () => {
 
     await elements["dismiss-setup"].emit("click");
     expect(elements["setup-view"].hidden).toBe(true);
+  });
+
+  it("shows one guided suggestion only after required setup passes", async () => {
+    const { elements, onMessage } = await installSidepanel({
+      capturePermissionGranted: true,
+    });
+
+    expect(elements["guided-demo-chip"].hidden).toBe(true);
+    onMessage({
+      target: "sidepanel",
+      type: "engine-status",
+      nano: "available",
+      listening: false,
+      mic: "granted",
+    });
+
+    await vi.waitFor(() =>
+      expect(elements["guided-demo-chip"].hidden).toBe(false)
+    );
+    expect(elements["guided-demo-text"].textContent).toBe(
+      'Try saying: "take a screenshot."',
+    );
+    expect(elements["guided-demo-announcer"].textContent).toBe(
+      'Try saying: "take a screenshot."',
+    );
+
+    onMessage({
+      target: "sidepanel",
+      type: "engine-status",
+      nano: "available",
+      listening: false,
+      mic: "granted",
+    });
+    expect(elements["guided-demo-announcer"].textUpdateCount).toBe(1);
+  });
+
+  it("retires the guided suggestion after a successful command", async () => {
+    const { elements, onMessage, storageValues } = await installSidepanel({
+      capturePermissionGranted: true,
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "engine-status",
+      nano: "available",
+      listening: false,
+      mic: "granted",
+    });
+    await vi.waitFor(() =>
+      expect(elements["guided-demo-chip"].hidden).toBe(false)
+    );
+
+    onMessage({
+      target: "sidepanel",
+      type: "action-log",
+      heard: "list tabs",
+      did: "2 tabs are open.",
+    });
+
+    expect(elements["guided-demo-chip"].hidden).toBe(true);
+    await vi.waitFor(() =>
+      expect(storageValues.guidedDemoRetired).toBe(true)
+    );
+  });
+
+  it("retires the guided suggestion after explicit dismissal", async () => {
+    const { elements, onMessage, storageValues } = await installSidepanel({
+      capturePermissionGranted: true,
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "engine-status",
+      nano: "available",
+      listening: false,
+      mic: "granted",
+    });
+    await vi.waitFor(() =>
+      expect(elements["guided-demo-chip"].hidden).toBe(false)
+    );
+
+    await elements["dismiss-guided-demo"].emit("click");
+
+    expect(elements["guided-demo-chip"].hidden).toBe(true);
+    await vi.waitFor(() =>
+      expect(storageValues.guidedDemoRetired).toBe(true)
+    );
+  });
+
+  it("keeps a retired guided suggestion hidden", async () => {
+    const { elements, onMessage, storageSet } = await installSidepanel({
+      capturePermissionGranted: true,
+      storageValues: { guidedDemoRetired: true },
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "engine-status",
+      nano: "available",
+      listening: false,
+      mic: "granted",
+    });
+
+    await Promise.resolve();
+    expect(elements["guided-demo-chip"].hidden).toBe(true);
+    expect(storageSet).not.toHaveBeenCalled();
   });
 
   it("renders page-model and note text as inert textContent", async () => {

@@ -40,11 +40,18 @@ describe("side-panel accessibility structure", () => {
     expect(openingTag("action-log-announcer")).toContain(
       'aria-live="polite"',
     );
+    expect(openingTag("guided-demo-announcer")).toContain(
+      'aria-live="polite"',
+    );
     expect(openingTag("latency-summary")).toContain('aria-live="polite"');
 
     expect(openingTag("listen-button")).toContain('aria-pressed="false"');
     expect(openingTag("listen-button")).toContain(
       'aria-labelledby="listen-label"',
+    );
+    expect(openingTag("dismiss-guided-demo")).toContain('type="button"');
+    expect(openingTag("dismiss-guided-demo")).toContain(
+      'data-i18n-aria-label="dismissGuidedDemo"',
     );
     expect(openingTag("quiet-mode")).toContain('role="switch"');
     expect(openingTag("quiet-mode")).toContain(

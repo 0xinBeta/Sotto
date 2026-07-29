@@ -536,6 +536,29 @@
           <span id="listen-label" data-i18n="holdToTalk"></span>
           <kbd id="shortcut-label">⌥ S</kbd>
         </button>
+        <div
+          class="guided-demo-chip"
+          id="guided-demo-chip"
+          aria-describedby="guided-demo-text"
+          hidden
+        >
+          <p id="guided-demo-text"></p>
+          <button
+            class="guided-demo-dismiss"
+            id="dismiss-guided-demo"
+            type="button"
+            data-i18n-aria-label="dismissGuidedDemo"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <p
+          class="sr-only"
+          id="guided-demo-announcer"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        ></p>
         <p class="shortcut-help">
           <span data-i18n="readThisPage"></span>
           <kbd id="read-page-shortcut-label">⌥ R</kbd>

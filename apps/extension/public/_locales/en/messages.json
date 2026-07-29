@@ -266,6 +266,18 @@
   "holdToTalk": {
     "message": "Hold to talk"
   },
+  "guidedDemoScreenshot": {
+    "message": "Try saying: \"take a screenshot.\""
+  },
+  "guidedDemoTabCount": {
+    "message": "Try saying: \"how many tabs are open?\""
+  },
+  "guidedDemoSummary": {
+    "message": "Try saying: \"summarize this page.\""
+  },
+  "dismissGuidedDemo": {
+    "message": "Do not show this suggestion again"
+  },
   "readThisPage": {
     "message": "Read this page"
   },
