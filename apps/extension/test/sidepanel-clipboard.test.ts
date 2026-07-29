@@ -137,14 +137,26 @@ const elementIds = [
   "quiet-mode",
   "quiet-mode-label",
   "pipeline-error",
-  "capture-setup",
+  "setup-view",
+  "setup-list",
+  "setup-complete",
+  "dismiss-setup",
+  "setup-microphone",
+  "setup-microphone-icon",
+  "setup-microphone-state",
+  "setup-capture",
+  "setup-capture-icon",
+  "setup-capture-state",
+  "setup-nano",
+  "setup-nano-icon",
+  "setup-nano-state",
+  "setup-premium",
+  "setup-premium-icon",
+  "setup-premium-state",
   "enable-capture",
   "setup-grant-mic",
   "setup-prepare-nano",
-  "onboarding",
-  "onboarding-title",
-  "onboarding-copy",
-  "prepare-nano",
+  "setup-download-premium",
   "transcript",
   "listening-mark",
   "listen-button",
@@ -254,7 +266,7 @@ async function installSidepanel(options: {
   const elements = Object.fromEntries(
     elementIds.map((id) => [id, new FakeElement()]),
   ) as Record<(typeof elementIds)[number], FakeElement>;
-  elements["capture-setup"].hidden = true;
+  elements["setup-complete"].hidden = true;
   elements["clipboard-card"].hidden = true;
   elements["reading-controls"].hidden = true;
   const emptyLog = new FakeElement("li");
@@ -934,20 +946,115 @@ describe("side-panel screenshot clipboard fallback", () => {
     expect(elements["reading-progress"].hidden).toBe(true);
   });
 
-  it("shows first-run capture setup and hides it live after the one-time grant", async () => {
-    const { elements, requestPermission } = await installSidepanel({
+  it("keeps the guided setup expanded on a fresh install", async () => {
+    const { elements } = await installSidepanel({
       capturePermissionGranted: false,
     });
 
     await vi.waitFor(() => {
-      expect(elements["capture-setup"].hidden).toBe(false);
+      expect(elements["setup-capture"].dataset.state).toBe("needs-action");
     });
+    expect(elements["setup-view"].hidden).toBe(false);
+    expect(elements["setup-view"].dataset.state).toBe("expanded");
+    expect(elements["setup-list"].hidden).toBe(false);
+    expect(elements["setup-microphone"].dataset.state).toBe("pending");
+    expect(elements["setup-nano"].dataset.state).toBe("pending");
+  });
+
+  it("reuses the existing setup actions without new grant logic", async () => {
+    const { elements, onMessage, requestPermission, sendMessage } =
+      await installSidepanel({
+        capturePermissionGranted: false,
+      });
+    const create = vi.fn().mockResolvedValue({
+      destroy: vi.fn(),
+    });
+    vi.stubGlobal("LanguageModel", { create });
+
+    onMessage({
+      target: "sidepanel",
+      type: "engine-status",
+      nano: "downloadable",
+      listening: false,
+      mic: "prompt",
+    });
+
+    await elements["setup-grant-mic"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "open-microphone-page",
+    });
+
     await elements["enable-capture"].emit("click");
 
     expect(requestPermission).toHaveBeenCalledWith({
       origins: ["<all_urls>"],
     });
-    expect(elements["capture-setup"].hidden).toBe(true);
+
+    await elements["setup-prepare-nano"].emit("click");
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "nano-ready",
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "premium-tts-state",
+      state: "absent",
+      enabled: false,
+      voice: "af_heart",
+    });
+    onMessage({
+      target: "sidepanel",
+      type: "premium-stt-state",
+      state: "not-downloaded",
+      enabled: false,
+      downloaded: false,
+      resident: false,
+      tier: "moonshine-base",
+      backend: "wasm",
+    });
+    await elements["setup-download-premium"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "prepare-premium-tts",
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "premium-tts-state",
+      state: "ready",
+      enabled: true,
+      voice: "af_heart",
+      backend: "webgpu",
+    });
+    await elements["setup-download-premium"].emit("click");
+    expect(sendMessage).toHaveBeenCalledWith({
+      target: "worker",
+      type: "prepare-premium-stt",
+    });
+  });
+
+  it("collapses and dismisses setup when required steps pass", async () => {
+    const { elements, onMessage } = await installSidepanel({
+      capturePermissionGranted: true,
+    });
+
+    onMessage({
+      target: "sidepanel",
+      type: "engine-status",
+      nano: "available",
+      listening: false,
+      mic: "granted",
+    });
+
+    expect(elements["setup-view"].dataset.state).toBe("complete");
+    expect(elements["setup-list"].hidden).toBe(true);
+    expect(elements["setup-complete"].hidden).toBe(false);
+
+    await elements["dismiss-setup"].emit("click");
+    expect(elements["setup-view"].hidden).toBe(true);
   });
 
   it("renders page-model and note text as inert textContent", async () => {

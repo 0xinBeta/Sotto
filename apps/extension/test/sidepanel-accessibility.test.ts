@@ -47,6 +47,22 @@ describe("side-panel accessibility structure", () => {
   });
 
   it("uses labels and ordered headings", () => {
+    expect(openingTag("setup-list")).toMatch(/^<ol\b/);
+    expect(openingTag("setup-microphone-state")).toContain(
+      'role="status"',
+    );
+    expect(openingTag("setup-capture-state")).toContain(
+      'aria-live="polite"',
+    );
+    expect(openingTag("setup-nano-state")).toContain(
+      'aria-live="polite"',
+    );
+    expect(openingTag("setup-premium-state")).toContain(
+      'aria-live="polite"',
+    );
+    expect(openingTag("dismiss-setup")).toContain('type="button"');
+    expect(panelMarkup).toContain("Setup complete");
+    expect(panelMarkup).not.toContain('class="onboarding"');
     expect(panelMarkup).toMatch(
       /<label for="command-input">TYPE A COMMAND<\/label>/,
     );

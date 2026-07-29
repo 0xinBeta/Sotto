@@ -69,35 +69,93 @@
       </header>
       <p class="sr-only" id="pipeline-error" role="alert" aria-atomic="true"></p>
 
-      <section class="onboarding" id="capture-setup" hidden>
-        <p class="section-index">00 / FIRST-RUN SETUP</p>
-        <h2>Finish setup once.</h2>
-        <p>
-          Enable screen capture now so Sotto can take screenshots later without interrupting you.
-        </p>
-        <div class="setup-actions">
-          <button class="button primary" id="enable-capture" type="button">Enable screen capture (one-time)</button>
-          <p class="mic-help">
-            Voice access:
-            <button class="link-button" id="setup-grant-mic" type="button">Grant microphone access</button>
-          </p>
-          <button class="button" id="setup-prepare-nano" type="button" hidden>Prepare Gemini Nano</button>
+      <section
+        class="setup-view"
+        id="setup-view"
+        data-state="expanded"
+        aria-labelledby="setup-heading"
+      >
+        <div class="setup-heading">
+          <div>
+            <p class="section-index">00 / SETUP</p>
+            <h2 id="setup-heading">Set up Sotto.</h2>
+          </div>
+          <span class="setup-count">4 STEPS</span>
         </div>
-      </section>
-
-      <section class="onboarding" id="onboarding" hidden>
-        <p class="section-index">00 / SETUP</p>
-        <h2 id="onboarding-title">Nano needs a capable machine.</h2>
-        <p id="onboarding-copy">
-          Sotto keeps every command on this device. Chrome’s built-in model must be available before voice commands can run.
-        </p>
-        <ul class="hardware-list">
-          <li>Chrome 138 or newer</li>
-          <li>macOS 13+, Windows 10/11, Linux, or Chromebook Plus</li>
-          <li>22 GB free storage</li>
-          <li>&gt;4 GB GPU memory, or 16 GB RAM and 4 CPU cores</li>
-        </ul>
-        <button class="button primary" id="prepare-nano" type="button" hidden>Prepare Gemini Nano</button>
+        <ol class="setup-list" id="setup-list">
+          <li class="setup-row" id="setup-microphone" data-state="pending">
+            <span class="setup-icon" id="setup-microphone-icon" aria-hidden="true">…</span>
+            <p>
+              <strong>Microphone</strong>
+              <span
+                id="setup-microphone-state"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >Pending. Checking access.</span>
+            </p>
+            <button class="link-button" id="setup-grant-mic" type="button" hidden>
+              Grant microphone access
+            </button>
+          </li>
+          <li class="setup-row" id="setup-capture" data-state="pending">
+            <span class="setup-icon" id="setup-capture-icon" aria-hidden="true">…</span>
+            <p>
+              <strong>Screen capture</strong>
+              <span
+                id="setup-capture-state"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >Pending. Checking the one-time grant.</span>
+            </p>
+            <button class="button" id="enable-capture" type="button" hidden>
+              Enable screen capture
+            </button>
+          </li>
+          <li class="setup-row" id="setup-nano" data-state="pending">
+            <span class="setup-icon" id="setup-nano-icon" aria-hidden="true">…</span>
+            <p>
+              <strong>Gemini Nano</strong>
+              <span
+                id="setup-nano-state"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >Pending. Checking the local model.</span>
+            </p>
+            <button class="button" id="setup-prepare-nano" type="button" hidden>
+              Prepare Gemini Nano
+            </button>
+          </li>
+          <li class="setup-row" id="setup-premium" data-state="pending">
+            <span class="setup-icon" id="setup-premium-icon" aria-hidden="true">…</span>
+            <p>
+              <strong>Premium models <span class="optional-mark">Optional</span></strong>
+              <span
+                id="setup-premium-state"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >Pending. Checking the optional models.</span>
+            </p>
+            <button class="button" id="setup-download-premium" type="button" hidden>
+              Download premium voice
+            </button>
+          </li>
+        </ol>
+        <div
+          class="setup-complete"
+          id="setup-complete"
+          role="status"
+          aria-live="polite"
+          hidden
+        >
+          <span><span aria-hidden="true">✓</span> Setup complete</span>
+          <button class="link-button" id="dismiss-setup" type="button">
+            Dismiss
+          </button>
+        </div>
       </section>
 
       <section class="progress-stack" aria-label="Model setup">

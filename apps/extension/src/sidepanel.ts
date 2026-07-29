@@ -26,9 +26,17 @@ import {
   DEFAULT_SPEECH_SETTINGS,
   type SpeechSettings,
 } from "./speech-settings.js";
+import {
+  deriveSetupViewState,
+  type NanoSetupState,
+  type PremiumSpeechSetupState,
+  type PremiumVoiceSetupState,
+  type SetupRowId,
+  type SetupRowState,
+} from "./setup-view.js";
 import "./styles.css";
 
-type NanoAvailability = "unavailable" | "downloadable" | "downloading" | "available";
+type NanoAvailability = NanoSetupState;
 type ModelProgressKind =
   | "nano"
   | "stt"
@@ -37,16 +45,8 @@ type ModelProgressKind =
   | "rewriter"
   | "premium-tts"
   | "premium-stt";
-type PremiumTtsState = "absent" | "downloading" | "ready" | "error";
-type PremiumSttState =
-  | "not-downloaded"
-  | "downloading"
-  | "validating"
-  | "loading"
-  | "warming"
-  | "ready"
-  | "active"
-  | "error";
+type PremiumTtsState = PremiumVoiceSetupState;
+type PremiumSttState = PremiumSpeechSetupState;
 type PremiumSttTier = "parakeet" | "moonshine-base";
 type SttDiagnostic =
   | "vad-rejected"
@@ -518,14 +518,44 @@ const quietModeToggle =
 const quietModeLabel =
   requiredElement<HTMLElement>("#quiet-mode-label");
 const pipelineError = requiredElement<HTMLElement>("#pipeline-error");
-const captureSetup = requiredElement<HTMLElement>("#capture-setup");
+const setupView = requiredElement<HTMLElement>("#setup-view");
+const setupList = requiredElement<HTMLOListElement>("#setup-list");
+const setupComplete = requiredElement<HTMLElement>("#setup-complete");
+const dismissSetup = requiredElement<HTMLButtonElement>("#dismiss-setup");
+const setupRows: Record<
+  SetupRowId,
+  {
+    readonly row: HTMLElement;
+    readonly icon: HTMLElement;
+    readonly state: HTMLElement;
+  }
+> = {
+  microphone: {
+    row: requiredElement<HTMLElement>("#setup-microphone"),
+    icon: requiredElement<HTMLElement>("#setup-microphone-icon"),
+    state: requiredElement<HTMLElement>("#setup-microphone-state"),
+  },
+  capture: {
+    row: requiredElement<HTMLElement>("#setup-capture"),
+    icon: requiredElement<HTMLElement>("#setup-capture-icon"),
+    state: requiredElement<HTMLElement>("#setup-capture-state"),
+  },
+  nano: {
+    row: requiredElement<HTMLElement>("#setup-nano"),
+    icon: requiredElement<HTMLElement>("#setup-nano-icon"),
+    state: requiredElement<HTMLElement>("#setup-nano-state"),
+  },
+  premium: {
+    row: requiredElement<HTMLElement>("#setup-premium"),
+    icon: requiredElement<HTMLElement>("#setup-premium-icon"),
+    state: requiredElement<HTMLElement>("#setup-premium-state"),
+  },
+};
 const enableCapture = requiredElement<HTMLButtonElement>("#enable-capture");
 const setupGrantMic = requiredElement<HTMLButtonElement>("#setup-grant-mic");
 const setupPrepareNano = requiredElement<HTMLButtonElement>("#setup-prepare-nano");
-const onboarding = requiredElement<HTMLElement>("#onboarding");
-const onboardingTitle = requiredElement<HTMLElement>("#onboarding-title");
-const onboardingCopy = requiredElement<HTMLElement>("#onboarding-copy");
-const prepareNano = requiredElement<HTMLButtonElement>("#prepare-nano");
+const setupDownloadPremium =
+  requiredElement<HTMLButtonElement>("#setup-download-premium");
 const transcript = requiredElement<HTMLElement>("#transcript");
 const listeningMark = requiredElement<HTMLElement>("#listening-mark");
 const listenButton = requiredElement<HTMLButtonElement>("#listen-button");
@@ -637,13 +667,17 @@ let pendingScreenshotPermission: ScreenshotPermissionWorkflow | undefined;
 let newestLogEntry: LogEntry | undefined;
 let pointerIsDown = false;
 let earconContext: AudioContext | undefined;
+let setupDismissed = false;
+let microphonePermission: PermissionState | "unknown" = "unknown";
 let capturePermissionGranted: boolean | undefined;
 let nanoAvailability: NanoAvailability | undefined;
 let premiumState: PremiumTtsState = "absent";
+let premiumSetupVoiceState: PremiumTtsState | undefined;
 let selectedPremiumVoice: KokoroVoiceId = KOKORO_VOICE;
 let premiumVoicePreviewPending = false;
 const premiumVoiceInputs = new Map<KokoroVoiceId, HTMLInputElement>();
 let highAccuracyState: PremiumSttState = "not-downloaded";
+let premiumSetupSpeechState: PremiumSttState | undefined;
 let highAccuracyTier: PremiumSttTier = "moonshine-base";
 let highAccuracyResumable = false;
 let meterAccessibleTimer: number | undefined;
@@ -948,46 +982,100 @@ function showReadingState(active: boolean, paused: boolean): void {
       : "Reading active.";
 }
 
-function showNanoState(availability: NanoAvailability): void {
-  nanoAvailability = availability;
-  setupPrepareNano.hidden =
-    availability !== "downloadable" && availability !== "downloading";
-  setupPrepareNano.textContent =
-    availability === "downloading" ? "Continue model setup" : "Prepare Gemini Nano";
+const SETUP_ICONS: Record<SetupRowState, string> = {
+  done: "✓",
+  pending: "…",
+  "needs-action": "!",
+};
 
-  if (capturePermissionGranted === false) {
-    onboarding.hidden = true;
-    return;
+const SETUP_STATE_LABELS: Record<SetupRowState, string> = {
+  done: "Done",
+  pending: "Pending",
+  "needs-action": "Needs action",
+};
+
+function renderSetupView(): void {
+  const state = deriveSetupViewState({
+    microphone: microphonePermission,
+    capture: capturePermissionGranted,
+    nano: nanoAvailability,
+    premiumVoice: premiumSetupVoiceState,
+    premiumSpeech: premiumSetupSpeechState,
+  });
+
+  setupGrantMic.hidden = true;
+  enableCapture.hidden = true;
+  setupPrepareNano.hidden = true;
+  setupDownloadPremium.hidden = true;
+
+  for (const row of state.rows) {
+    const elements = setupRows[row.id];
+    elements.row.dataset.state = row.state;
+    elements.icon.textContent = SETUP_ICONS[row.state];
+    elements.state.textContent =
+      `${SETUP_STATE_LABELS[row.state]}. ${row.description}`;
+
+    switch (row.action) {
+      case "microphone":
+        setupGrantMic.hidden = false;
+        setupGrantMic.disabled = false;
+        setupGrantMic.textContent = microphonePermission === "denied"
+          ? "Review microphone settings"
+          : "Grant microphone access";
+        break;
+      case "capture":
+        enableCapture.hidden = false;
+        break;
+      case "nano":
+        setupPrepareNano.hidden = false;
+        setupPrepareNano.disabled = false;
+        setupPrepareNano.textContent = nanoAvailability === "downloading"
+          ? "Continue model setup"
+          : "Prepare Gemini Nano";
+        break;
+      case "premium-voice":
+        setupDownloadPremium.hidden = false;
+        setupDownloadPremium.disabled = false;
+        setupDownloadPremium.textContent = premiumState === "error"
+          ? "Retry voice download"
+          : "Download premium voice";
+        break;
+      case "premium-speech":
+        setupDownloadPremium.hidden = false;
+        setupDownloadPremium.disabled = false;
+        setupDownloadPremium.textContent = highAccuracyResumable
+          ? "Resume speech download"
+          : "Download speech model";
+        break;
+    }
   }
 
+  if (!state.complete) setupDismissed = false;
+  setupView.hidden = state.complete && setupDismissed;
+  setupView.dataset.state = state.complete ? "complete" : "expanded";
+  setupList.hidden = state.complete;
+  setupComplete.hidden = !state.complete;
+}
+
+function showNanoState(availability: NanoAvailability): void {
+  nanoAvailability = availability;
+  renderSetupView();
+
   if (availability === "unavailable") {
-    onboarding.hidden = false;
-    onboardingTitle.textContent = "Nano is unavailable here.";
-    onboardingCopy.textContent =
-      "Sotto will not send commands to a server. Check the local hardware requirements below, Chrome policy, and available storage.";
-    prepareNano.hidden = true;
     setStatus("error", "Nano unavailable");
     return;
   }
 
   if (availability === "downloadable" || availability === "downloading") {
-    onboarding.hidden = false;
-    onboardingTitle.textContent = "One local model to prepare.";
-    onboardingCopy.textContent =
-      "Chrome can download Gemini Nano after a click. It stays on this device and is shared with Chrome’s built-in AI features.";
-    prepareNano.hidden = false;
-    prepareNano.textContent =
-      availability === "downloading" ? "Continue model setup" : "Prepare Gemini Nano";
     setStatus("booting", availability === "downloading" ? "Nano downloading" : "Nano setup");
     return;
   }
 
-  onboarding.hidden = true;
-  prepareNano.hidden = true;
   setStatus(isListening ? "listening" : "ready", isListening ? "Listening" : "On device");
 }
 
 function showMicrophoneState(state: PermissionState | "unknown"): void {
+  microphonePermission = state;
   const granted = state === "granted";
   listenButton.disabled = !granted;
   const label =
@@ -995,8 +1083,7 @@ function showMicrophoneState(state: PermissionState | "unknown"): void {
       ? "Review microphone settings"
       : "Grant microphone access";
   grantMic.textContent = label;
-  setupGrantMic.textContent = granted ? "Microphone enabled" : label;
-  setupGrantMic.disabled = granted;
+  renderSetupView();
   if (granted) return;
 
   listenLabel.textContent = "Use text command";
@@ -1008,7 +1095,7 @@ function showMicrophoneState(state: PermissionState | "unknown"): void {
 
 function showCapturePermissionState(granted: boolean): void {
   capturePermissionGranted = granted;
-  captureSetup.hidden = granted;
+  renderSetupView();
   if (nanoAvailability) showNanoState(nanoAvailability);
 }
 
@@ -1261,6 +1348,7 @@ function showPremiumVoiceState(
   error?: string,
 ): void {
   premiumState = state;
+  premiumSetupVoiceState = state;
   selectedPremiumVoice = voice;
   premiumVoiceCard.dataset.state = state;
   premiumVoiceState.textContent = state.toUpperCase();
@@ -1302,6 +1390,7 @@ function showPremiumVoiceState(
         "The voice download failed. Select retry to use completed files from the local cache.";
       break;
   }
+  renderSetupView();
 }
 
 function showPremiumSttState(
@@ -1314,6 +1403,7 @@ function showPremiumSttState(
   error?: string,
 ): void {
   highAccuracyState = state;
+  premiumSetupSpeechState = state;
   highAccuracyTier = tier;
   highAccuracyResumable = resumable;
   premiumSttCard.dataset.state = state;
@@ -1391,6 +1481,7 @@ function showPremiumSttState(
             "High accuracy speech could not start. Moonshine tiny remains active.";
       break;
   }
+  renderSetupView();
 }
 
 function showPageText(text: string, title: string): void {
@@ -1767,6 +1858,11 @@ for (const button of [grantMic, setupGrantMic]) {
   });
 }
 
+dismissSetup.addEventListener("click", () => {
+  setupDismissed = true;
+  renderSetupView();
+});
+
 commandForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const text = commandInput.value.trim();
@@ -1829,7 +1925,6 @@ exportNotes.addEventListener("click", async () => {
 });
 
 async function prepareNanoModel(): Promise<void> {
-  prepareNano.disabled = true;
   setupPrepareNano.disabled = true;
   nanoProgressCard.hidden = false;
   setStatus("booting", "Preparing Nano");
@@ -1860,15 +1955,13 @@ async function prepareNanoModel(): Promise<void> {
     const message = error instanceof Error ? error.message : "Nano setup failed";
     setStatus("error", "Nano setup failed");
     appendLog("model setup", message);
-    prepareNano.disabled = false;
     setupPrepareNano.disabled = false;
   }
 }
 
-prepareNano.addEventListener("click", () => void prepareNanoModel());
 setupPrepareNano.addEventListener("click", () => void prepareNanoModel());
 
-downloadPremiumVoice.addEventListener("click", async () => {
+async function preparePremiumVoiceModel(): Promise<void> {
   showPremiumVoiceState(
     "downloading",
     true,
@@ -1884,7 +1977,12 @@ downloadPremiumVoice.addEventListener("click", async () => {
       "Premium voice setup could not start. Sotto is still using your operating system voice.",
     );
   }
-});
+}
+
+downloadPremiumVoice.addEventListener(
+  "click",
+  () => void preparePremiumVoiceModel(),
+);
 
 premiumVoiceEnabled.addEventListener("change", async () => {
   if (premiumState !== "ready") return;
@@ -1907,8 +2005,9 @@ for (const slider of [speechRate, speechVolume]) {
   });
 }
 
-downloadPremiumStt.addEventListener("click", async () => {
+async function preparePremiumSpeechModel(): Promise<void> {
   downloadPremiumStt.disabled = true;
+  setupDownloadPremium.disabled = true;
   if (highAccuracyResumable) {
     premiumSttProgressCard.hidden = false;
   } else {
@@ -1925,6 +2024,19 @@ downloadPremiumStt.addEventListener("click", async () => {
       "High accuracy speech setup could not start. Moonshine tiny is still available.",
     );
   }
+}
+
+downloadPremiumStt.addEventListener(
+  "click",
+  () => void preparePremiumSpeechModel(),
+);
+
+setupDownloadPremium.addEventListener("click", () => {
+  if (premiumState === "ready") {
+    void preparePremiumSpeechModel();
+    return;
+  }
+  void preparePremiumVoiceModel();
 });
 
 premiumSttEnabled.addEventListener("change", async () => {
@@ -2274,6 +2386,7 @@ async function loadCommandReference(): Promise<void> {
 showTranscript("");
 micMeter.dataset.state = "idle";
 micMeterFill.style.transform = "scaleX(0)";
+renderSetupView();
 void send({ type: "get-status" });
 void requestWorker<readonly PanelNote[]>({ type: "get-notes" })
   .then((notes) => {
