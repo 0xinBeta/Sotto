@@ -29,6 +29,16 @@ const SCROLL_OPERATIONS = new Set<PageControlOperation>([
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 5;
 const ZOOM_STEP = 0.2;
+const PAGE_CHANGED_RESPONSE = "The page changed. Try again.";
+
+interface NavigationEpoch {
+  readonly href: string;
+  readonly nonce: string;
+}
+
+interface ScrollInjectionResult {
+  readonly epoch: NavigationEpoch;
+}
 
 function operationSchema(operation: PageControlOperation): JsonSchema {
   return {
@@ -92,7 +102,11 @@ export function isRestrictedPage(url: string | undefined): boolean {
   }
 }
 
-export function runScrollOperation(operation: ScrollOperation): void {
+export function runScrollOperation(
+  operation: ScrollOperation,
+  nonce: string,
+): ScrollInjectionResult {
+  const epoch = { href: location.href, nonce };
   const behavior: ScrollBehavior = window.matchMedia(
     "(prefers-reduced-motion: reduce)",
   ).matches
@@ -105,16 +119,16 @@ export function runScrollOperation(operation: ScrollOperation): void {
         top: -window.innerHeight * 0.8,
         behavior,
       });
-      return;
+      return { epoch };
     case "scroll-down":
       window.scrollBy({
         top: window.innerHeight * 0.8,
         behavior,
       });
-      return;
+      return { epoch };
     case "top":
       window.scrollTo({ top: 0, behavior });
-      return;
+      return { epoch };
     case "bottom":
       window.scrollTo({
         top:
@@ -122,25 +136,46 @@ export function runScrollOperation(operation: ScrollOperation): void {
           document.documentElement.scrollHeight,
         behavior,
       });
+      return { epoch };
   }
+}
+
+function readLocationHref(): string {
+  return location.href;
 }
 
 async function scrollActivePage(
   operation: ScrollOperation,
-): Promise<boolean> {
+): Promise<"changed" | "scrolled" | "unavailable"> {
   const tab = await activeTab();
-  if (isRestrictedPage(tab.url)) return false;
+  if (isRestrictedPage(tab.url)) return "unavailable";
 
   try {
-    await chrome.scripting.executeScript({
+    const nonce = crypto.randomUUID();
+    const [injection] = await chrome.scripting.executeScript({
       target: { tabId: tab.id!, frameIds: [0] },
       func: runScrollOperation,
-      args: [operation],
+      args: [operation, nonce],
       world: "ISOLATED",
     });
-    return true;
+    const epoch = injection?.result?.epoch;
+    if (
+      !epoch ||
+      epoch.nonce !== nonce ||
+      typeof epoch.href !== "string" ||
+      epoch.href.length < 1 ||
+      epoch.href.length > 4_000
+    ) {
+      return "unavailable";
+    }
+    const [fresh] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id!, frameIds: [0] },
+      func: readLocationHref,
+      world: "ISOLATED",
+    });
+    return fresh?.result === epoch.href ? "scrolled" : "changed";
   } catch {
-    return false;
+    return "unavailable";
   }
 }
 
@@ -255,7 +290,11 @@ const pageControlAction = defineAction<PageControlCommand>({
   confirm: false,
   async execute(command) {
     if (isScrollOperation(command.operation)) {
-      if (!await scrollActivePage(command.operation)) {
+      const status = await scrollActivePage(command.operation);
+      if (status === "changed") {
+        return { spoken: PAGE_CHANGED_RESPONSE };
+      }
+      if (status === "unavailable") {
         return { spoken: "I cannot control this page." };
       }
       return {

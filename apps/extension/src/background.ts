@@ -800,6 +800,81 @@ const PAGE_SOURCES = new Set<ExtractedPageText["source"]>([
   "main",
   "body",
 ]);
+const PAGE_CHANGED_RESPONSE = "The page changed. Try again.";
+
+interface NavigationEpoch {
+  readonly href: string;
+  readonly nonce: string;
+}
+
+function readLocationHref(): string {
+  return location.href;
+}
+
+function parseNavigationEpoch(
+  value: unknown,
+  nonce: string,
+): NavigationEpoch {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    throw new TypeError("The content script returned an invalid page epoch");
+  }
+  const epoch = value as { readonly href?: unknown; readonly nonce?: unknown };
+  if (
+    typeof epoch.href !== "string" ||
+    epoch.href.length < 1 ||
+    epoch.href.length > 4_000 ||
+    epoch.nonce !== nonce ||
+    Object.keys(epoch).some((key) => key !== "href" && key !== "nonce")
+  ) {
+    throw new TypeError("The content script returned an invalid page epoch");
+  }
+  return { href: epoch.href, nonce };
+}
+
+async function readFrameHref(
+  tabId: number,
+  frameId: number,
+): Promise<string> {
+  try {
+    const [fresh] = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [frameId] },
+      func: readLocationHref,
+      world: "ISOLATED",
+    });
+    if (
+      typeof fresh?.result !== "string" ||
+      fresh.result.length < 1 ||
+      fresh.result.length > 4_000
+    ) {
+      throw new Error();
+    }
+    return fresh.result;
+  } catch {
+    throw new Error(PAGE_CHANGED_RESPONSE);
+  }
+}
+
+async function assertFreshNavigationEpoch(
+  tabId: number,
+  frameId: number,
+  value: unknown,
+  nonce: string,
+  expectedHref?: string,
+): Promise<NavigationEpoch> {
+  const epoch = parseNavigationEpoch(value, nonce);
+  const freshHref = await readFrameHref(tabId, frameId);
+  if (
+    freshHref !== epoch.href ||
+    (expectedHref !== undefined && freshHref !== expectedHref)
+  ) {
+    throw new Error(PAGE_CHANGED_RESPONSE);
+  }
+  return epoch;
+}
 
 function parseExtractedPage(value: unknown): ExtractedPageText {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -854,6 +929,7 @@ async function extractActivePage(
   }
 
   try {
+    const epochNonce = crypto.randomUUID();
     await chrome.scripting.executeScript({
       target: { tabId: activeTab.id, frameIds: [0] },
       files: ["extractPage.js"],
@@ -864,15 +940,23 @@ async function extractActivePage(
       {
         target: "sotto-page-extractor",
         options,
+        epochNonce,
       },
       { frameId: 0 },
     )) as
       | {
           readonly ok?: unknown;
+          readonly epoch?: unknown;
           readonly value?: unknown;
           readonly error?: unknown;
         }
       | undefined;
+    await assertFreshNavigationEpoch(
+      activeTab.id,
+      0,
+      raw?.epoch,
+      epochNonce,
+    );
     if (raw?.ok !== true) {
       throw new Error(
         typeof raw?.error === "string"
@@ -884,6 +968,7 @@ async function extractActivePage(
   } catch (error) {
     const detail = errorMessage(error);
     if (
+      detail === PAGE_CHANGED_RESPONSE ||
       detail.startsWith("Select some text") ||
       detail.startsWith("Sotto could not find readable text")
     ) {
@@ -1037,6 +1122,7 @@ interface EditorBridgeLocation {
   readonly tabId: number;
   readonly frameId: number;
   readonly documentId?: string;
+  readonly href: string;
   readonly bridgeSnapshotId: string;
 }
 
@@ -1128,12 +1214,14 @@ async function findFocusedEditable(
   const errors: string[] = [];
   for (const frame of frames) {
     try {
+      const epochNonce = crypto.randomUUID();
       const raw = (await chrome.tabs.sendMessage(
         activeTab.id,
         {
           target: "sotto-type-bridge",
           type: "capture",
           options,
+          epochNonce,
         },
         bridgeMessageOptions({
           frameId: frame.frameId,
@@ -1144,6 +1232,7 @@ async function findFocusedEditable(
       )) as
         | {
             readonly ok?: unknown;
+            readonly epoch?: unknown;
             readonly value?: unknown;
             readonly error?: {
               readonly code?: unknown;
@@ -1151,6 +1240,12 @@ async function findFocusedEditable(
             };
           }
         | undefined;
+      const epoch = await assertFreshNavigationEpoch(
+        activeTab.id,
+        frame.frameId,
+        raw?.epoch,
+        epochNonce,
+      );
       if (raw?.ok !== true) {
         if (typeof raw?.error?.message === "string") {
           errors.push(raw.error.message);
@@ -1165,6 +1260,7 @@ async function findFocusedEditable(
           ...(frame.documentId === undefined
             ? {}
             : { documentId: frame.documentId }),
+          href: epoch.href,
         },
       });
     } catch (error) {
@@ -1173,11 +1269,15 @@ async function findFocusedEditable(
   }
 
   if (captures.length !== 1) {
+    const navigationError = errors.find(
+      (message) => message === PAGE_CHANGED_RESPONSE,
+    );
     const selectionError = errors.find((message) =>
       message.startsWith("Select text"),
     );
     throw new Error(
-      selectionError ??
+      navigationError ??
+        selectionError ??
         (captures.length > 1
           ? "Sotto found more than one focused editor and refused to guess."
           : "The focused editor is inaccessible or too complex to edit safely."),
@@ -1214,6 +1314,10 @@ async function commitEditable(
 
   try {
     if (!location) throw new Error("The editor snapshot is no longer valid.");
+    await readFrameHref(location.tabId, location.frameId).then((href) => {
+      if (href !== location.href) throw new Error(PAGE_CHANGED_RESPONSE);
+    });
+    const epochNonce = crypto.randomUUID();
     const raw = (await chrome.tabs.sendMessage(
       location.tabId,
       {
@@ -1223,15 +1327,24 @@ async function commitEditable(
         text: options.text,
         inputType: options.inputType,
         rememberAsDictation: options.rememberAsDictation,
+        epochNonce,
       },
       bridgeMessageOptions(location),
     )) as
       | {
           readonly ok?: unknown;
+          readonly epoch?: unknown;
           readonly value?: unknown;
           readonly error?: { readonly message?: unknown };
         }
       | undefined;
+    await assertFreshNavigationEpoch(
+      location.tabId,
+      location.frameId,
+      raw?.epoch,
+      epochNonce,
+      location.href,
+    );
     if (raw?.ok !== true) {
       throw new Error(
         typeof raw?.error?.message === "string"
@@ -1300,6 +1413,7 @@ function dictationTargetFrom(
     ...(location.documentId === undefined
       ? {}
       : { documentId: location.documentId }),
+    href: location.href,
     targetId: capture.targetId,
   };
 }
@@ -1309,11 +1423,17 @@ async function releaseDictationTarget(
 ): Promise<void> {
   if (!target) return;
   try {
+    if (
+      await readFrameHref(target.tabId, target.frameId) !== target.href
+    ) {
+      return;
+    }
     await chrome.tabs.sendMessage(
       target.tabId,
       {
         target: "sotto-type-bridge",
         type: "release",
+        epochNonce: crypto.randomUUID(),
       },
       bridgeMessageOptions(target),
     );
@@ -1338,11 +1458,19 @@ async function captureCurrentDictationTarget(): Promise<{
   }
 
   try {
+    const currentHref = await readFrameHref(
+      expected.tabId,
+      expected.frameId,
+    );
+    if (currentHref !== expected.href) {
+      throw new Error(PAGE_CHANGED_RESPONSE);
+    }
     await chrome.scripting.executeScript({
       target: { tabId: expected.tabId, frameIds: [expected.frameId] },
       files: ["typeBridge.js"],
       world: "ISOLATED",
     });
+    const epochNonce = crypto.randomUUID();
     const raw = (await chrome.tabs.sendMessage(
       expected.tabId,
       {
@@ -1353,15 +1481,24 @@ async function captureCurrentDictationTarget(): Promise<{
           allowLastDictated: false,
         },
         keepAlive: true,
+        epochNonce,
       },
       bridgeMessageOptions(expected),
     )) as
       | {
           readonly ok?: unknown;
+          readonly epoch?: unknown;
           readonly value?: unknown;
           readonly error?: { readonly message?: unknown };
         }
       | undefined;
+    const epoch = await assertFreshNavigationEpoch(
+      expected.tabId,
+      expected.frameId,
+      raw?.epoch,
+      epochNonce,
+      expected.href,
+    );
     if (raw?.ok !== true) {
       throw new Error(
         typeof raw?.error?.message === "string"
@@ -1376,6 +1513,7 @@ async function captureCurrentDictationTarget(): Promise<{
       ...(expected.documentId === undefined
         ? {}
         : { documentId: expected.documentId }),
+      href: epoch.href,
       bridgeSnapshotId: capture.snapshotId,
     };
     return {
@@ -1438,6 +1576,7 @@ async function insertDictationText(
     if (!dictationSession.validate(current.target)) {
       return { status: "paused" };
     }
+    const epochNonce = crypto.randomUUID();
     const raw = (await chrome.tabs.sendMessage(
       current.location.tabId,
       {
@@ -1451,20 +1590,50 @@ async function insertDictationText(
             : "insertText",
         rememberAsDictation: true,
         keepAlive: true,
+        epochNonce,
       },
       bridgeMessageOptions(current.location),
     )) as
       | {
           readonly ok?: unknown;
+          readonly epoch?: unknown;
           readonly value?: unknown;
         }
       | undefined;
+    await assertFreshNavigationEpoch(
+      current.location.tabId,
+      current.location.frameId,
+      raw?.epoch,
+      epochNonce,
+      current.location.href,
+    );
     if (raw?.ok !== true) throw new Error("The text field changed.");
     return { status: "inserted" };
   } catch {
     dictationSession.pause();
     return { status: "paused" };
   }
+}
+
+async function pauseDictationForNavigation(
+  sender: chrome.runtime.MessageSender,
+): Promise<boolean> {
+  const target = dictationSession.target;
+  if (
+    dictationSession.state !== "active" ||
+    !target ||
+    sender.tab?.id !== target.tabId ||
+    sender.frameId !== target.frameId ||
+    (
+      target.documentId !== undefined &&
+      sender.documentId !== target.documentId
+    )
+  ) {
+    return false;
+  }
+  dictationSession.pause();
+  await sendOffscreen({ type: "dictation-field-changed" });
+  return true;
 }
 
 async function resumeDictation(): Promise<boolean> {
@@ -2136,14 +2305,16 @@ async function executeCommand(
       typeof (command as { action?: unknown }).action === "string"
         ? (command as { action: string }).action
         : "";
-    const spoken = rejected
-      ? "Sorry, say that again?"
-      : actionId === "type"
-        ? "I couldn't safely type in that editor."
-      : actionId === "dictation"
-        ? "Focus a text field before you start dictation."
-      : "That action could not be completed.";
     const detail = error instanceof Error ? error.message : String(error);
+    const spoken = detail === PAGE_CHANGED_RESPONSE
+      ? PAGE_CHANGED_RESPONSE
+      : rejected
+        ? "Sorry, say that again?"
+        : actionId === "type"
+          ? "I couldn't safely type in that editor."
+        : actionId === "dictation"
+          ? "Focus a text field before you start dictation."
+        : "That action could not be completed.";
     console.warn("Sotto command failed", error);
     await sendOffscreen({
       type: "action-error",
@@ -2634,7 +2805,7 @@ async function handleWorkerMessage(message: WorkerMessage): Promise<unknown> {
 }
 
 chrome.runtime.onMessage.addListener(
-  (raw: unknown, _sender, sendResponse): boolean | void => {
+  (raw: unknown, sender, sendResponse): boolean | void => {
     if (
       typeof raw === "object" &&
       raw !== null &&
@@ -2657,6 +2828,18 @@ chrome.runtime.onMessage.addListener(
       (raw as { target?: unknown }).target !== "worker"
     ) {
       return;
+    }
+
+    if ((raw as { type?: unknown }).type === "type-bridge-navigation") {
+      void pauseDictationForNavigation(sender)
+        .then((value) => sendResponse({ ok: true, value }))
+        .catch((error: unknown) => {
+          const message = error instanceof Error
+            ? error.message
+            : String(error);
+          sendResponse({ ok: false, error: { name: "Error", message } });
+        });
+      return true;
     }
 
     void handleWorkerMessage(raw as WorkerMessage)

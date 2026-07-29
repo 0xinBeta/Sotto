@@ -51,7 +51,22 @@ describe("page scroll control", () => {
         url: "https://example.test/article",
       }),
     ]);
-    chromeStub.scripting.executeScript.mockResolvedValue([]);
+    chromeStub.scripting.executeScript.mockImplementation(
+      async (details: { readonly args?: readonly unknown[] }) => {
+        const nonce = details.args?.[1];
+        return nonce === undefined
+          ? [{ frameId: 0, result: "https://example.test/article" }]
+          : [{
+              frameId: 0,
+              result: {
+                epoch: {
+                  href: "https://example.test/article",
+                  nonce,
+                },
+              },
+            }];
+      },
+    );
   });
 
   it.each([
@@ -70,9 +85,10 @@ describe("page scroll control", () => {
     expect(chromeStub.scripting.executeScript).toHaveBeenCalledWith({
       target: { tabId: 8, frameIds: [0] },
       func: runScrollOperation,
-      args: [operation],
+      args: [operation, expect.any(String)],
       world: "ISOLATED",
     });
+    expect(chromeStub.scripting.executeScript).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -107,6 +123,34 @@ describe("page scroll control", () => {
       ),
     ).resolves.toEqual({
       spoken: "I cannot control this page.",
+    });
+  });
+
+  it("discards a scroll result after pushState changes the URL", async () => {
+    chromeStub.scripting.executeScript
+      .mockImplementationOnce(
+        async (details: { readonly args?: readonly unknown[] }) => [{
+          frameId: 0,
+          result: {
+            epoch: {
+              href: "https://example.test/article",
+              nonce: details.args?.[1],
+            },
+          },
+        }],
+      )
+      .mockResolvedValueOnce([{
+        frameId: 0,
+        result: "https://example.test/next",
+      }]);
+
+    await expect(
+      pageControlAction.execute(
+        { action: "page-control", operation: "scroll-down" },
+        {},
+      ),
+    ).resolves.toEqual({
+      spoken: "The page changed. Try again.",
     });
   });
 });

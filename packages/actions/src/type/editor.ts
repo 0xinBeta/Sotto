@@ -334,6 +334,11 @@ export class EditorSnapshotSession {
 
   constructor(readonly document: Document) {}
 
+  invalidate(): void {
+    this.#snapshots.clear();
+    this.#lastDictated = undefined;
+  }
+
   #targetId(target: Element): string {
     const existing = this.#targetIds.get(target);
     if (existing) return existing;

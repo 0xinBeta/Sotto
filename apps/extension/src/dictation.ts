@@ -12,6 +12,7 @@ export interface DictationTarget {
   readonly tabId: number;
   readonly frameId: number;
   readonly documentId?: string;
+  readonly href: string;
   readonly targetId: string;
 }
 
@@ -40,6 +41,7 @@ export function isSameDictationTarget(
     expected.tabId === current.tabId &&
     expected.frameId === current.frameId &&
     expected.documentId === current.documentId &&
+    expected.href === current.href &&
     expected.targetId === current.targetId
   );
 }

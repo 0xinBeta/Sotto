@@ -68,6 +68,7 @@ describe("dictation safety state", () => {
     tabId: 4,
     frameId: 0,
     documentId: "document-a",
+    href: "https://example.test/one",
     targetId: "field-a",
   } as const;
 

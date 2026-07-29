@@ -4,7 +4,16 @@ import {
 } from "@sotto/actions/summarize/extract";
 
 declare global {
-  var __sottoPageExtractorInstalled: boolean | undefined;
+  var __sottoPageExtractorInstall:
+    | {
+        readonly href: string;
+        readonly listener: (
+          raw: unknown,
+          sender: chrome.runtime.MessageSender,
+          sendResponse: (response: unknown) => void,
+        ) => void;
+      }
+    | undefined;
 }
 
 function parseOptions(value: unknown): ExtractPageOptions | undefined {
@@ -44,8 +53,14 @@ function parseOptions(value: unknown): ExtractPageOptions | undefined {
   };
 }
 
-if (!globalThis.__sottoPageExtractorInstalled) {
-  globalThis.__sottoPageExtractorInstalled = true;
+const installed = globalThis.__sottoPageExtractorInstall;
+if (installed && installed.href !== location.href) {
+  chrome.runtime.onMessage.removeListener(installed.listener);
+  globalThis.__sottoPageExtractorInstall = undefined;
+}
+
+if (!globalThis.__sottoPageExtractorInstall) {
+  const injectedHref = location.href;
   const listener = (
     raw: unknown,
     _sender: chrome.runtime.MessageSender,
@@ -55,17 +70,28 @@ if (!globalThis.__sottoPageExtractorInstalled) {
       typeof raw !== "object" ||
       raw === null ||
       Array.isArray(raw) ||
-      (raw as { target?: unknown }).target !== "sotto-page-extractor"
+      (raw as { target?: unknown }).target !== "sotto-page-extractor" ||
+      typeof (raw as { epochNonce?: unknown }).epochNonce !== "string" ||
+      (raw as { epochNonce: string }).epochNonce.length < 1 ||
+      (raw as { epochNonce: string }).epochNonce.length > 128
     ) {
       return;
     }
 
+    const epoch = {
+      href: injectedHref,
+      nonce: (raw as { epochNonce: string }).epochNonce,
+    };
     try {
       const options = parseOptions(
         (raw as { options?: unknown }).options,
       );
       if (!options) {
-        sendResponse({ ok: false, error: "Invalid extraction options" });
+        sendResponse({
+          ok: false,
+          epoch,
+          error: "Invalid extraction options",
+        });
         return;
       }
 
@@ -76,22 +102,32 @@ if (!globalThis.__sottoPageExtractorInstalled) {
       if (!result) {
         sendResponse({
           ok: false,
+          epoch,
           error: options.requireSelection
             ? "Select some text first."
             : "Sotto could not find readable text on this page.",
         });
         return;
       }
-      sendResponse({ ok: true, value: result });
+      sendResponse({ ok: true, epoch, value: result });
     } catch (error) {
       sendResponse({
         ok: false,
+        epoch,
         error: error instanceof Error ? error.message : String(error),
       });
     } finally {
       chrome.runtime.onMessage.removeListener(listener);
-      globalThis.__sottoPageExtractorInstalled = false;
+      if (
+        globalThis.__sottoPageExtractorInstall?.listener === listener
+      ) {
+        globalThis.__sottoPageExtractorInstall = undefined;
+      }
     }
   };
   chrome.runtime.onMessage.addListener(listener);
+  globalThis.__sottoPageExtractorInstall = {
+    href: injectedHref,
+    listener,
+  };
 }

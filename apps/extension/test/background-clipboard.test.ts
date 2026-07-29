@@ -91,6 +91,7 @@ interface ChromeHarness {
   ) => void;
   readonly workerMessage: (
     message: Record<string, unknown>,
+    sender?: Record<string, unknown>,
   ) => Promise<unknown>;
 }
 
@@ -258,10 +259,10 @@ async function installBackground(
     tabSendMessage,
     updateTab,
     command: (command, tab = activeTab) => onCommand?.(command, tab),
-    workerMessage: (message) =>
+    workerMessage: (message, sender = {}) =>
       new Promise((resolve) => {
         expect(
-          onMessage?.({ target: "worker", ...message }, {}, resolve),
+          onMessage?.({ target: "worker", ...message }, sender, resolve),
         ).toBe(true);
       }),
   };
@@ -283,6 +284,163 @@ afterEach(() => {
   vi.resetModules();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("background navigation epochs", () => {
+  it("discards extracted page data after the frame URL changes", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    worker.route.mockImplementation(
+      async (
+        _command: unknown,
+        context: {
+          readonly page: {
+            extract(options: {
+              readonly preferSelection: boolean;
+              readonly requireSelection: boolean;
+              readonly maxCharacters: number;
+            }): Promise<{ readonly title: string }>;
+          };
+        },
+      ) => {
+        const page = await context.page.extract({
+          preferSelection: false,
+          requireSelection: false,
+          maxCharacters: 10_000,
+        });
+        return { spoken: page.title };
+      },
+    );
+    const harness = await installBackground({
+      id: 31,
+      url: "https://example.test/one",
+    });
+    harness.tabSendMessage.mockImplementation(
+      async (
+        _tabId: number,
+        message: { readonly epochNonce: string },
+      ) => ({
+        ok: true,
+        epoch: {
+          href: "https://example.test/one",
+          nonce: message.epochNonce,
+        },
+        value: {
+          text: "Old page text",
+          title: "Old page",
+          url: "https://example.test/one",
+          source: "article",
+          truncated: false,
+        },
+      }),
+    );
+    harness.executeScript.mockImplementation(
+      async (details: { readonly files?: readonly string[] }) =>
+        details.files
+          ? [{ frameId: 0 }]
+          : [{ frameId: 0, result: "https://example.test/two" }],
+    );
+
+    await expect(
+      harness.workerMessage({
+        type: "execute-command",
+        transcript: "read this page",
+        command: {
+          action: "summarize",
+          mode: "read",
+          scope: "page",
+        },
+      }),
+    ).resolves.toEqual({ ok: true, value: undefined });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "offscreen",
+        type: "action-error",
+        spoken: "The page changed. Try again.",
+        detail: "The page changed. Try again.",
+      }),
+    );
+  });
+
+  it("pauses dictation when its content bridge reports navigation", async () => {
+    worker.route.mockImplementation(
+      async (
+        _command: unknown,
+        context: {
+          readonly dictation: { start(): Promise<string> };
+        },
+      ) => ({ spoken: await context.dictation.start() }),
+    );
+    const harness = await installBackground({
+      id: 37,
+      url: "https://example.test/one",
+    });
+    harness.executeScript.mockImplementation(
+      async (details: { readonly files?: readonly string[] }) =>
+        details.files
+          ? [{ frameId: 0, documentId: "document-one" }]
+          : [{ frameId: 0, result: "https://example.test/one" }],
+    );
+    harness.tabSendMessage.mockImplementation(
+      async (
+        _tabId: number,
+        message: {
+          readonly type: string;
+          readonly epochNonce: string;
+        },
+      ) => {
+        if (message.type !== "capture") return undefined;
+        return {
+          ok: true,
+          epoch: {
+            href: "https://example.test/one",
+            nonce: message.epochNonce,
+          },
+          value: {
+            snapshotId: "editor-1",
+            targetId: "field-1",
+            selectedText: "",
+            source: "caret",
+          },
+        };
+      },
+    );
+
+    await harness.workerMessage({
+      type: "execute-command",
+      transcript: "start dictation",
+      command: { action: "dictation", operation: "start" },
+    });
+    const callsBeforeNavigation = harness.tabSendMessage.mock.calls.length;
+
+    await expect(
+      harness.workerMessage(
+        { type: "type-bridge-navigation" },
+        {
+          tab: { id: 37 },
+          frameId: 0,
+          documentId: "document-one",
+        },
+      ),
+    ).resolves.toEqual({ ok: true, value: true });
+
+    expect(harness.sendMessage).toHaveBeenCalledWith({
+      target: "offscreen",
+      type: "dictation-field-changed",
+    });
+    await expect(
+      harness.workerMessage({
+        type: "dictation-insert",
+        text: "stale text",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { status: "paused" },
+    });
+    expect(harness.tabSendMessage).toHaveBeenCalledTimes(
+      callsBeforeNavigation,
+    );
+  });
 });
 
 describe("background screenshot clipboard injection", () => {

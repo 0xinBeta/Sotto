@@ -2428,6 +2428,9 @@ async function handleOffscreenMessage(
         paused: false,
       });
       return;
+    case "dictation-field-changed":
+      await pauseDictation();
+      return;
     case "stop-listening":
       stopListening();
       return;
